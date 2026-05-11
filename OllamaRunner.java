@@ -13,7 +13,7 @@ import java.util.Map;
 public class OllamaRunner {
     // Usage:
     // java OllamaRunner <provider> <model> <inputFile> <outputFile>
-    // java OllamaRunner <model> <inputFile> <outputFile> (defaults provider=openai)
+    // java OllamaRunner <model> <inputFile> <outputFile> (defaults provider=ollama)
     //
     // Examples:
     // java OllamaRunner ollama llama3.2:1b prompt.txt out.txt
@@ -22,7 +22,7 @@ public class OllamaRunner {
         if (args.length != 3 && args.length != 4) {
             System.err.println("Usage: java OllamaRunner <provider> <model> <inputFile> <outputFile>");
             System.err.println(
-                    "   or: java OllamaRunner <model> <inputFile> <outputFile>   (provider defaults to openai)");
+                    "   or: java OllamaRunner <model> <inputFile> <outputFile>   (provider defaults to ollama)");
             System.exit(2);
             return;
         }
