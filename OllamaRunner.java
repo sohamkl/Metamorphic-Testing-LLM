@@ -7,329 +7,139 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class OllamaRunner {
-    // Usage:
-    // java OllamaRunner <provider> <model> <inputFile> <outputFile>
-    // java OllamaRunner <model> <inputFile> <outputFile> (defaults provider=ollama)
-    //
-    // Examples:
-    // java OllamaRunner ollama llama3.2:1b prompt.txt out.txt
-    // java OllamaRunner openai gpt-4o-mini prompt.txt out.txt
     public static void main(String[] args) throws Exception {
-        if (args.length != 3 && args.length != 4) {
-            System.err.println("Usage: java OllamaRunner <provider> <model> <inputFile> <outputFile>");
-            System.err.println(
-                    "   or: java OllamaRunner <model> <inputFile> <outputFile>   (provider defaults to ollama)");
-            System.exit(2);
-            return;
+        // --- STEP 1: Read the configuration from prompt.txt ---
+        List<String> lines = Files.readAllLines(Path.of("prompt.txt"), StandardCharsets.UTF_8);
+        String sut = "Unknown SUT";
+        String mr = "Unknown MR";
+        String count = "5";
+        String dataType = "int[]";
+
+        for (String line : lines) {
+            if (line.startsWith("SUT:")) sut = line.substring(4).trim();
+            else if (line.startsWith("MR:")) mr = line.substring(3).trim();
+            else if (line.startsWith("Count:")) count = line.substring(6).trim();
+            else if (line.startsWith("DataType:")) dataType = line.substring(9).trim();
         }
 
-        String provider;
-        String model;
-        Path inputFile;
-        Path outputFile;
+        // --- STEP 2: Build the exact prompt for the LLM ---
+        String constructedPrompt = 
+            "Target: " + sut + "\n" +
+            "Metamorphic Relation: " + mr + "\n" +
+            "Task: Generate exactly " + count + " edge-case test pairs.\n" +
+            "Constraint: Output ONLY valid JSON in this exact schema: [ { \"source\": [1, 2], \"followUp\": [2, 1] } ] " +
+            "where values are of type " + dataType + ". No markdown, no conversational text, no Java code.";
 
-        if (args.length == 3) {
-            provider = "ollama";
-            model = args[0];
-            inputFile = Path.of(args[1]);
-            outputFile = Path.of(args[2]);
-        } else {
-            provider = args[0];
-            model = args[1];
-            inputFile = Path.of(args[2]);
-            outputFile = Path.of(args[3]);
-        }
+        System.out.println("Sending prompt to Ollama...");
 
-        String prompt = Files.readString(inputFile, StandardCharsets.UTF_8);
+        // --- STEP 3: Send HTTP POST Request to Ollama ---
+        // Escape the prompt to safely fit inside a JSON string
+        String escapedPrompt = constructedPrompt.replace("\\", "\\\\")
+                                                .replace("\"", "\\\"")
+                                                .replace("\n", "\\n")
+                                                .replace("\r", "\\r")
+                                                .replace("\t", "\\t");
 
-        if (prompt == null || prompt.trim().isEmpty()) {
-            System.err.println("Prompt is empty. Check input file: " + inputFile.toAbsolutePath());
-            System.exit(2);
-            return;
-        }
+        String payload = "{\"model\": \"llama3\", \"prompt\": \"" + escapedPrompt + "\", \"stream\": false}";
 
-        String responseText = switch (provider.trim().toLowerCase()) {
-            case "ollama" -> generateWithOllama(model, prompt);
-            case "openai" -> generateWithOpenAi(model, prompt);
-            default -> throw new IllegalArgumentException("Unknown provider: " + provider + " (use: ollama | openai)");
-        };
-
-        Files.writeString(outputFile, responseText, StandardCharsets.UTF_8);
-        System.out.println("Wrote response to: " + outputFile.toAbsolutePath());
-    }
-
-    private static String generateWithOllama(String model, String prompt) throws IOException, InterruptedException {
-        HttpClient client = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(10))
-                .build();
-
-        String body = "{"
-                + "\"model\":" + jsonString(model) + ","
-                + "\"prompt\":" + jsonString(prompt) + ","
-                + "\"stream\":false"
-                + "}";
-
+        HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create("http://localhost:11434/api/generate"))
-                .timeout(Duration.ofMinutes(5))
                 .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
+                .POST(HttpRequest.BodyPublishers.ofString(payload, StandardCharsets.UTF_8))
                 .build();
 
         HttpResponse<String> res = client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-
-        if (res.statusCode() < 200 || res.statusCode() >= 300) {
-            throw new IOException("Ollama HTTP " + res.statusCode() + ": " + res.body());
+        if (res.statusCode() != 200) {
+            throw new RuntimeException("HTTP Error: " + res.statusCode() + " - " + res.body());
         }
 
-        // Expected JSON shape includes: {"response":"...","done":true,...}
-        String response = extractJsonStringField(res.body(), "response");
-        if (response == null) {
-            throw new IOException("Could not parse Ollama response field from: " + res.body());
+        // --- STEP 4: Extract the generated text from Ollama's JSON response ---
+        Pattern responsePattern = Pattern.compile("\"response\"\\s*:\\s*\"(.*?)\"(?:,|})", Pattern.DOTALL);
+        Matcher responseMatcher = responsePattern.matcher(res.body());
+        
+        if (!responseMatcher.find()) {
+            throw new RuntimeException("Could not find 'response' field in Ollama output.");
         }
-        return response;
+        
+        String rawResponse = responseMatcher.group(1);
+        
+        // Un-escape the text back into readable JSON format
+        String extractedJson = rawResponse.replace("\\n", "\n")
+                                          .replace("\\\"", "\"")
+                                          .replace("\\t", "\t")
+                                          .replace("\\r", "\r")
+                                          .replace("\\\\", "\\");
+
+        Files.writeString(Path.of("out.txt"), extractedJson, StandardCharsets.UTF_8);
+        System.out.println("Wrote extracted LLM response to out.txt\n");
+
+        // --- STEP 5: Parse the test arrays and run them ---
+        System.out.println("Running Metamorphic Tests...");
+        
+        Pattern arrayPattern = Pattern.compile("\"source\"\\s*:\\s*\\[(.*?)\\]\\s*,\\s*\"followUp\"\\s*:\\s*\\[(.*?)\\]", Pattern.DOTALL);
+        Matcher arrayMatcher = arrayPattern.matcher(extractedJson);
+
+        int passed = 0;
+        int total = 0;
+
+        while (arrayMatcher.find()) {
+            total++;
+            int[] source = parseArray(arrayMatcher.group(1));
+            int[] followUp = parseArray(arrayMatcher.group(2));
+
+            // Execute the actual sorting method against both arrays
+            int[] sortedSource = SortUtil.sortArray(source);
+            int[] sortedFollowUp = SortUtil.sortArray(followUp);
+
+            boolean isPass = Arrays.equals(sortedSource, sortedFollowUp);
+            
+            if (isPass) {
+                passed++;
+                System.out.println("[PASS] Source: " + Arrays.toString(source) + " -> FollowUp: " + Arrays.toString(followUp));
+            } else {
+                System.out.println("[FAIL] Source: " + Arrays.toString(source) + " -> FollowUp: " + Arrays.toString(followUp));
+                System.out.println("       Sorted Source: " + Arrays.toString(sortedSource));
+                System.out.println("       Sorted FollowUp: " + Arrays.toString(sortedFollowUp));
+            }
+        }
+
+        // --- STEP 6: Report final results ---
+        System.out.println("\n--- Test Summary ---");
+        if (total == 0) {
+            System.out.println("Warning: No tests were generated/parsed successfully.");
+        } else {
+            System.out.println("Total tests parsed: " + total);
+            System.out.println("Passed: " + passed);
+            System.out.println("Failed: " + (total - passed));
+        }
     }
 
-    private static String generateWithOpenAi(String model, String prompt) throws IOException, InterruptedException {
-        Map<String, String> env = loadDotEnv(Path.of(".env"));
-        String apiKey = firstNonBlank(
-                env.get("OPENAI_API_KEY"),
-                System.getenv("OPENAI_API_KEY"));
-        if (apiKey == null) {
-            throw new IOException("Missing OPENAI_API_KEY. Put it in .env or your environment.");
+    // Helper method to convert comma-separated string into int[] array
+    private static int[] parseArray(String innerContent) {
+        if (innerContent == null || innerContent.trim().isEmpty()) {
+            return new int[0];
         }
-
-        String baseUrl = firstNonBlank(
-                env.get("OPENAI_BASE_URL"),
-                System.getenv("OPENAI_BASE_URL"),
-                "https://api.openai.com/v1");
-
-        HttpClient client = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(10))
-                .build();
-
-        String body = "{"
-                + "\"model\":" + jsonString(model) + ","
-                + "\"messages\":[{\"role\":\"user\",\"content\":" + jsonString(prompt) + "}]"
-                + "}";
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(baseUrl + "/chat/completions"))
-                .timeout(Duration.ofMinutes(5))
-                .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + apiKey)
-                .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
-                .build();
-
-        HttpResponse<String> res = client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-
-        if (res.statusCode() < 200 || res.statusCode() >= 300) {
-            throw new IOException("OpenAI HTTP " + res.statusCode() + ": " + res.body());
-        }
-
-        String content = extractOpenAiChatContent(res.body());
-        if (content == null) {
-            throw new IOException("Could not parse OpenAI response content from: " + res.body());
-        }
-        return content;
-    }
-
-    private static String jsonString(String s) {
-        StringBuilder out = new StringBuilder();
-        out.append('"');
-        for (int i = 0; i < s.length(); i++) {
-            char c = s.charAt(i);
-            switch (c) {
-                case '\\' -> out.append("\\\\");
-                case '"' -> out.append("\\\"");
-                case '\n' -> out.append("\\n");
-                case '\r' -> out.append("\\r");
-                case '\t' -> out.append("\\t");
-                default -> {
-                    if (c <= 0x1F)
-                        out.append(String.format("\\u%04x", (int) c));
-                    else
-                        out.append(c);
-                }
+        String[] parts = innerContent.split(",");
+        List<Integer> list = new ArrayList<>();
+        for (String p : parts) {
+            String trimmed = p.trim();
+            if (!trimmed.isEmpty()) {
+                list.add(Integer.parseInt(trimmed));
             }
         }
-        out.append('"');
-        return out.toString();
-    }
-
-    private static String extractJsonStringField(String json, String fieldName) {
-        // Minimal JSON parsing for: "fieldName":"<string>"
-        // Handles escapes within the JSON string value.
-        String needle = "\"" + fieldName + "\":\"";
-        int start = json.indexOf(needle);
-        if (start < 0)
-            return null;
-        int i = start + needle.length();
-        StringBuilder sb = new StringBuilder();
-        boolean escaping = false;
-        while (i < json.length()) {
-            char c = json.charAt(i++);
-            if (escaping) {
-                switch (c) {
-                    case '"':
-                        sb.append('"');
-                        break;
-                    case '\\':
-                        sb.append('\\');
-                        break;
-                    case '/':
-                        sb.append('/');
-                        break;
-                    case 'b':
-                        sb.append('\b');
-                        break;
-                    case 'f':
-                        sb.append('\f');
-                        break;
-                    case 'n':
-                        sb.append('\n');
-                        break;
-                    case 'r':
-                        sb.append('\r');
-                        break;
-                    case 't':
-                        sb.append('\t');
-                        break;
-                    case 'u': {
-                        if (i + 4 > json.length())
-                            return null;
-                        String hex = json.substring(i, i + 4);
-                        i += 4;
-                        try {
-                            sb.append((char) Integer.parseInt(hex, 16));
-                        } catch (NumberFormatException e) {
-                            return null;
-                        }
-                        break;
-                    }
-                    default:
-                        sb.append(c);
-                }
-                escaping = false;
-                continue;
-            }
-            if (c == '\\') {
-                escaping = true;
-                continue;
-            }
-            if (c == '"') {
-                return sb.toString();
-            }
-            sb.append(c);
+        
+        int[] result = new int[list.size()];
+        for (int i = 0; i < list.size(); i++) {
+            result[i] = list.get(i);
         }
-        return null;
-    }
-
-    private static String extractOpenAiChatContent(String json) {
-        // Minimal parsing for: choices[0].message.content (string)
-        int msgIdx = json.indexOf("\"message\"");
-        if (msgIdx < 0)
-            return null;
-
-        int contentKey = json.indexOf("\"content\":\"", msgIdx);
-        if (contentKey < 0)
-            return null;
-        int i = contentKey + "\"content\":\"".length();
-
-        StringBuilder sb = new StringBuilder();
-        boolean escaping = false;
-        while (i < json.length()) {
-            char c = json.charAt(i++);
-            if (escaping) {
-                switch (c) {
-                    case '"':
-                        sb.append('"');
-                        break;
-                    case '\\':
-                        sb.append('\\');
-                        break;
-                    case '/':
-                        sb.append('/');
-                        break;
-                    case 'b':
-                        sb.append('\b');
-                        break;
-                    case 'f':
-                        sb.append('\f');
-                        break;
-                    case 'n':
-                        sb.append('\n');
-                        break;
-                    case 'r':
-                        sb.append('\r');
-                        break;
-                    case 't':
-                        sb.append('\t');
-                        break;
-                    case 'u': {
-                        if (i + 4 > json.length())
-                            return null;
-                        String hex = json.substring(i, i + 4);
-                        i += 4;
-                        try {
-                            sb.append((char) Integer.parseInt(hex, 16));
-                        } catch (NumberFormatException e) {
-                            return null;
-                        }
-                        break;
-                    }
-                    default:
-                        sb.append(c);
-                }
-                escaping = false;
-                continue;
-            }
-            if (c == '\\') {
-                escaping = true;
-                continue;
-            }
-            if (c == '"') {
-                return sb.toString();
-            }
-            sb.append(c);
-        }
-        return null;
-    }
-
-    private static String firstNonBlank(String... values) {
-        for (String v : values) {
-            if (v != null && !v.trim().isEmpty())
-                return v;
-        }
-        return null;
-    }
-
-    private static Map<String, String> loadDotEnv(Path path) {
-        Map<String, String> out = new HashMap<>();
-        try {
-            if (!Files.exists(path))
-                return out;
-            for (String line : Files.readAllLines(path, StandardCharsets.UTF_8)) {
-                String trimmed = line.trim();
-                if (trimmed.isEmpty() || trimmed.startsWith("#"))
-                    continue;
-                int eq = trimmed.indexOf('=');
-                if (eq <= 0)
-                    continue;
-                String key = trimmed.substring(0, eq).trim();
-                String value = trimmed.substring(eq + 1).trim();
-                if (value.startsWith("\"") && value.endsWith("\"") && value.length() >= 2) {
-                    value = value.substring(1, value.length() - 1);
-                }
-                out.put(key, value);
-            }
-        } catch (IOException ignored) {
-            return out;
-        }
-        return out;
+        return result;
     }
 }
