@@ -7,93 +7,66 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.Map;
 
-public class OllamaRunner {
+public class OpenaiRunner {
     private static final int MAX_SOURCE_CHARS = 30000;
 
-    public static void main(String[] args) throws Exception {
-        Path promptPath = Path.of("prompt.txt");
-        if (!Files.isRegularFile(promptPath)) {
-            throw new RuntimeException("Missing prompt.txt (run from project root).");
-        }
-        List<String> lines = Files.readAllLines(promptPath, StandardCharsets.UTF_8);
-        PromptConfig cfg = parsePromptConfig(lines);
-        String constructedPrompt = buildPromptFromConfig(cfg, Path.of("").toAbsolutePath().normalize());
-
-        System.out.println("Sending prompt to Ollama...");
-
-        // --- STEP 3: Send HTTP POST Request to Ollama ---
-        String payload = "{"
-                + "\"model\":" + jsonQuoted(cfg.model) + ","
-                + "\"prompt\":" + jsonQuoted(constructedPrompt) + ","
-                + "\"stream\":false"
-                + "}";
-
-        HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create("http://localhost:11434/api/generate"))
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(payload, StandardCharsets.UTF_8))
-                .build();
-
-        HttpResponse<String> res = client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-        if (res.statusCode() != 200) {
-            throw new RuntimeException("HTTP Error: " + res.statusCode() + " - " + res.body());
-        }
-
-        // --- STEP 4: Extract the generated text from Ollama's JSON response ---
-        String extractedJson = extractJsonStringField(res.body(), "response");
-        if (extractedJson == null) {
-            throw new RuntimeException("Could not find 'response' field in Ollama output.");
-        }
-        extractedJson = stripMarkdownFences(extractedJson);
-
-        Files.writeString(Path.of("out.txt"), extractedJson, StandardCharsets.UTF_8);
-        System.out.println("Wrote extracted LLM response to out.txt\n");
-
-        // --- STEP 5: Parse the test arrays and run them ---
-        System.out.println("Running Metamorphic Tests...");
-        
-        Pattern arrayPattern = Pattern.compile("\"source\"\\s*:\\s*\\[(.*?)\\]\\s*,\\s*\"followUp\"\\s*:\\s*\\[(.*?)\\]", Pattern.DOTALL);
-        Matcher arrayMatcher = arrayPattern.matcher(extractedJson);
-
-        int passed = 0;
-        int total = 0;
-
-        while (arrayMatcher.find()) {
-            total++;
-            int[] source = parseArray(arrayMatcher.group(1));
-            int[] followUp = parseArray(arrayMatcher.group(2));
-
-            // Execute the actual sorting method against both arrays
-            int[] sortedSource = SortUtil.sortArray(source);
-            int[] sortedFollowUp = SortUtil.sortArray(followUp);
-
-            boolean isPass = Arrays.equals(sortedSource, sortedFollowUp);
-            
-            if (isPass) {
-                passed++;
-                System.out.println("[PASS] Source: " + Arrays.toString(source) + " -> FollowUp: " + Arrays.toString(followUp));
-            } else {
-                System.out.println("[FAIL] Source: " + Arrays.toString(source) + " -> FollowUp: " + Arrays.toString(followUp));
-                System.out.println("       Sorted Source: " + Arrays.toString(sortedSource));
-                System.out.println("       Sorted FollowUp: " + Arrays.toString(sortedFollowUp));
+    public static void main(String[] args) {
+        try {
+            Path promptPath = Path.of("prompt.txt");
+            if (!Files.isRegularFile(promptPath)) {
+                throw new RuntimeException("Missing prompt.txt (run from project root).");
             }
-        }
+            List<String> lines = Files.readAllLines(promptPath, StandardCharsets.UTF_8);
+            if (lines.isEmpty()) {
+                throw new RuntimeException("prompt.txt is empty.");
+            }
 
-        // --- STEP 6: Report final results ---
-        System.out.println("\n--- Test Summary ---");
-        if (total == 0) {
-            System.out.println("Warning: No tests were generated/parsed successfully.");
-        } else {
-            System.out.println("Total tests parsed: " + total);
-            System.out.println("Passed: " + passed);
-            System.out.println("Failed: " + (total - passed));
+            Map<String, String> env = loadDotEnv(Path.of(".env"));
+            String apiKey = firstNonBlank(System.getenv("OPENAI_API_KEY"), env.get("OPENAI_API_KEY"), "");
+            if (apiKey.isEmpty()) {
+                throw new RuntimeException("Missing OPENAI_API_KEY. Put it in .env or environment.");
+            }
+
+            String model = firstNonBlank(System.getenv("OPENAI_MODEL"), env.get("OPENAI_MODEL"), "gpt-4o-mini");
+            String baseUrl = firstNonBlank(System.getenv("OPENAI_BASE_URL"), env.get("OPENAI_BASE_URL"),
+                    "https://api.openai.com/v1");
+            PromptConfig cfg = parsePromptConfig(lines);
+            String prompt = buildPromptFromConfig(cfg, Path.of("").toAbsolutePath().normalize());
+
+            String payload = "{"
+                    + "\"model\":" + jsonQuoted(model) + ","
+                    + "\"messages\":[{\"role\":\"user\",\"content\":" + jsonQuoted(prompt) + "}]"
+                    + "}";
+
+            HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15)).build();
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(baseUrl + "/chat/completions"))
+                    .timeout(Duration.ofMinutes(5))
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", "Bearer " + apiKey)
+                    .POST(HttpRequest.BodyPublishers.ofString(payload, StandardCharsets.UTF_8))
+                    .build();
+
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                throw new RuntimeException("OpenAI HTTP Error: " + response.statusCode() + " - " + response.body());
+            }
+
+            String output = extractOpenAiContent(response.body());
+            if (output == null) {
+                throw new RuntimeException("Could not extract response content from OpenAI output.");
+            }
+
+            Files.writeString(Path.of("out.txt"), output, StandardCharsets.UTF_8);
+            System.out.println("Wrote OpenAI response to out.txt");
+        } catch (Exception e) {
+            System.err.println("OpenaiRunner failed: " + e.getMessage());
+            e.printStackTrace(System.err);
+            System.exit(1);
         }
     }
 
@@ -111,7 +84,6 @@ public class OllamaRunner {
             String key = line.substring(0, idx).trim();
             String value = line.substring(idx + 1).trim();
             switch (key) {
-                case "Model" -> cfg.model = value;
                 case "SUTClassFile" -> cfg.sutClassFile = value;
                 case "TargetFunction" -> cfg.targetFunction = value;
                 case "SUTSupportFiles" -> cfg.sutSupportFiles = value;
@@ -144,6 +116,7 @@ public class OllamaRunner {
                     .append("```java\n")
                     .append(classSource)
                     .append("\n```\n");
+
             if (!cfg.sutSupportFiles.isBlank()) {
                 for (String part : cfg.sutSupportFiles.split(",")) {
                     String p = part.trim();
@@ -160,7 +133,7 @@ public class OllamaRunner {
             }
             sutSection = sut.toString();
         } else {
-            // Backward compatibility: preserve brief SUT description if class file isn't supplied.
+            // Backward compatibility: use brief SUT description when class file isn't supplied.
             String fallback = cfg.sutDescription.isBlank()
                     ? "A Java class-level SUT for metamorphic testing."
                     : cfg.sutDescription;
@@ -182,7 +155,8 @@ public class OllamaRunner {
             throw new RuntimeException("Empty path provided.");
         }
         Path p = Path.of(raw);
-        return p.isAbsolute() ? p.normalize() : repoRoot.resolve(p).normalize();
+        Path resolved = p.isAbsolute() ? p.normalize() : repoRoot.resolve(p).normalize();
+        return resolved;
     }
 
     private static String readFileWithLimit(Path path, int maxChars, String label) {
@@ -204,19 +178,35 @@ public class OllamaRunner {
         }
     }
 
-    private static String extractJsonStringField(String json, String fieldName) {
-        String needle = "\"" + fieldName + "\":\"";
-        int start = json.indexOf(needle);
-        if (start < 0) {
+    private static final class PromptConfig {
+        String sutClassFile = "";
+        String targetFunction = "";
+        String sutSupportFiles = "";
+        String sutDescription = "";
+        String mr = "Permutation";
+        String count = "5";
+        String dataType = "int[]";
+        String constraints = "Return valid JSON only.";
+    }
+
+    private static String extractOpenAiContent(String json) {
+        int messageIdx = json.indexOf("\"message\"");
+        if (messageIdx < 0) {
             return null;
         }
-        return parseJsonStringLiteral(json, start + needle.length());
+        int contentIdx = json.indexOf("\"content\":\"", messageIdx);
+        if (contentIdx < 0) {
+            return null;
+        }
+        int start = contentIdx + "\"content\":\"".length();
+        return parseJsonStringLiteral(json, start);
     }
 
     private static String parseJsonStringLiteral(String json, int startIndex) {
         int i = startIndex;
         StringBuilder out = new StringBuilder();
         boolean escaping = false;
+
         while (i < json.length()) {
             char c = json.charAt(i++);
             if (escaping) {
@@ -258,18 +248,6 @@ public class OllamaRunner {
         return null;
     }
 
-    private static String stripMarkdownFences(String s) {
-        String t = s.trim();
-        if (t.startsWith("```")) {
-            int firstNewline = t.indexOf('\n');
-            t = firstNewline >= 0 ? t.substring(firstNewline + 1).trim() : t.substring(3).trim();
-        }
-        if (t.endsWith("```")) {
-            t = t.substring(0, t.length() - 3).trim();
-        }
-        return t;
-    }
-
     private static String jsonQuoted(String s) {
         return "\"" + jsonEscape(s) + "\"";
     }
@@ -296,36 +274,37 @@ public class OllamaRunner {
         return out.toString();
     }
 
-    private static final class PromptConfig {
-        String model = "llama3";
-        String sutClassFile = "";
-        String targetFunction = "";
-        String sutSupportFiles = "";
-        String sutDescription = "";
-        String mr = "Permutation";
-        String count = "5";
-        String dataType = "int[]";
-        String constraints = "Return valid JSON only.";
+    private static Map<String, String> loadDotEnv(Path envPath) {
+        Map<String, String> values = new HashMap<>();
+        try {
+            if (!Files.exists(envPath)) {
+                return values;
+            }
+            for (String line : Files.readAllLines(envPath, StandardCharsets.UTF_8)) {
+                String t = line.trim();
+                if (t.isEmpty() || t.startsWith("#")) {
+                    continue;
+                }
+                int eq = t.indexOf('=');
+                if (eq <= 0) {
+                    continue;
+                }
+                String key = t.substring(0, eq).trim();
+                String value = t.substring(eq + 1).trim();
+                values.put(key, value);
+            }
+        } catch (IOException ignored) {
+            return values;
+        }
+        return values;
     }
 
-    // Helper method to convert comma-separated string into int[] array
-    private static int[] parseArray(String innerContent) {
-        if (innerContent == null || innerContent.trim().isEmpty()) {
-            return new int[0];
-        }
-        String[] parts = innerContent.split(",");
-        List<Integer> list = new ArrayList<>();
-        for (String p : parts) {
-            String trimmed = p.trim();
-            if (!trimmed.isEmpty()) {
-                list.add(Integer.parseInt(trimmed));
+    private static String firstNonBlank(String... values) {
+        for (String v : values) {
+            if (v != null && !v.trim().isEmpty()) {
+                return v.trim();
             }
         }
-        
-        int[] result = new int[list.size()];
-        for (int i = 0; i < list.size(); i++) {
-            result[i] = list.get(i);
-        }
-        return result;
+        return "";
     }
 }

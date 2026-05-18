@@ -9,9 +9,9 @@ Small Java workspace for **prompting a local or cloud LLM** from a text file and
 | What | Why |
 |------|-----|
 | **JDK 11+** (17 recommended) | Compile and run `OllamaRunner`, `SortUtil`, tests |
-| **Ollama** (optional) | Only if you use provider `ollama` |
-| **OpenAI API key** (optional) | Only if you use provider `openai` |
-| **Internet** | Required for OpenAI; Ollama is usually local |
+| **Ollama** (optional) | Needed only when running `OllamaRunner` |
+| **OpenAI API key** (optional) | Needed only when running `OpenaiRunner` |
+| **Internet** | Required for OpenAI; Ollama is local |
 
 Check Java:
 
@@ -66,6 +66,7 @@ curl -sS http://localhost:11434/api/tags | head
 
    ```bash
    OPENAI_API_KEY=sk-...
+   OPENAI_ORG_ID=org-...
    ```
 
    Optional: `OPENAI_BASE_URL=` if you use a compatible proxy (defaults to `https://api.openai.com/v1`).
@@ -78,47 +79,53 @@ curl -sS http://localhost:11434/api/tags | head
 
 | Path | Purpose |
 |------|---------|
-| `OllamaRunner.java` | Reads a prompt file, calls **Ollama** or **OpenAI**, writes model text to an output file |
-| `prompt.txt` | Example prompt you can edit |
+| `OllamaRunner.java` | Ollama-only runner that builds prompt from class-level SUT file references |
+| `OpenaiRunner.java` | OpenAI-only runner that builds prompt from class-level SUT file references |
+| `prompt.txt` | Active prompt config (supports class-level file paths) |
+| `prompt.class-level.example.txt` | Template showing class-level schema with file references |
 | `SortUtil.java` | Demo `sortArray` implementation |
 | `LLM-output-files/output-1-test.java` | Example **fixed** LLM-shaped tests (runnable `main`) |
 | `.env.example` | Template for OpenAI settings |
 
 ---
 
-## Prompt workflow
+## Prompt workflow (class-level SUT)
 
-1. Put your instructions in a text file (for example `prompt.txt`).
-2. Compile the runner from the **repository root**:
+`prompt.txt` now supports class-level input via file references:
 
-   ```bash
-   cd /path/to/MT-testing
-   javac OllamaRunner.java
-   ```
-
-3. Run with **explicit provider** (recommended so nothing is ambiguous):
-
-   **Ollama** (model must exist locally; example `llama3.2:1b`):
-
-   ```bash
-   java -cp . OllamaRunner ollama llama3.2:1b prompt.txt out.txt
-   ```
-
-   **OpenAI**:
-
-   ```bash
-   java -cp . OllamaRunner openai gpt-4o-mini prompt.txt out.txt
-   ```
-
-4. Open `out.txt` (or whatever output path you passed) for the model response.
-
-### Shorter three-argument form
-
-```bash
-java -cp . OllamaRunner <model> <inputFile> <outputFile>
+```text
+SUTClassFile: SortUtil.java
+TargetFunction: public static int[] sortArray(int[] arr)
+SUTSupportFiles: path/to/Helper.java,path/to/OtherFile.java
+SUT: optional fallback description
+MR: Permutation
+Count: 5
+DataType: int[]
+InputDomain: ...
 ```
 
-In the current code, this form uses provider **`ollama`** and treats the first argument as the **Ollama model name**.
+Notes:
+- `SUTClassFile` enables class-level mode and injects full class code into the LLM prompt.
+- `TargetFunction` helps focus the model on a method within the class.
+- `SUTSupportFiles` is optional and comma-separated.
+- Backward compatibility: if `SUTClassFile` is omitted, runners use brief `SUT:` text.
+
+Run OpenAI flow:
+
+```bash
+cd /path/to/MT-testing
+javac OpenaiRunner.java
+java -cp . OpenaiRunner
+```
+
+Run Ollama flow:
+
+```bash
+javac SortUtil.java OllamaRunner.java
+java -cp . OllamaRunner
+```
+
+Both runners write model output to `out.txt`.
 
 ---
 
