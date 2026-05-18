@@ -9,9 +9,9 @@ Small Java workspace for **prompting a local or cloud LLM** from a text file and
 | What | Why |
 |------|-----|
 | **JDK 11+** (17 recommended) | Compile and run `OllamaRunner`, `SortUtil`, tests |
-| **Ollama** (optional) | Only if you use provider `ollama` |
-| **OpenAI API key** (optional) | Only if you use provider `openai` |
-| **Internet** | Required for OpenAI; Ollama is usually local |
+| **Ollama** (optional) | Needed only when `Provider: ollama` |
+| **OpenAI API key** (optional) | Needed only when `Provider: openai` |
+| **Internet** | Required for OpenAI; Ollama is local |
 
 Check Java:
 
@@ -66,6 +66,7 @@ curl -sS http://localhost:11434/api/tags | head
 
    ```bash
    OPENAI_API_KEY=sk-...
+   OPENAI_ORG_ID=org-...
    ```
 
    Optional: `OPENAI_BASE_URL=` if you use a compatible proxy (defaults to `https://api.openai.com/v1`).
@@ -78,7 +79,7 @@ curl -sS http://localhost:11434/api/tags | head
 
 | Path | Purpose |
 |------|---------|
-| `OllamaRunner.java` | Reads a prompt file, calls **Ollama** or **OpenAI**, writes model text to an output file |
+| `OllamaRunner.java` | Reads `prompt.txt`, calls provider (`ollama`/`openai`), writes model text to `out.txt` |
 | `prompt.txt` | Example prompt you can edit |
 | `SortUtil.java` | Demo `sortArray` implementation |
 | `LLM-output-files/output-1-test.java` | Example **fixed** LLM-shaped tests (runnable `main`) |
@@ -96,29 +97,28 @@ curl -sS http://localhost:11434/api/tags | head
    javac OllamaRunner.java
    ```
 
-3. Run with **explicit provider** (recommended so nothing is ambiguous):
+3. Set provider/model in `prompt.txt`:
 
-   **Ollama** (model must exist locally; example `llama3.2:1b`):
-
-   ```bash
-   java -cp . OllamaRunner ollama llama3.2:1b prompt.txt out.txt
+   ```text
+   Provider: openai
+   Model: gpt-4o-mini
    ```
 
-   **OpenAI**:
+   To use Ollama instead:
 
-   ```bash
-   java -cp . OllamaRunner openai gpt-4o-mini prompt.txt out.txt
+   ```text
+   Provider: ollama
+   Model: llama3.2:1b
    ```
 
-4. Open `out.txt` (or whatever output path you passed) for the model response.
+4. Run:
 
-### Shorter three-argument form
+   ```bash
+   javac SortUtil.java OllamaRunner.java
+   java -cp . OllamaRunner
+   ```
 
-```bash
-java -cp . OllamaRunner <model> <inputFile> <outputFile>
-```
-
-In the current code, this form uses provider **`ollama`** and treats the first argument as the **Ollama model name**.
+5. Open `out.txt` for model response and check console for PASS/FAIL summary.
 
 ---
 
