@@ -8,13 +8,20 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 public class OpenaiRunner {
+    private static final int MAX_SOURCE_CHARS = 30000;
+
     public static void main(String[] args) {
         try {
-            String prompt = Files.readString(Path.of("prompt.txt"), StandardCharsets.UTF_8).trim();
-            if (prompt.isEmpty()) {
+            Path promptPath = Path.of("prompt.txt");
+            if (!Files.isRegularFile(promptPath)) {
+                throw new RuntimeException("Missing prompt.txt (run from project root).");
+            }
+            List<String> lines = Files.readAllLines(promptPath, StandardCharsets.UTF_8);
+            if (lines.isEmpty()) {
                 throw new RuntimeException("prompt.txt is empty.");
             }
 
@@ -27,6 +34,8 @@ public class OpenaiRunner {
             String model = firstNonBlank(System.getenv("OPENAI_MODEL"), env.get("OPENAI_MODEL"), "gpt-4o-mini");
             String baseUrl = firstNonBlank(System.getenv("OPENAI_BASE_URL"), env.get("OPENAI_BASE_URL"),
                     "https://api.openai.com/v1");
+            PromptConfig cfg = parsePromptConfig(lines);
+            String prompt = buildPromptFromConfig(cfg, Path.of("").toAbsolutePath().normalize());
 
             String payload = "{"
                     + "\"model\":" + jsonQuoted(model) + ","
@@ -59,6 +68,125 @@ public class OpenaiRunner {
             e.printStackTrace(System.err);
             System.exit(1);
         }
+    }
+
+    private static PromptConfig parsePromptConfig(List<String> lines) {
+        PromptConfig cfg = new PromptConfig();
+        for (String raw : lines) {
+            String line = raw.trim();
+            if (line.isEmpty() || line.startsWith("#")) {
+                continue;
+            }
+            int idx = line.indexOf(':');
+            if (idx <= 0) {
+                continue;
+            }
+            String key = line.substring(0, idx).trim();
+            String value = line.substring(idx + 1).trim();
+            switch (key) {
+                case "SUTClassFile" -> cfg.sutClassFile = value;
+                case "TargetFunction" -> cfg.targetFunction = value;
+                case "SUTSupportFiles" -> cfg.sutSupportFiles = value;
+                case "SUT" -> cfg.sutDescription = value;
+                case "MR" -> cfg.mr = value;
+                case "Count" -> cfg.count = value;
+                case "DataType" -> cfg.dataType = value;
+                case "InputDomain" -> cfg.constraints = value;
+                case "Constraints" -> cfg.constraints = value; // backward compatibility
+                default -> {
+                    // ignore unknown keys
+                }
+            }
+        }
+        return cfg;
+    }
+
+    private static String buildPromptFromConfig(PromptConfig cfg, Path repoRoot) {
+        String sutSection;
+        if (!cfg.sutClassFile.isBlank()) {
+            Path classPath = resolveUserPath(cfg.sutClassFile, repoRoot);
+            String classSource = readFileWithLimit(classPath, MAX_SOURCE_CHARS, "SUTClassFile");
+            StringBuilder sut = new StringBuilder();
+            sut.append("System Under Test (class-level):\n")
+                    .append("SUT class file: ").append(classPath).append("\n");
+            if (!cfg.targetFunction.isBlank()) {
+                sut.append("Target function: ").append(cfg.targetFunction).append("\n");
+            }
+            sut.append("SUT class source:\n")
+                    .append("```java\n")
+                    .append(classSource)
+                    .append("\n```\n");
+
+            if (!cfg.sutSupportFiles.isBlank()) {
+                for (String part : cfg.sutSupportFiles.split(",")) {
+                    String p = part.trim();
+                    if (p.isEmpty()) {
+                        continue;
+                    }
+                    Path support = resolveUserPath(p, repoRoot);
+                    String supportSource = readFileWithLimit(support, MAX_SOURCE_CHARS / 2, "SUTSupportFiles");
+                    sut.append("Support source from ").append(support).append(":\n")
+                            .append("```java\n")
+                            .append(supportSource)
+                            .append("\n```\n");
+                }
+            }
+            sutSection = sut.toString();
+        } else {
+            // Backward compatibility: use brief SUT description when class file isn't supplied.
+            String fallback = cfg.sutDescription.isBlank()
+                    ? "A Java class-level SUT for metamorphic testing."
+                    : cfg.sutDescription;
+            sutSection = "System Under Test:\n" + fallback + "\n";
+        }
+
+        return sutSection
+                + "Metamorphic Relation: " + cfg.mr + "\n"
+                + "Task: Generate exactly " + cfg.count + " edge-case test pairs.\n"
+                + "Input/Output type: " + cfg.dataType + "\n"
+                + "Input domain: " + cfg.constraints + "\n"
+                + "Output ONLY valid JSON in this exact schema: "
+                + "[ { \"source\": [1, 2], \"followUp\": [2, 1] } ] "
+                + "No markdown, no conversational text, no Java code.";
+    }
+
+    private static Path resolveUserPath(String raw, Path repoRoot) {
+        if (raw.isBlank()) {
+            throw new RuntimeException("Empty path provided.");
+        }
+        Path p = Path.of(raw);
+        Path resolved = p.isAbsolute() ? p.normalize() : repoRoot.resolve(p).normalize();
+        return resolved;
+    }
+
+    private static String readFileWithLimit(Path path, int maxChars, String label) {
+        try {
+            if (!Files.isRegularFile(path)) {
+                throw new RuntimeException(label + " file not found: " + path);
+            }
+            String content = Files.readString(path, StandardCharsets.UTF_8);
+            if (content.isBlank()) {
+                throw new RuntimeException(label + " file is empty: " + path);
+            }
+            if (content.length() > maxChars) {
+                return content.substring(0, maxChars)
+                        + "\n// ... truncated for prompt size (" + content.length() + " chars total)";
+            }
+            return content;
+        } catch (IOException e) {
+            throw new RuntimeException("Unable to read " + label + " file: " + path + " (" + e.getMessage() + ")");
+        }
+    }
+
+    private static final class PromptConfig {
+        String sutClassFile = "";
+        String targetFunction = "";
+        String sutSupportFiles = "";
+        String sutDescription = "";
+        String mr = "Permutation";
+        String count = "5";
+        String dataType = "int[]";
+        String constraints = "Return valid JSON only.";
     }
 
     private static String extractOpenAiContent(String json) {
