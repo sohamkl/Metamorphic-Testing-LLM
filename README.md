@@ -1,6 +1,6 @@
-# MT-testing
+# Metamorphic Testing with LLMs
 
-Small Java workspace for **prompting a local or cloud LLM** from a text file and writing the reply to disk, plus a toy `SortUtil` and **runnable metamorphic-style tests** under `LLM-output-files/`.
+A Java tool that uses an LLM (OpenAI) to automatically generate metamorphic test pairs for a class you provide. Instead of writing tests by hand, you describe the class, the function, and the metamorphic relation — the LLM generates the test inputs.
 
 ---
 
@@ -8,12 +8,11 @@ Small Java workspace for **prompting a local or cloud LLM** from a text file and
 
 | What | Why |
 |------|-----|
-| **JDK 11+** (17 recommended) | Compile and run `OllamaRunner`, `SortUtil`, tests |
-| **Ollama** (optional) | Only if you use provider `ollama` |
-| **OpenAI API key** (optional) | Only if you use provider `openai` |
-| **Internet** | Required for OpenAI; Ollama is usually local |
+| **JDK 11+** (17 recommended) | Compile and run the tool |
+| **OpenAI API key** | Calls the OpenAI API to generate tests |
+| **Internet connection** | Required to reach the OpenAI API |
 
-Check Java:
+Check Java is installed:
 
 ```bash
 java -version
@@ -22,135 +21,113 @@ javac -version
 
 ---
 
-## Install Ollama
+## OpenAI API key setup
 
-### macOS (Homebrew)
+1. Create a `.env` file in the project root:
 
-```bash
-brew install ollama
-```
-
-On some macOS versions, Homebrew may try to build dependencies (for example **MLX**) that need **full Xcode** and a **newer macOS**. If `brew install ollama` fails with messages about Xcode or Sonoma, use one of the alternatives below.
-
-### macOS (official app)
-
-Download and install from [https://ollama.com/download](https://ollama.com/download). That path often avoids the Homebrew build issues above.
-
-### Docker (works when native brew install fails)
-
-```bash
-docker pull ollama/ollama
-docker run -d --name ollama -p 11434:11434 ollama/ollama
-docker exec -it ollama ollama pull llama3.2:1b
-```
-
-Ollama’s HTTP API should be reachable at `http://localhost:11434` (this matches `OllamaRunner`).
-
-Check:
-
-```bash
-curl -sS http://localhost:11434/api/tags | head
-```
-
----
-
-## OpenAI API key
-
-1. Copy the example env file:
-
-   ```bash
-   cp .env.example .env
    ```
-
-2. Edit `.env` and set:
-
-   ```bash
    OPENAI_API_KEY=sk-...
+   OPENAI_ORG_ID=org-...
    ```
 
-   Optional: `OPENAI_BASE_URL=` if you use a compatible proxy (defaults to `https://api.openai.com/v1`).
+   Optional: add `OPENAI_BASE_URL=...` if you use a compatible proxy (defaults to `https://api.openai.com/v1`).
+   Optional: add `OPENAI_MODEL=...` to change the model (defaults to `gpt-4o-mini`).
 
-`.env` is listed in `.gitignore` so keys are not committed.
+2. `.env` is listed in `.gitignore` so keys are never committed.
 
 ---
 
 ## Project layout
 
-| Path | Purpose |
+| File | Purpose |
 |------|---------|
-| `OllamaRunner.java` | Reads a prompt file, calls **Ollama** or **OpenAI**, writes model text to an output file |
-| `prompt.txt` | Example prompt you can edit |
-| `SortUtil.java` | Demo `sortArray` implementation |
-| `LLM-output-files/output-1-test.java` | Example **fixed** LLM-shaped tests (runnable `main`) |
-| `.env.example` | Template for OpenAI settings |
+| `OpenaiRunner.java` | Main runner — reads config, calls OpenAI, writes output |
+| `prompt.txt` | Config file that controls what gets sent to the LLM |
+| `SortUtil.java` | Example class used as the system under test |
+| `out.txt` | LLM response is written here (gitignored) |
 
 ---
 
-## Prompt workflow
+## How to configure prompt.txt
 
-1. Put your instructions in a text file (for example `prompt.txt`).
-2. Compile the runner from the **repository root**:
+`prompt.txt` controls everything the LLM is told. Each line is a `Key: value` pair. Lines starting with `#` are comments.
 
-   ```bash
-   cd /path/to/MT-testing
-   javac OllamaRunner.java
-   ```
+```text
+# Path to the Java class you want to test
+SUTClassFile: SortUtil.java
 
-3. Run with **explicit provider** (recommended so nothing is ambiguous):
+# The specific function within that class to focus on
+TargetFunction: public static int[] sortArray(int[] arr)
 
-   **Ollama** (model must exist locally; example `llama3.2:1b`):
+# Optional: comma-separated list of helper/dependency files to include.
+# If left blank, the tool will auto-detect imports from SUTClassFile and
+# include any matching .java files it finds in the project.
+SUTSupportFiles:
 
-   ```bash
-   java -cp . OllamaRunner ollama llama3.2:1b prompt.txt out.txt
-   ```
+# The metamorphic relation — describe what relationship must hold
+MR: Permutation
 
-   **OpenAI**:
+# How many test pairs to generate
+Count: 5
 
-   ```bash
-   java -cp . OllamaRunner openai gpt-4o-mini prompt.txt out.txt
-   ```
+# The data type of the inputs
+DataType: int[]
 
-4. Open `out.txt` (or whatever output path you passed) for the model response.
-
-### Shorter three-argument form
-
-```bash
-java -cp . OllamaRunner <model> <inputFile> <outputFile>
+# Edge cases and constraints to cover
+InputDomain: empty array, single element, duplicates, negative numbers, mixed magnitudes
 ```
 
-In the current code, this form uses provider **`ollama`** and treats the first argument as the **Ollama model name**.
+### Key notes
+
+- **SUTClassFile** — the full source of this class is injected into the LLM prompt so it understands exactly what it is testing.
+- **SUTSupportFiles** — if your class depends on other classes, list them here (comma-separated). If left blank, the tool scans the project for files matching the imports in your SUT class and includes them automatically (first-level dependencies only).
+- **MR** — the metamorphic relation tells the LLM what relationship the test pairs must satisfy (e.g. two permutations of the same array should sort to the same result).
 
 ---
 
-## Run `SortUtil` and the example tests
+## How to run
 
-From the repo root:
-
-```bash
-javac SortUtil.java
-java -cp . SortUtil
-```
-
-Run the LLM-shaped runnable tests:
+From the project root:
 
 ```bash
-javac SortUtil.java LLM-output-files/output-1-test.java
-java -cp ".:LLM-output-files" Output1Test
+javac OpenaiRunner.java
+java OpenaiRunner
 ```
+
+The LLM response is written to `out.txt`. The format is a JSON array of test pairs:
+
+```json
+[
+  { "source": [3, 1, 2], "followUp": [2, 3, 1] },
+  { "source": [-5, 0, 5], "followUp": [5, -5, 0] }
+]
+```
+
+---
+
+## How it works
+
+1. `prompt.txt` is read and parsed into a config object.
+2. The source code of the SUT class (`SUTClassFile`) is read from disk and embedded into the prompt.
+3. If no support files are manually listed, the tool reads the SUT's import statements and searches the project for matching `.java` files, including them automatically.
+4. A prompt is built containing the full SUT source, any dependency sources, the metamorphic relation, the data type, the input domain constraints, and the number of pairs to generate.
+5. The prompt is sent to OpenAI via the chat completions API.
+6. The response is extracted from the API's JSON envelope and written to `out.txt`.
 
 ---
 
 ## Troubleshooting
 
 | Symptom | Likely cause |
-|---------|----------------|
-| `Could not find or load main class OllamaRunner` | Run from project root after `javac`, and use `java -cp . OllamaRunner ...` |
-| `Connection refused` to Ollama | Ollama not running or Docker container not up / port `11434` not published |
-| OpenAI `429` / `insufficient_quota` | Billing or quota on the OpenAI account; not a Java bug |
-| `brew install ollama` fails (MLX / Xcode / Sonoma) | Use the **official installer** or **Docker** (see above) |
+|---------|-------------|
+| `Missing prompt.txt` | Run from the project root directory, not a subdirectory |
+| `Missing OPENAI_API_KEY` | Create a `.env` file with your key (see setup section above) |
+| `OpenAI HTTP error 401` | API key is wrong or expired — check your key |
+| `OpenAI HTTP error 429` | Rate limit or billing quota reached on your OpenAI account |
+| `Could not extract response content` | Unexpected response shape from the API — check `out.txt` for the raw response |
 
 ---
 
 ## Security note
 
-Never commit `.env` or paste API keys into prompts that get logged publicly. Rotate keys if they leak.
+Never commit `.env` or paste API keys anywhere public. Rotate your key immediately if it leaks.
