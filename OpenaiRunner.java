@@ -4,14 +4,19 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class OpenaiRunner {
+
     private static final int MAX_SOURCE_CHARS = 30000;
 
     public static void main(String[] args) {
@@ -31,18 +36,21 @@ public class OpenaiRunner {
                 throw new RuntimeException("Missing OPENAI_API_KEY. Put it in .env or environment.");
             }
 
-            String model = firstNonBlank(System.getenv("OPENAI_MODEL"), env.get("OPENAI_MODEL"), "gpt-4o-mini");
-            String baseUrl = firstNonBlank(System.getenv("OPENAI_BASE_URL"), env.get("OPENAI_BASE_URL"),
-                    "https://api.openai.com/v1");
-            PromptConfig cfg = parsePromptConfig(lines);
-            String prompt = buildPromptFromConfig(cfg, Path.of("").toAbsolutePath().normalize());
+            String model   = firstNonBlank(System.getenv("OPENAI_MODEL"),    env.get("OPENAI_MODEL"),    "gpt-4o-mini");
+            String baseUrl = firstNonBlank(System.getenv("OPENAI_BASE_URL"), env.get("OPENAI_BASE_URL"), "https://api.openai.com/v1");
+
+            PromptConfig cfg    = parsePromptConfig(lines);
+            String       prompt = buildPromptFromConfig(cfg, Path.of("").toAbsolutePath().normalize());
 
             String payload = "{"
-                    + "\"model\":" + jsonQuoted(model) + ","
+                    + "\"model\":"    + jsonQuoted(model) + ","
                     + "\"messages\":[{\"role\":\"user\",\"content\":" + jsonQuoted(prompt) + "}]"
                     + "}";
 
-            HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15)).build();
+            HttpClient client = HttpClient.newBuilder()
+                    .connectTimeout(Duration.ofSeconds(15))
+                    .build();
+
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(baseUrl + "/chat/completions"))
                     .timeout(Duration.ofMinutes(5))
@@ -53,7 +61,7 @@ public class OpenaiRunner {
 
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                throw new RuntimeException("OpenAI HTTP Error: " + response.statusCode() + " - " + response.body());
+                throw new RuntimeException("OpenAI HTTP error " + response.statusCode() + ": " + response.body());
             }
 
             String output = extractOpenAiContent(response.body());
@@ -63,6 +71,7 @@ public class OpenaiRunner {
 
             Files.writeString(Path.of("out.txt"), output, StandardCharsets.UTF_8);
             System.out.println("Wrote OpenAI response to out.txt");
+
         } catch (Exception e) {
             System.err.println("OpenaiRunner failed: " + e.getMessage());
             e.printStackTrace(System.err);
@@ -70,8 +79,13 @@ public class OpenaiRunner {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Config parsing
+    // -------------------------------------------------------------------------
+
     private static PromptConfig parsePromptConfig(List<String> lines) {
         PromptConfig cfg = new PromptConfig();
+
         for (String raw : lines) {
             String line = raw.trim();
             if (line.isEmpty() || line.startsWith("#")) {
@@ -81,81 +95,214 @@ public class OpenaiRunner {
             if (idx <= 0) {
                 continue;
             }
-            String key = line.substring(0, idx).trim();
+            String key   = line.substring(0, idx).trim();
             String value = line.substring(idx + 1).trim();
+
             switch (key) {
-                case "SUTClassFile" -> cfg.sutClassFile = value;
-                case "TargetFunction" -> cfg.targetFunction = value;
-                case "SUTSupportFiles" -> cfg.sutSupportFiles = value;
-                case "SUT" -> cfg.sutDescription = value;
-                case "MR" -> cfg.mr = value;
-                case "Count" -> cfg.count = value;
-                case "DataType" -> cfg.dataType = value;
-                case "InputDomain" -> cfg.constraints = value;
-                case "Constraints" -> cfg.constraints = value; // backward compatibility
-                default -> {
-                    // ignore unknown keys
-                }
+                case "SUTClassFile":
+                    cfg.sutClassFile = value;
+                    break;
+                case "TargetFunction":
+                    cfg.targetFunction = value;
+                    break;
+                case "SUTSupportFiles":
+                    cfg.sutSupportFiles = value;
+                    break;
+                case "SUT":
+                    cfg.sutDescription = value;
+                    break;
+                case "MRInput":
+                    cfg.mrInput = value;
+                    break;
+                case "MROutput":
+                    cfg.mrOutput = value;
+                    break;
+                case "MR":
+                    cfg.mr = value;
+                    break;
+                case "Count":
+                    cfg.count = value;
+                    break;
+                case "DataType":
+                    cfg.dataType = value;
+                    break;
+                case "InputDomain":
+                    cfg.constraints = value;
+                    break;
+                case "Constraints":
+                    cfg.constraints = value;
+                    break;
+                default:
+                    break;
             }
         }
         return cfg;
     }
 
+    // -------------------------------------------------------------------------
+    // Prompt building
+    // -------------------------------------------------------------------------
+
     private static String buildPromptFromConfig(PromptConfig cfg, Path repoRoot) {
         String sutSection;
+
         if (!cfg.sutClassFile.isBlank()) {
-            Path classPath = resolveUserPath(cfg.sutClassFile, repoRoot);
+            Path   classPath   = resolveUserPath(cfg.sutClassFile, repoRoot);
             String classSource = readFileWithLimit(classPath, MAX_SOURCE_CHARS, "SUTClassFile");
+
             StringBuilder sut = new StringBuilder();
-            sut.append("System Under Test (class-level):\n")
-                    .append("SUT class file: ").append(classPath).append("\n");
+            sut.append("System Under Test (class-level):\n");
+            sut.append("SUT class file: ").append(classPath).append("\n");
+
             if (!cfg.targetFunction.isBlank()) {
                 sut.append("Target function: ").append(cfg.targetFunction).append("\n");
             }
-            sut.append("SUT class source:\n")
-                    .append("```java\n")
-                    .append(classSource)
-                    .append("\n```\n");
+
+            sut.append("SUT class source:\n");
+            sut.append("```java\n");
+            sut.append(classSource);
+            sut.append("\n```\n");
 
             if (!cfg.sutSupportFiles.isBlank()) {
-                for (String part : cfg.sutSupportFiles.split(",")) {
+                // Manually listed support files
+                String[] parts = cfg.sutSupportFiles.split(",");
+                for (String part : parts) {
                     String p = part.trim();
                     if (p.isEmpty()) {
                         continue;
                     }
-                    Path support = resolveUserPath(p, repoRoot);
+                    Path   support       = resolveUserPath(p, repoRoot);
                     String supportSource = readFileWithLimit(support, MAX_SOURCE_CHARS / 2, "SUTSupportFiles");
-                    sut.append("Support source from ").append(support).append(":\n")
-                            .append("```java\n")
-                            .append(supportSource)
-                            .append("\n```\n");
+                    sut.append("Support source from ").append(support.getFileName()).append(":\n");
+                    sut.append("```java\n");
+                    sut.append(supportSource);
+                    sut.append("\n```\n");
+                }
+            } else {
+                // Auto-detect first-level dependencies from import statements
+                List<Path> autoDeps = detectFirstLevelDependencies(classPath, repoRoot);
+                for (Path dep : autoDeps) {
+                    System.out.println("Auto-detected dependency: " + dep.getFileName());
+                    String depSource = readFileWithLimit(dep, MAX_SOURCE_CHARS / 2, "auto-detected dependency");
+                    sut.append("Dependency source from ").append(dep.getFileName()).append(":\n");
+                    sut.append("```java\n");
+                    sut.append(depSource);
+                    sut.append("\n```\n");
                 }
             }
+
             sutSection = sut.toString();
+
         } else {
-            // Backward compatibility: use brief SUT description when class file isn't supplied.
-            String fallback = cfg.sutDescription.isBlank()
-                    ? "A Java class-level SUT for metamorphic testing."
-                    : cfg.sutDescription;
-            sutSection = "System Under Test:\n" + fallback + "\n";
+            // Fallback: use a plain text SUT description if no class file is provided
+            String description;
+            if (cfg.sutDescription.isBlank()) {
+                description = "A Java class-level SUT for metamorphic testing.";
+            } else {
+                description = cfg.sutDescription;
+            }
+            sutSection = "System Under Test:\n" + description + "\n";
+        }
+
+        String mrStatement;
+        if (!cfg.mrInput.isBlank() && !cfg.mrOutput.isBlank()) {
+            mrStatement = "If " + cfg.mrInput + ", then " + cfg.mrOutput;
+        } else if (!cfg.mr.isBlank()) {
+            mrStatement = cfg.mr;
+        } else {
+            mrStatement = "not specified";
+        }
+
+        String domainLine;
+        if (!cfg.constraints.isBlank()) {
+            domainLine = "Input domain: " + cfg.constraints + "\n";
+        } else {
+            domainLine = "";
         }
 
         return sutSection
-                + "Metamorphic Relation: " + cfg.mr + "\n"
+                + "Metamorphic Relation: " + mrStatement + "\n"
                 + "Task: Generate exactly " + cfg.count + " edge-case test pairs.\n"
                 + "Input/Output type: " + cfg.dataType + "\n"
-                + "Input domain: " + cfg.constraints + "\n"
+                + domainLine
                 + "Output ONLY valid JSON in this exact schema: "
                 + "[ { \"source\": [1, 2], \"followUp\": [2, 1] } ] "
                 + "No markdown, no conversational text, no Java code.";
     }
+
+    // -------------------------------------------------------------------------
+    // Dependency detection
+    // -------------------------------------------------------------------------
+
+    private static List<Path> detectFirstLevelDependencies(Path classFile, Path repoRoot) {
+        List<Path> deps = new ArrayList<>();
+        try {
+            String  source        = Files.readString(classFile, StandardCharsets.UTF_8);
+            Pattern importPattern = Pattern.compile("^import\\s+([\\w.]+);", Pattern.MULTILINE);
+            Matcher matcher       = importPattern.matcher(source);
+
+            List<Path> javaFiles = new ArrayList<>();
+            collectJavaFiles(repoRoot, classFile, javaFiles);
+
+            while (matcher.find()) {
+                String importName = matcher.group(1);
+
+                // Skip standard Java library imports
+                if (importName.startsWith("java.")
+                        || importName.startsWith("javax.")
+                        || importName.startsWith("sun.")
+                        || importName.startsWith("com.sun.")) {
+                    continue;
+                }
+
+                // Get the simple class name from the end of the import path
+                String simpleName = importName.substring(importName.lastIndexOf('.') + 1);
+                if (simpleName.equals("*")) {
+                    continue;
+                }
+
+                // Look for a matching .java file in the repo
+                String fileName = simpleName + ".java";
+                for (Path jf : javaFiles) {
+                    if (jf.getFileName().toString().equals(fileName)) {
+                        deps.add(jf);
+                        break;
+                    }
+                }
+            }
+        } catch (IOException e) {
+            // Best-effort — skip silently if the file walk fails
+        }
+        return deps;
+    }
+
+    private static void collectJavaFiles(Path dir, Path excludeFile, List<Path> result) throws IOException {
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(dir)) {
+            for (Path entry : stream) {
+                if (Files.isDirectory(entry)) {
+                    collectJavaFiles(entry, excludeFile, result);
+                } else if (entry.toString().endsWith(".java") && !entry.equals(excludeFile)) {
+                    result.add(entry);
+                }
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // File helpers
+    // -------------------------------------------------------------------------
 
     private static Path resolveUserPath(String raw, Path repoRoot) {
         if (raw.isBlank()) {
             throw new RuntimeException("Empty path provided.");
         }
         Path p = Path.of(raw);
-        Path resolved = p.isAbsolute() ? p.normalize() : repoRoot.resolve(p).normalize();
+        Path resolved;
+        if (p.isAbsolute()) {
+            resolved = p.normalize();
+        } else {
+            resolved = repoRoot.resolve(p).normalize();
+        }
         return resolved;
     }
 
@@ -178,48 +325,95 @@ public class OpenaiRunner {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Config data class
+    // -------------------------------------------------------------------------
+
     private static final class PromptConfig {
-        String sutClassFile = "";
-        String targetFunction = "";
+        String sutClassFile    = "";
+        String targetFunction  = "";
         String sutSupportFiles = "";
-        String sutDescription = "";
-        String mr = "Permutation";
-        String count = "5";
-        String dataType = "int[]";
-        String constraints = "Return valid JSON only.";
+        String sutDescription  = "";
+        String mrInput         = "";
+        String mrOutput        = "";
+        String mr              = "";
+        String count           = "5";
+        String dataType        = "int[]";
+        String constraints     = "";
     }
+
+    // -------------------------------------------------------------------------
+    // OpenAI response parsing
+    // -------------------------------------------------------------------------
 
     private static String extractOpenAiContent(String json) {
         int messageIdx = json.indexOf("\"message\"");
         if (messageIdx < 0) {
             return null;
         }
-        int contentIdx = json.indexOf("\"content\":\"", messageIdx);
-        if (contentIdx < 0) {
+
+        int keyIdx = json.indexOf("\"content\"", messageIdx);
+        if (keyIdx < 0) {
             return null;
         }
-        int start = contentIdx + "\"content\":\"".length();
-        return parseJsonStringLiteral(json, start);
+
+        // Step past the key name, then skip whitespace up to the colon
+        int i = keyIdx + "\"content\"".length();
+        while (i < json.length() && Character.isWhitespace(json.charAt(i))) {
+            i++;
+        }
+        if (i >= json.length() || json.charAt(i) != ':') {
+            return null;
+        }
+
+        // Skip the colon, then skip whitespace up to the opening quote
+        i++;
+        while (i < json.length() && Character.isWhitespace(json.charAt(i))) {
+            i++;
+        }
+        if (i >= json.length() || json.charAt(i) != '"') {
+            return null;
+        }
+
+        return parseJsonStringLiteral(json, i + 1);
     }
 
     private static String parseJsonStringLiteral(String json, int startIndex) {
-        int i = startIndex;
+        int     i         = startIndex;
+        boolean escaping  = false;
         StringBuilder out = new StringBuilder();
-        boolean escaping = false;
 
         while (i < json.length()) {
-            char c = json.charAt(i++);
+            char c = json.charAt(i);
+            i++;
+
             if (escaping) {
                 switch (c) {
-                    case '"' -> out.append('"');
-                    case '\\' -> out.append('\\');
-                    case '/' -> out.append('/');
-                    case 'b' -> out.append('\b');
-                    case 'f' -> out.append('\f');
-                    case 'n' -> out.append('\n');
-                    case 'r' -> out.append('\r');
-                    case 't' -> out.append('\t');
-                    case 'u' -> {
+                    case '"':
+                        out.append('"');
+                        break;
+                    case '\\':
+                        out.append('\\');
+                        break;
+                    case '/':
+                        out.append('/');
+                        break;
+                    case 'b':
+                        out.append('\b');
+                        break;
+                    case 'f':
+                        out.append('\f');
+                        break;
+                    case 'n':
+                        out.append('\n');
+                        break;
+                    case 'r':
+                        out.append('\r');
+                        break;
+                    case 't':
+                        out.append('\t');
+                        break;
+                    case 'u':
                         if (i + 4 > json.length()) {
                             return null;
                         }
@@ -230,12 +424,15 @@ public class OpenaiRunner {
                         } catch (NumberFormatException e) {
                             return null;
                         }
-                    }
-                    default -> out.append(c);
+                        break;
+                    default:
+                        out.append(c);
+                        break;
                 }
                 escaping = false;
                 continue;
             }
+
             if (c == '\\') {
                 escaping = true;
                 continue;
@@ -248,6 +445,10 @@ public class OpenaiRunner {
         return null;
     }
 
+    // -------------------------------------------------------------------------
+    // JSON encoding helpers
+    // -------------------------------------------------------------------------
+
     private static String jsonQuoted(String s) {
         return "\"" + jsonEscape(s) + "\"";
     }
@@ -257,22 +458,36 @@ public class OpenaiRunner {
         for (int i = 0; i < s.length(); i++) {
             char c = s.charAt(i);
             switch (c) {
-                case '\\' -> out.append("\\\\");
-                case '"' -> out.append("\\\"");
-                case '\n' -> out.append("\\n");
-                case '\r' -> out.append("\\r");
-                case '\t' -> out.append("\\t");
-                default -> {
+                case '\\':
+                    out.append("\\\\");
+                    break;
+                case '"':
+                    out.append("\\\"");
+                    break;
+                case '\n':
+                    out.append("\\n");
+                    break;
+                case '\r':
+                    out.append("\\r");
+                    break;
+                case '\t':
+                    out.append("\\t");
+                    break;
+                default:
                     if (c <= 0x1F) {
                         out.append(String.format("\\u%04x", (int) c));
                     } else {
                         out.append(c);
                     }
-                }
+                    break;
             }
         }
         return out.toString();
     }
+
+    // -------------------------------------------------------------------------
+    // Environment / config helpers
+    // -------------------------------------------------------------------------
 
     private static Map<String, String> loadDotEnv(Path envPath) {
         Map<String, String> values = new HashMap<>();
@@ -289,7 +504,7 @@ public class OpenaiRunner {
                 if (eq <= 0) {
                     continue;
                 }
-                String key = t.substring(0, eq).trim();
+                String key   = t.substring(0, eq).trim();
                 String value = t.substring(eq + 1).trim();
                 values.put(key, value);
             }
