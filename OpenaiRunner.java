@@ -69,8 +69,21 @@ public class OpenaiRunner {
                 throw new RuntimeException("Could not extract response content from OpenAI output.");
             }
 
-            Files.writeString(Path.of("out.txt"), output, StandardCharsets.UTF_8);
-            System.out.println("Wrote OpenAI response to out.txt");
+            String javaSource = stripMarkdownFences(output);
+
+            Path generatedFile = Path.of("GeneratedTest.java");
+            Files.writeString(generatedFile, javaSource, StandardCharsets.UTF_8);
+            System.out.println("=== Generated source code ===");
+            System.out.println(javaSource);
+            System.out.println("=== End of generated source ===\n");
+            System.out.println("Wrote generated code to " + generatedFile);
+
+            String compileAndRunOutput = compileAndRun(generatedFile);
+            Files.writeString(Path.of("out.txt"), compileAndRunOutput, StandardCharsets.UTF_8);
+            System.out.println("\n=== Execution output ===");
+            System.out.println(compileAndRunOutput);
+            System.out.println("=== End of execution output ===");
+            System.out.println("\nWrote execution output to out.txt");
 
         } catch (Exception e) {
             System.err.println("OpenaiRunner failed: " + e.getMessage());
@@ -225,9 +238,18 @@ public class OpenaiRunner {
                 + "Task: Generate exactly " + cfg.count + " edge-case test pairs.\n"
                 + "Input/Output type: " + cfg.dataType + "\n"
                 + domainLine
-                + "Output ONLY valid JSON in this exact schema: "
-                + "[ { \"source\": [1, 2], \"followUp\": [2, 1] } ] "
-                + "No markdown, no conversational text, no Java code.";
+                + "\n"
+                + "IMPORTANT: Output a COMPLETE, compilable Java class called GeneratedTest.\n"
+                + "The class must have a public static void main(String[] args) method.\n"
+                + "The main method must programmatically generate the test pairs using real logic "
+                + "(loops, Random, helper methods, shuffling, etc.) — do NOT hardcode literal values.\n"
+                + "The generation logic should respect the metamorphic relation: "
+                + "build a source input, then derive the follow-up input from it according to the relation.\n"
+                + "Cover the input domain edge cases specified above.\n"
+                + "At the end of main, print the pairs as a JSON array to stdout in this exact schema:\n"
+                + "[ { \"source\": <value>, \"followUp\": <value> } ]\n"
+                + "Do NOT call or import the system under test — only generate inputs.\n"
+                + "Output ONLY the Java source code. No markdown fences, no explanation, no conversational text.";
     }
 
     // -------------------------------------------------------------------------
@@ -322,6 +344,61 @@ public class OpenaiRunner {
             return content;
         } catch (IOException e) {
             throw new RuntimeException("Unable to read " + label + " file: " + path + " (" + e.getMessage() + ")");
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Code generation helpers
+    // -------------------------------------------------------------------------
+
+    private static String stripMarkdownFences(String raw) {
+        String trimmed = raw.trim();
+        if (trimmed.startsWith("```")) {
+            int firstNewline = trimmed.indexOf('\n');
+            if (firstNewline >= 0) {
+                trimmed = trimmed.substring(firstNewline + 1);
+            }
+        }
+        if (trimmed.endsWith("```")) {
+            trimmed = trimmed.substring(0, trimmed.length() - 3).trim();
+        }
+        return trimmed;
+    }
+
+    private static String compileAndRun(Path javaFile) {
+        try {
+            String fileName = javaFile.getFileName().toString();
+            String className = fileName.replace(".java", "");
+
+            System.out.println("Compiling " + fileName + "...");
+            ProcessBuilder javac = new ProcessBuilder("javac", fileName);
+            javac.directory(javaFile.toAbsolutePath().getParent().toFile());
+            javac.redirectErrorStream(true);
+            Process compileProc = javac.start();
+            String compileOutput = new String(compileProc.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            int compileExit = compileProc.waitFor();
+
+            if (compileExit != 0) {
+                throw new RuntimeException("Compilation failed (exit " + compileExit + "):\n" + compileOutput);
+            }
+            System.out.println("Compilation successful.");
+
+            System.out.println("Running " + className + "...");
+            ProcessBuilder java = new ProcessBuilder("java", className);
+            java.directory(javaFile.toAbsolutePath().getParent().toFile());
+            java.redirectErrorStream(true);
+            Process runProc = java.start();
+            String runOutput = new String(runProc.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            int runExit = runProc.waitFor();
+
+            if (runExit != 0) {
+                throw new RuntimeException("Execution failed (exit " + runExit + "):\n" + runOutput);
+            }
+
+            return runOutput.trim();
+
+        } catch (IOException | InterruptedException e) {
+            throw new RuntimeException("Failed to compile/run generated code: " + e.getMessage());
         }
     }
 
