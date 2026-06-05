@@ -4,6 +4,7 @@ import mtllm.config.PromptConfig;
 import mtllm.config.PromptConfigLoader;
 import mtllm.llm.LlmClient;
 import mtllm.llm.OpenAiClient;
+import mtllm.runner.DataGeneratorRunner;
 import mtllm.runner.GeneratedTestRunner;
 import mtllm.runner.RepairLoop;
 import mtllm.runner.TestRunResult;
@@ -58,7 +59,16 @@ public final class App {
                     repoRoot.resolve("generated-tests/classes"),
                     junitJar,
                     mavenCommand);
-            RepairLoop repairLoop = new RepairLoop(llmClient, testRunner, repoRoot.resolve("generated-tests"));
+            DataGeneratorRunner dataGeneratorRunner = new DataGeneratorRunner(
+                    repoRoot,
+                    repoRoot.resolve("generated-code/classes"),
+                    repoRoot.resolve("generated-data"));
+            RepairLoop repairLoop = new RepairLoop(
+                    llmClient,
+                    testRunner,
+                    dataGeneratorRunner,
+                    repoRoot.resolve("generated-tests"),
+                    repoRoot.resolve("generated-code"));
 
             TestRunResult result = repairLoop.generateRunAndRepair(config, sutContext);
             System.out.println("\n--- Result: " + result.status() + " ---");

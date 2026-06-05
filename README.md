@@ -10,6 +10,8 @@ The current design treats the LLM as a code-generation assistant. Instead of ask
 
 This keeps the generated logic readable and debuggable by developers.
 
+The backend also supports three LLM involvement modes. See [MODES.md](MODES.md) for the detailed explanation.
+
 ## Requirements
 
 | What | Why |
@@ -50,6 +52,7 @@ JUNIT_PLATFORM_CONSOLE_STANDALONE_JAR=/absolute/path/to/junit-platform-console-s
 | `src/main/java/mtllm/util/` | Small helpers for `.env`, JSON, and code fences |
 | `prompt.txt` | Active generation config |
 | `prompt.class-level.example.txt` | Template config |
+| `MODES.md` | Explanation of Mode 1, Mode 2, and Mode 3 |
 
 ## Prompt Config
 
@@ -67,12 +70,23 @@ MR:
 Count: 8
 InputDomain: non-null int arrays; include empty arrays, duplicates, negatives, already sorted arrays, reverse sorted arrays
 GeneratedClassName: GeneratedSortUtilMetamorphicTest
+Mode: 3
 MaxRepairAttempts: 1
 ```
 
 Prefer `MRInput` plus `MROutput` because it matches the metamorphic-testing form “input relation implies output relation.” `MR` remains as a fallback for relations that are easier to express in one field.
 
 `DataType` is no longer required. The LLM is instructed to infer Java types from the target method signature and SUT source.
+
+`Mode` controls how much the LLM generates:
+
+```text
+Mode: 1  source inputs only, printed as JSON
+Mode: 2  source inputs + follow-up inputs, printed as JSON
+Mode: 3  full JUnit 5 metamorphic test class
+```
+
+Mode 1 and Mode 2 generated code is compiled with plain `javac`, so it must use only the Java standard library and the SUT/support classes. The LLM is instructed to build JSON manually rather than importing Jackson, Gson, or other JSON libraries.
 
 ## Run
 
@@ -99,6 +113,18 @@ The generated JUnit class is written to:
 
 ```text
 generated-tests/<GeneratedClassName>.java
+```
+
+For Mode 1 and Mode 2, generated Java data-generator code is written to:
+
+```text
+generated-code/<GeneratedClassName>.java
+```
+
+and the JSON data output is written to:
+
+```text
+generated-data/<GeneratedClassName>.json
 ```
 
 `generated-tests/` is ignored by Git because it is runtime output. Maven is configured to treat this folder as the generated JUnit test source directory.

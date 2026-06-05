@@ -22,6 +22,7 @@ public final class PromptConfig {
     private final int count;
     private final String inputDomain;
     private final String generatedClassName;
+    private final GenerationMode mode;
     private final int maxRepairAttempts;
 
     public PromptConfig(
@@ -35,6 +36,7 @@ public final class PromptConfig {
             int count,
             String inputDomain,
             String generatedClassName,
+            GenerationMode mode,
             int maxRepairAttempts) {
         this.sutClassFile = sutClassFile;
         this.targetFunction = valueOrEmpty(targetFunction);
@@ -48,6 +50,7 @@ public final class PromptConfig {
         this.generatedClassName = valueOrEmpty(generatedClassName).isEmpty()
                 ? "GeneratedMetamorphicTest"
                 : generatedClassName.trim();
+        this.mode = mode == null ? GenerationMode.FULL_JUNIT : mode;
         this.maxRepairAttempts = maxRepairAttempts;
     }
 
@@ -87,6 +90,10 @@ public final class PromptConfig {
 
     public String generatedClassName() {
         return generatedClassName;
+    }
+
+    public GenerationMode mode() {
+        return mode;
     }
 
     public int maxRepairAttempts() {

@@ -50,6 +50,7 @@ public final class PromptConfigLoader {
                 parsePositiveInt(values.get("Count"), 5, "Count"),
                 firstNonBlank(values.get("InputDomain"), values.get("Constraints"), ""),
                 values.getOrDefault("GeneratedClassName", "GeneratedMetamorphicTest"),
+                GenerationMode.fromConfig(values.get("Mode"), values.get("Level")),
                 parseNonNegativeInt(values.get("MaxRepairAttempts"), 1, "MaxRepairAttempts"));
     }
 
