@@ -83,7 +83,7 @@ Prefer `MRInput` plus `MROutput` because it matches the metamorphic-testing form
 ```text
 Mode: 1  source inputs only, printed as JSON
 Mode: 2  source inputs + follow-up inputs, printed as JSON
-Mode: 3  full JUnit 5 metamorphic test class
+Mode: 3  full JUnit 5 metamorphic test class, filtered to failing cases only
 ```
 
 Mode 1 and Mode 2 generated code is compiled with plain `javac`, so it must use only the Java standard library and the SUT/support classes. The LLM is instructed to build JSON manually rather than importing Jackson, Gson, or other JSON libraries.
@@ -109,11 +109,15 @@ javac -d out/classes src/main/java/*.java src/main/java/mtllm/*.java src/main/ja
 java -cp out/classes OpenaiRunner
 ```
 
-The generated JUnit class is written to:
+The generated Mode 3 JUnit class is written to:
 
 ```text
 generated-tests/<GeneratedClassName>.java
 ```
+
+When useful for demonstrations, passing and failing generated classes can both live in this same
+folder with clear class names, for example `GeneratedOrderUtilMetamorphicPassingTest` and
+`GeneratedOrderUtilMetamorphicFailingTest`.
 
 For Mode 1 and Mode 2, generated Java data-generator code is written to:
 
@@ -127,9 +131,9 @@ and the JSON data output is written to:
 generated-data/<GeneratedClassName>.json
 ```
 
-`generated-tests/` is ignored by Git because it is runtime output. Maven is configured to treat this folder as the generated JUnit test source directory.
+`generated-tests/` is ignored by Git because it is runtime output. Maven and VS Code are configured to treat this folder as the generated JUnit test source root.
 
-If `JUNIT_PLATFORM_CONSOLE_STANDALONE_JAR` is configured, the tool compiles/runs generated tests through the JUnit Platform Console. Otherwise, it uses `mvn test -Dtest=<GeneratedClassName>`. If compilation or execution fails, the failure output is sent back to the LLM for up to `MaxRepairAttempts` repair attempts.
+If `JUNIT_PLATFORM_CONSOLE_STANDALONE_JAR` is configured, the tool compiles/runs generated tests through the JUnit Platform Console. Otherwise, it uses `mvn test -Dtest=<GeneratedClassName>`. In Mode 3, generated tests are expected to contain only MR-violating cases, so JUnit assertion failures are treated as successful bug discovery rather than broken generation. Compilation errors, invalid generated code, and infrastructure failures are still sent back to the LLM for up to `MaxRepairAttempts` repair attempts.
 
 ## Current Scope
 

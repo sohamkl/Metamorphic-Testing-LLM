@@ -9,7 +9,9 @@ public final class OrderUtil {
 
         double total = 0.0;
         for (LineItem item : order.getItems()) {
-            total += item.getQuantity() * item.getUnitPrice();
+            // Deliberate bug for testing failed-case filtering: quantities above 5 are capped.
+            int billedQuantity = Math.min(item.getQuantity(), 5);
+            total += billedQuantity * item.getUnitPrice();
         }
         return total;
     }

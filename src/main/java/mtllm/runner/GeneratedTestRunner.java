@@ -15,7 +15,9 @@ import java.util.List;
  * Compiles and optionally executes the generated JUnit 5 test class.
  *
  * <p>In simple terms, this class checks whether the model's Java code is actually usable by
- * running javac and, when configured, the JUnit Platform Console.</p>
+ * running javac and, when configured, the JUnit Platform Console. For Mode 3, a JUnit failure
+ * can be a useful result because the generated suite intentionally contains only MR-violating
+ * cases.</p>
  */
 public final class GeneratedTestRunner {
     private final Path repoRoot;
@@ -59,6 +61,12 @@ public final class GeneratedTestRunner {
             ProcessResult result = runProcess(command, repoRoot);
             if (result.exitCode == 0) {
                 return TestRunResult.passed(result.output);
+            }
+            if (isCompilationFailure(result.output)) {
+                return TestRunResult.failed("Maven compilation failed:\n" + result.output);
+            }
+            if (isExpectedTestFailureOutput(result.output)) {
+                return TestRunResult.passed("Generated failing-only suite found MR violations:\n" + result.output);
             }
             return TestRunResult.failed("Maven test failed:\n" + result.output);
         } catch (IOException e) {
@@ -105,7 +113,27 @@ public final class GeneratedTestRunner {
         if (result.exitCode == 0) {
             return TestRunResult.passed(result.output);
         }
+        if (isExpectedTestFailureOutput(result.output)) {
+            return TestRunResult.passed("Generated failing-only suite found MR violations:\n" + result.output);
+        }
         return TestRunResult.failed("JUnit execution failed:\n" + result.output);
+    }
+
+    private static boolean isCompilationFailure(String output) {
+        String lower = output.toLowerCase();
+        return lower.contains("compilation failure")
+                || lower.contains("compilation error")
+                || lower.contains("failed to execute goal org.apache.maven.plugins:maven-compiler-plugin");
+    }
+
+    private static boolean isExpectedTestFailureOutput(String output) {
+        String lower = output.toLowerCase();
+        if (lower.matches("(?s).*errors: [1-9][0-9]*.*")
+                || lower.matches("(?s).*tests errored: [1-9][0-9]*.*")) {
+            return false;
+        }
+        return lower.matches("(?s).*failures: [1-9][0-9]*.*")
+                || lower.matches("(?s).*tests failed: [1-9][0-9]*.*");
     }
 
     private String classpath() {

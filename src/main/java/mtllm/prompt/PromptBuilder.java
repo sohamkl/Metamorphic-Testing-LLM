@@ -100,22 +100,30 @@ public final class PromptBuilder {
     private static void appendJUnitTask(StringBuilder prompt, PromptConfig config) {
         prompt.append("Generate a complete JUnit 5 test class with this exact public class name: ")
                 .append(config.generatedClassName()).append(".\n");
-        prompt.append("Selected mode: Mode 3 - full JUnit metamorphic test generation.\n");
+        prompt.append("Selected mode: Mode 3 - full JUnit metamorphic test generation, filtered to failing cases only.\n");
         prompt.append("The class must contain:\n");
-        prompt.append("- A JUnit 5 @ParameterizedTest method that runs once for each source input.\n");
-        prompt.append("- A @MethodSource provider named generateSources().\n");
-        prompt.append("- A source-input generator helper, for example generateSources().\n");
+        prompt.append("- Individual JUnit 5 @Test methods for the source inputs that violate the MR.\n");
+        prompt.append("- Do not use @ParameterizedTest, @MethodSource, @TestFactory, DynamicTest, or a candidateSources() provider in the final class.\n");
+        prompt.append("- Each @Test method must construct one concrete failing source input directly inside the test body.\n");
         prompt.append("- A follow-up-input helper, for example generateFollowUp(source).\n");
+        prompt.append("- A small helper that runs the SUT on the source and follow-up input, for example assertMetamorphicRelationFor(source).\n");
         prompt.append("- A relation assertion helper, for example assertMetamorphicRelation(sourceOutput, followUpOutput).\n");
-        prompt.append("- At least ").append(config.count()).append(" diverse deterministic source inputs.\n");
-        prompt.append("- JUnit 5 imports from org.junit.jupiter.params.ParameterizedTest, org.junit.jupiter.params.provider.MethodSource, and org.junit.jupiter.api.Assertions.\n");
+        prompt.append("- Up to ").append(config.count()).append(" diverse deterministic failing test methods if that many MR-violating cases are identifiable.\n");
+        prompt.append("- JUnit 5 imports from org.junit.jupiter.api.Test and org.junit.jupiter.api.Assertions.\n");
         prompt.append("- No package declaration; import public SUT classes by package name when needed.\n\n");
 
         prompt.append("Generation criteria:\n");
         prompt.append("- Infer Java input and output types from the target method signature and SUT source.\n");
-        prompt.append("- The generated test report should show each source input as a separate parameterized test invocation.\n");
+        prompt.append("- Think through possible source inputs internally, but write only the concrete MR-violating inputs as normal @Test methods in the final code.\n");
+        prompt.append("- The generated test report should show only failing metamorphic cases as named JUnit test methods.\n");
+        prompt.append("- Do not include passing/control test cases in the failing-only generated class.\n");
+        prompt.append("- If no candidate violates the MR, generate a compilable class with no @Test methods and a short private helper comment explaining that no failing cases were found.\n");
+        prompt.append("- Do not create passing test methods. This mode is meant to keep the generated suite small when many candidates are possible.\n");
+        prompt.append("- Important: assertMetamorphicRelation must assert that the stated MR output relation holds, for example assertEquals(expected, actual). Do not use assertNotEquals to make violating cases pass.\n");
+        prompt.append("- Each emitted @Test method must still assert the original MR so it fails and exposes the bug.\n");
         prompt.append("- Prefer readable deterministic fixtures over unseeded randomness.\n");
         prompt.append("- Include normal cases, boundary cases, and edge cases that make the MR meaningful.\n");
+        prompt.append("- Do not add inline comments that state computed totals, expected outputs, or follow-up outputs; they can be misleading when the SUT is buggy.\n");
         prompt.append("- Do not generate invalid inputs unless the input domain explicitly asks for invalid cases.\n");
         prompt.append("- Make object inputs by using visible constructors, builders, factories, or simple helper methods.\n");
         prompt.append("- Do not test MR quality; implement the MR as stated.\n");

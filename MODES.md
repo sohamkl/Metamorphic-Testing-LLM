@@ -94,9 +94,10 @@ Best for:
 - keeping assertion logic human-controlled
 - producing reusable source/follow-up fixtures
 
-## Mode 3: Full JUnit 5 Metamorphic Test
+## Mode 3: Full JUnit 5 Metamorphic Test, Failing Cases Only
 
-Use this when you want the LLM to generate the full runnable JUnit 5 test class.
+Use this when you want the LLM to generate the full runnable JUnit 5 test class, but only keep
+source inputs that expose a metamorphic-relation violation.
 
 ```text
 Mode: 3
@@ -105,14 +106,17 @@ Mode: 3
 The LLM generates a JUnit class with:
 
 ```java
-@ParameterizedTest
-@MethodSource("generateSources")
-testMetamorphicRelation(...)
+@Test
+failingMetamorphicCase1()
 
-generateSources()
 generateFollowUp(source)
+assertMetamorphicRelationFor(source)
 assertMetamorphicRelation(sourceOutput, followUpOutput)
 ```
+
+The LLM may consider many candidate source inputs while generating code, but the final JUnit suite
+contains only normal `@Test` methods for cases where the source output and follow-up output do not
+satisfy the MR.
 
 The generated test is written to:
 
@@ -120,13 +124,18 @@ The generated test is written to:
 generated-tests/<GeneratedClassName>.java
 ```
 
-Maven/JUnit runs it as a normal test.
+Maven/JUnit runs it as a normal test. Because Mode 3 is now a failing-only suite, a JUnit test
+failure can be the expected discovery result: it means the generated suite found concrete MR
+violations. Compilation errors and broken generated code are still treated as generation failures.
+Passing/control cases, when kept for comparison, can live in the same `generated-tests/` folder
+with a clear class name such as `GeneratedOrderUtilMetamorphicPassingTest`.
 
 Best for:
 
 - fastest end-to-end MT demo
 - JUnit integration
-- showing generated tests in IDE/Maven output
+- keeping the final suite small when many candidate inputs are possible
+- showing only bug-revealing cases in IDE/Maven output
 
 ## Mapping To MT Concepts
 
@@ -135,7 +144,7 @@ Best for:
 | Source input generation | LLM | LLM | LLM |
 | Follow-up input generation | Developer | LLM | LLM |
 | Output relation/assertion | Developer | Developer | LLM-generated, developer-reviewed |
-| Output artifact | JSON data | JSON data | JUnit 5 test class |
+| Output artifact | JSON data | JSON data | JUnit 5 failing-only test class |
 | Run target | Generated Java main | Generated Java main | Maven/JUnit |
 
 ## Recommended MVP Usage
