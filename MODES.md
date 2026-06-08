@@ -1,6 +1,6 @@
 # LLM Generation Modes
 
-The framework supports four user-facing modes. Each mode controls how much code the LLM is allowed to generate.
+The framework supports five user-facing modes. Each mode controls how much code the LLM is allowed to generate.
 
 ## Mode 1: Source Inputs Only
 
@@ -47,9 +47,10 @@ Best for:
 - high developer control
 - cases where follow-up transformation is too domain-specific to trust to the LLM
 
-## Mode 2: Source Inputs and Follow-Up Inputs
+## Mode 2: Source Inputs and Follow-Up Inputs With Executed Pass/Fail Data
 
-Use this when you want the LLM to generate both source inputs and the follow-up transformation, but you still want the developer to write the assertion/oracle.
+Use this when you want the LLM to generate source inputs, the follow-up transformation, and the
+MR assertion, then have the generated Java data program execute the SUT and classify each data pair.
 
 ```text
 Mode: 2
@@ -60,6 +61,7 @@ The LLM generates a Java data-generator class with:
 ```java
 generateSources()
 generateFollowUp(source)
+assertMetamorphicRelation(sourceOutput, followUpOutput)
 main(String[] args)
 ```
 
@@ -67,8 +69,13 @@ The generated class prints JSON like:
 
 ```json
 [
-  {"source": ..., "followUp": ...},
-  {"source": ..., "followUp": ...}
+  {
+    "source": {},
+    "followUp": {},
+    "sourceOutput": 0,
+    "followUpOutput": 0,
+    "passed": true
+  }
 ]
 ```
 
@@ -78,21 +85,27 @@ The validated JSON output is written to:
 generated-data/<GeneratedClassName>.json
 ```
 
+The backend also splits the full JSON by actual `passed` value:
+
+```text
+generated-data/<GeneratedClassNameWithoutData>Passing.json
+generated-data/<GeneratedClassNameWithoutData>Failing.json
+```
+
 Mode 2 generated code must use only the Java standard library and the SUT/support classes. It should build JSON manually with `StringBuilder`; it should not import Jackson, Gson, or other JSON libraries.
 
-The follow-up input is generated from the source input using `MRInput`.
+The follow-up input is generated from the source input using `MRInput`. The assertion is generated
+from `MROutput`. The `sourceOutput` and `followUpOutput` values are not invented by the LLM; they
+are computed by the generated Java program calling the real SUT.
 
-Developer still writes:
-
-```java
-assertMetamorphicRelation(sourceOutput, followUpOutput)
-```
+The generated program still needs developer review because both the transformation and assertion
+come from the LLM.
 
 Best for:
 
-- checking whether the LLM can apply the MR input transformation
-- keeping assertion logic human-controlled
-- producing reusable source/follow-up fixtures
+- checking whether the LLM can apply both the MR input transformation and MR output assertion
+- producing reusable source/follow-up/output fixtures
+- getting passing/failing JSON data without creating JUnit test files
 
 ## Mode 3: Full JUnit 5 Candidate Tests, Split By Actual Results
 
@@ -183,15 +196,70 @@ Best for:
 - cases where the developer trusts LLM-generated inputs but not LLM-generated oracle logic
 - showing a practical hybrid between manual MT frameworks and fully generated tests
 
+## Mode 5: Developer-Defined MR Helpers With Executed JSON Data
+
+Use this when you want JSON data rather than JUnit tests, while still keeping MR logic under
+developer control.
+
+```text
+Mode: 5
+DeveloperMrFile: src/main/java/PricingMetamorphicSpec.java
+DeveloperFollowUpMethod: PricingMetamorphicSpec.generateFollowUp
+DeveloperAssertMethod: PricingMetamorphicSpec.assertRelation
+```
+
+The LLM generates a Java data-generator class that creates candidate source inputs. When the
+backend runs that class, the Java code computes:
+
+```text
+source         = LLM-generated source input
+followUp       = developer follow-up method applied to source
+sourceOutput   = real SUT result for source
+followUpOutput = real SUT result for followUp
+passed         = developer assertion result for sourceOutput/followUpOutput
+```
+
+The JSON file is written to:
+
+```text
+generated-data/<GeneratedClassName>.json
+```
+
+Each entry has this shape:
+
+```json
+{
+  "source": {},
+  "followUp": {},
+  "sourceOutput": 0,
+  "followUpOutput": 0,
+  "passed": true
+}
+```
+
+The backend also splits the full JSON by actual `passed` value:
+
+```text
+generated-data/<GeneratedClassNameWithoutData>Passing.json
+generated-data/<GeneratedClassNameWithoutData>Failing.json
+```
+
+Best for:
+
+- inspecting MT data without running tests in the IDE
+- exporting source/follow-up/output pairs for reports or evaluation
+- showing that follow-up/output values come from executed backend code rather than LLM guesses
+
 ## Mapping To MT Concepts
 
-| MT concept | Mode 1 | Mode 2 | Mode 3 | Mode 4 |
-|---|---|---|---|---|
-| Source input generation | LLM | LLM | LLM | LLM |
-| Follow-up input generation | Developer | LLM | LLM | Developer |
-| Output relation/assertion | Developer | Developer | LLM-generated, developer-reviewed | Developer |
-| Output artifact | JSON data | JSON data | JUnit 5 passing/failing classes from actual results | JUnit 5 passing/failing classes from actual results |
-| Run target | Generated Java main | Generated Java main | Maven/JUnit | Maven/JUnit |
+| MT concept | Mode 1 | Mode 2 | Mode 3 | Mode 4 | Mode 5 |
+|---|---|---|---|---|---|
+| Source input generation | LLM | LLM | LLM | LLM | LLM |
+| Follow-up input generation | Developer | LLM | LLM | Developer | Developer method called by backend-run code |
+| Source/follow-up outputs | Not generated | SUT executed by generated Java main | SUT executed by JUnit | SUT executed by JUnit | SUT executed by backend-run data generator |
+| Output relation/assertion | Developer | LLM-generated, developer-reviewed | LLM-generated, developer-reviewed | Developer | Developer, optional for downstream checks |
+| Output artifact | JSON data | JSON source/follow-up/output data split by pass/fail | JUnit 5 passing/failing classes from actual results | JUnit 5 passing/failing classes from actual results | JSON source/follow-up/output data split by pass/fail |
+| Run target | Generated Java main | Generated Java main | Maven/JUnit | Maven/JUnit | Generated Java main |
 
 ## Recommended MVP Usage
 
@@ -200,6 +268,7 @@ For the research prototype, Mode 3 is the strongest demo because it shows JUnit 
 Mode 1 and Mode 2 are useful to show flexibility:
 
 - Mode 1: lowest trust in LLM
-- Mode 2: medium trust in LLM
+- Mode 2: medium/high trust in LLM for JSON data, because the LLM writes the follow-up and assertion
 - Mode 4: developer controls MR transformation/assertion, LLM generates source-input JUnit tests
+- Mode 5: developer controls MR transformation/assertion, LLM generates source-input data, backend executes outputs
 - Mode 3: highest automation, but requires developer review

@@ -103,6 +103,16 @@ public final class PromptBuilder {
             prompt.append(config.inputDomain()).append("\n\n");
         }
 
+        if (config.mode().usesDeveloperMrDataHelpers()) {
+            appendDeveloperMrExecutedMtDataTask(prompt, config);
+            return;
+        }
+
+        if (config.mode().generatesExecutedMtData()) {
+            appendLlmExecutedMtDataTask(prompt, config);
+            return;
+        }
+
         if (!config.mode().generatesJUnit()) {
             appendDataGeneratorTask(prompt, config);
             return;
@@ -181,6 +191,103 @@ public final class PromptBuilder {
         prompt.append("- Do not generate invalid inputs unless the input domain explicitly asks for invalid cases.\n");
         prompt.append("- Make object inputs by using visible constructors, builders, factories, or simple helper methods.\n");
         prompt.append("- Do not test MR quality; implement the MR as stated.\n");
+        prompt.append("- Output only Java code. No markdown fences and no explanation.\n");
+    }
+
+    private static void appendDeveloperMrExecutedMtDataTask(StringBuilder prompt, PromptConfig config) {
+        prompt.append("Generate a complete, compilable Java data-generator class with this exact public class name: ")
+                .append(config.generatedClassName()).append(".\n");
+        prompt.append("Selected mode: Mode 5 - executed metamorphic data generation with developer-defined MR helpers.\n");
+        prompt.append("This class generates candidate SOURCE INPUTS, then computes follow-up inputs and outputs by running real Java code.\n\n");
+
+        prompt.append("Developer-owned helper methods that must be called exactly:\n");
+        prompt.append("- Follow-up transformation: ").append(config.developerFollowUpMethod()).append("\n");
+        prompt.append("- Relation assertion, available if you need to classify pass/fail: ")
+                .append(config.developerAssertMethod()).append("\n\n");
+
+        prompt.append("The class must contain:\n");
+        prompt.append("- A generateSources() method that returns a List of source inputs.\n");
+        prompt.append("- generateSources() must generate at least ").append(config.count()).append(" diverse source inputs.\n");
+        prompt.append("- A main(String[] args) method that prints valid JSON to stdout only.\n");
+        prompt.append("- The main method must, for each source input:\n");
+        prompt.append("  1. call the target SUT method on the source input to compute sourceOutput\n");
+        prompt.append("  2. call ").append(config.developerFollowUpMethod()).append(" to compute followUp\n");
+        prompt.append("  3. call the target SUT method on followUp to compute followUpOutput\n");
+        prompt.append("  4. call ").append(config.developerAssertMethod()).append(" to compute whether the MR passed\n");
+        prompt.append("  5. print source, followUp, sourceOutput, followUpOutput, and passed in JSON\n\n");
+
+        prompt.append("Strict Mode 5 rules:\n");
+        prompt.append("- Do not invent sourceOutput or followUpOutput values manually.\n");
+        prompt.append("- Do not generate your own follow-up transformation; call the developer method.\n");
+        prompt.append("- Do not generate JUnit tests or assertions.\n");
+        prompt.append("- The passed field must be computed by calling the developer assertion method and catching AssertionError.\n");
+        prompt.append("- Do not print logs, explanations, markdown, or extra text to stdout.\n");
+        prompt.append("- Use only the Java standard library and the SUT/support/helper classes included above.\n");
+        prompt.append("- Do not import third-party JSON libraries such as Jackson, Gson, org.json, or JSON-P.\n");
+        prompt.append("- Build JSON manually with StringBuilder and small helper methods.\n\n");
+
+        prompt.append("JSON output rules:\n");
+        prompt.append("- Print a JSON array in this exact shape: ");
+        prompt.append("[{\"source\": <value>, \"followUp\": <value>, \"sourceOutput\": <value>, \"followUpOutput\": <value>, \"passed\": <boolean>}].\n");
+        prompt.append("- Every top-level array element must include all five keys: \"source\", \"followUp\", \"sourceOutput\", \"followUpOutput\", and \"passed\".\n");
+        prompt.append("- The array must contain at least ").append(config.count()).append(" top-level entries.\n");
+        prompt.append("- If inputs are objects, serialize them as JSON objects matching their visible fields/getters.\n");
+        prompt.append("- Serialize numeric outputs as JSON numbers when possible; serialize complex outputs as JSON objects or strings.\n\n");
+
+        prompt.append("Generation criteria:\n");
+        prompt.append("- Infer Java input and output types from the target method signature and SUT source.\n");
+        prompt.append("- Source inputs should follow the input domain and include normal cases, boundary cases, and edge cases.\n");
+        prompt.append("- Do not generate invalid inputs unless the input domain explicitly asks for invalid cases.\n");
+        prompt.append("- Make object inputs by using visible constructors, builders, factories, or simple helper methods.\n");
+        prompt.append("- Prefer readable deterministic fixtures over unseeded randomness.\n");
+        prompt.append("- Output only Java code. No markdown fences and no explanation.\n");
+    }
+
+    private static void appendLlmExecutedMtDataTask(StringBuilder prompt, PromptConfig config) {
+        prompt.append("Generate a complete, compilable Java data-generator class with this exact public class name: ")
+                .append(config.generatedClassName()).append(".\n");
+        prompt.append("Selected mode: Mode 2 - executed source/follow-up data generation.\n");
+        prompt.append("This class generates SOURCE INPUTS and FOLLOW-UP INPUTS, then computes outputs by running real Java code.\n\n");
+
+        prompt.append("The class must contain:\n");
+        prompt.append("- A generateSources() method that returns a List of source inputs.\n");
+        prompt.append("- generateSources() must generate at least ").append(config.count()).append(" diverse source inputs.\n");
+        prompt.append("- A generateFollowUp(source) method that transforms each source input according to MRInput.\n");
+        prompt.append("- An assertMetamorphicRelation(sourceOutput, followUpOutput) method that checks MROutput.\n");
+        prompt.append("- A main(String[] args) method that prints valid JSON to stdout only.\n");
+        prompt.append("- The main method must, for each source input:\n");
+        prompt.append("  1. call generateFollowUp(source) to compute followUp\n");
+        prompt.append("  2. call the target SUT method on source to compute sourceOutput\n");
+        prompt.append("  3. call the target SUT method on followUp to compute followUpOutput\n");
+        prompt.append("  4. call assertMetamorphicRelation(sourceOutput, followUpOutput) to compute whether the MR passed\n");
+        prompt.append("  5. print source, followUp, sourceOutput, followUpOutput, and passed in JSON\n\n");
+
+        prompt.append("Strict Mode 2 rules:\n");
+        prompt.append("- Do not invent sourceOutput or followUpOutput values manually.\n");
+        prompt.append("- Do not generate JUnit tests.\n");
+        prompt.append("- The passed field must be computed by calling assertMetamorphicRelation and catching AssertionError.\n");
+        prompt.append("- Do not use assertNotEquals or inverted logic to make violating cases pass.\n");
+        prompt.append("- Do not print logs, explanations, markdown, or extra text to stdout.\n");
+        prompt.append("- Use only the Java standard library and the SUT/support classes included above.\n");
+        prompt.append("- Do not import third-party JSON libraries such as Jackson, Gson, org.json, or JSON-P.\n");
+        prompt.append("- Build JSON manually with StringBuilder and small helper methods.\n\n");
+
+        prompt.append("JSON output rules:\n");
+        prompt.append("- Print a JSON array in this exact shape: ");
+        prompt.append("[{\"source\": <value>, \"followUp\": <value>, \"sourceOutput\": <value>, \"followUpOutput\": <value>, \"passed\": <boolean>}].\n");
+        prompt.append("- Every top-level array element must include all five keys: \"source\", \"followUp\", \"sourceOutput\", \"followUpOutput\", and \"passed\".\n");
+        prompt.append("- The array must contain at least ").append(config.count()).append(" top-level entries.\n");
+        prompt.append("- If inputs are objects, serialize them as JSON objects matching their visible fields/getters.\n");
+        prompt.append("- Serialize numeric outputs as JSON numbers when possible; serialize complex outputs as JSON objects or strings.\n\n");
+
+        prompt.append("Generation criteria:\n");
+        prompt.append("- Infer Java input and output types from the target method signature and SUT source.\n");
+        prompt.append("- Source inputs should follow the input domain and include normal cases, boundary cases, and edge cases.\n");
+        prompt.append("- Follow-up inputs must follow MRInput and must actually transform the source input unless the MR allows identity cases.\n");
+        prompt.append("- assertMetamorphicRelation must implement MROutput as stated.\n");
+        prompt.append("- Do not generate invalid inputs unless the input domain explicitly asks for invalid cases.\n");
+        prompt.append("- Make object inputs by using visible constructors, builders, factories, or simple helper methods.\n");
+        prompt.append("- Prefer readable deterministic fixtures over unseeded randomness.\n");
         prompt.append("- Output only Java code. No markdown fences and no explanation.\n");
     }
 

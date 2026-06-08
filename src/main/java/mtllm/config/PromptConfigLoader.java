@@ -74,13 +74,13 @@ public final class PromptConfigLoader {
             return;
         }
         if (developerMrFile == null) {
-            throw new IllegalArgumentException("Mode 4 requires DeveloperMrFile.");
+            throw new IllegalArgumentException("Mode " + mode.number() + " requires DeveloperMrFile.");
         }
         if (developerFollowUpMethod == null || developerFollowUpMethod.trim().isEmpty()) {
-            throw new IllegalArgumentException("Mode 4 requires DeveloperFollowUpMethod.");
+            throw new IllegalArgumentException("Mode " + mode.number() + " requires DeveloperFollowUpMethod.");
         }
         if (developerAssertMethod == null || developerAssertMethod.trim().isEmpty()) {
-            throw new IllegalArgumentException("Mode 4 requires DeveloperAssertMethod.");
+            throw new IllegalArgumentException("Mode " + mode.number() + " requires DeveloperAssertMethod.");
         }
     }
 

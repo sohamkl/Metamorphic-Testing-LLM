@@ -3,7 +3,7 @@ package mtllm.config;
 /**
  * Describes how much code the LLM should generate.
  *
- * <p>Mode 1 and Mode 2 generate data-producing Java classes. Mode 3 generates a
+ * <p>Mode 1, Mode 2, and Mode 5 generate data-producing Java classes. Mode 3 generates a
  * complete JUnit 5 metamorphic test class. Mode 4 generates JUnit tests that call
  * developer-defined MR helper methods.</p>
  */
@@ -11,7 +11,8 @@ public enum GenerationMode {
     INPUTS_ONLY(1),
     INPUTS_AND_FOLLOWUP(2),
     FULL_JUNIT(3),
-    DEVELOPER_MR_JUNIT(4);
+    DEVELOPER_MR_JUNIT(4),
+    DEVELOPER_MR_DATA(5);
 
     private final int number;
 
@@ -28,11 +29,19 @@ public enum GenerationMode {
     }
 
     public boolean usesDeveloperMrHelpers() {
-        return this == DEVELOPER_MR_JUNIT;
+        return this == DEVELOPER_MR_JUNIT || this == DEVELOPER_MR_DATA;
     }
 
     public boolean generatesFollowUpData() {
         return this == INPUTS_AND_FOLLOWUP;
+    }
+
+    public boolean generatesExecutedMtData() {
+        return this == INPUTS_AND_FOLLOWUP || this == DEVELOPER_MR_DATA;
+    }
+
+    public boolean usesDeveloperMrDataHelpers() {
+        return this == DEVELOPER_MR_DATA;
     }
 
     public static GenerationMode fromConfig(String modeValue, String levelValue) {
@@ -59,10 +68,16 @@ public enum GenerationMode {
             case "developer-mr":
             case "hybrid-junit":
                 return DEVELOPER_MR_JUNIT;
+            case "5":
+            case "mode 5":
+            case "developer-mr-data":
+            case "hybrid-data":
+            case "executed-mt-data":
+                return DEVELOPER_MR_DATA;
             default:
                 throw new IllegalArgumentException(
                         "Invalid Mode/Level: " + value
-                                + ". Use Mode: 1, Mode: 2, Mode: 3, or Mode: 4.");
+                                + ". Use Mode: 1, Mode: 2, Mode: 3, Mode: 4, or Mode: 5.");
         }
     }
 

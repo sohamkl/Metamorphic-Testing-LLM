@@ -12,10 +12,10 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Compiles and runs Mode 1/2 generated Java data-generator classes.
+ * Compiles and runs generated Java data-generator classes.
  *
  * <p>In simple terms, this checks that the LLM-generated data generator compiles,
- * executes, prints valid-looking JSON, and produces enough source/follow-up entries.</p>
+ * executes, prints valid-looking JSON, and produces enough generated entries.</p>
  */
 public final class DataGeneratorRunner {
     private final Path repoRoot;
@@ -50,8 +50,17 @@ public final class DataGeneratorRunner {
 
         Files.createDirectories(outputDir);
         Path outputFile = outputDir.resolve(config.generatedClassName() + ".json");
-        Files.writeString(outputFile, prettyPrintJsonLike(runResult.output()) + System.lineSeparator(), StandardCharsets.UTF_8);
-        return TestRunResult.passed("Wrote generated data JSON to " + outputFile + "\n\n" + runResult.output());
+        String prettyJson = prettyPrintJsonLike(runResult.output()) + System.lineSeparator();
+        Files.writeString(outputFile, prettyJson, StandardCharsets.UTF_8);
+
+        String splitMessage = "";
+        if (config.mode().generatesExecutedMtData()) {
+            splitMessage = splitExecutedMtData(runResult.output(), config);
+        }
+
+        return TestRunResult.passed("Wrote generated data JSON to " + outputFile
+                + splitMessage
+                + "\n\n" + runResult.output());
     }
 
     private TestRunResult compile(Path generatedFile, PromptConfig config, SutContext sutContext) throws Exception {
@@ -66,6 +75,9 @@ public final class DataGeneratorRunner {
         }
         for (SutContext.SourceFile supportFile : sutContext.supportFiles()) {
             command.add(supportFile.path().toString());
+        }
+        if (config.mode().usesDeveloperMrHelpers() && config.developerMrFile() != null) {
+            command.add(config.developerMrFile().toString());
         }
         command.add(generatedFile.toString());
 
@@ -102,14 +114,117 @@ public final class DataGeneratorRunner {
         }
 
         int followUpCount = countOccurrences(trimmed, "\"followUp\"");
-        if (config.mode().generatesFollowUpData() && followUpCount < config.count()) {
+        if ((config.mode().generatesFollowUpData() || config.mode().generatesExecutedMtData())
+                && followUpCount < config.count()) {
             return "Expected at least " + config.count() + " entries with \"followUp\", found " + followUpCount + ".";
         }
-        if (!config.mode().generatesFollowUpData() && followUpCount > 0) {
+        if (!config.mode().generatesFollowUpData()
+                && !config.mode().generatesExecutedMtData()
+                && followUpCount > 0) {
             return "Mode 1 should not include \"followUp\" entries, found " + followUpCount + ".";
         }
 
+        if (config.mode().generatesExecutedMtData()) {
+            int sourceOutputCount = countOccurrences(trimmed, "\"sourceOutput\"");
+            if (sourceOutputCount < config.count()) {
+                return "Expected at least " + config.count()
+                        + " entries with \"sourceOutput\", found " + sourceOutputCount + ".";
+            }
+            int followUpOutputCount = countOccurrences(trimmed, "\"followUpOutput\"");
+            if (followUpOutputCount < config.count()) {
+                return "Expected at least " + config.count()
+                        + " entries with \"followUpOutput\", found " + followUpOutputCount + ".";
+            }
+            int passedCount = countOccurrences(trimmed, "\"passed\"");
+            if (passedCount < config.count()) {
+                return "Expected at least " + config.count()
+                        + " entries with \"passed\", found " + passedCount + ".";
+            }
+        }
+
         return null;
+    }
+
+    private String splitExecutedMtData(String rawJson, PromptConfig config) throws IOException {
+        List<String> entries = splitTopLevelObjects(rawJson);
+        List<String> passing = new ArrayList<>();
+        List<String> failing = new ArrayList<>();
+
+        for (String entry : entries) {
+            if (hasPassedValue(entry, true)) {
+                passing.add(entry);
+            } else if (hasPassedValue(entry, false)) {
+                failing.add(entry);
+            }
+        }
+
+        String baseName = baseName(config.generatedClassName());
+        Path passingFile = outputDir.resolve(baseName + "Passing.json");
+        Path failingFile = outputDir.resolve(baseName + "Failing.json");
+        Files.writeString(passingFile, prettyPrintJsonLike(toJsonArray(passing)) + System.lineSeparator(), StandardCharsets.UTF_8);
+        Files.writeString(failingFile, prettyPrintJsonLike(toJsonArray(failing)) + System.lineSeparator(), StandardCharsets.UTF_8);
+
+        return "\nWrote passing data JSON to " + passingFile
+                + "\nWrote failing data JSON to " + failingFile
+                + "\nPassing entries: " + passing.size()
+                + "\nFailing entries: " + failing.size();
+    }
+
+    private boolean hasPassedValue(String entry, boolean expectedValue) {
+        String value = expectedValue ? "true" : "false";
+        return entry.matches("(?s).*\"passed\"\\s*:\\s*" + value + ".*");
+    }
+
+    private List<String> splitTopLevelObjects(String rawJson) {
+        String trimmed = rawJson == null ? "" : rawJson.trim();
+        List<String> entries = new ArrayList<>();
+        int depth = 0;
+        int objectStart = -1;
+        boolean inString = false;
+        boolean escaping = false;
+
+        for (int i = 0; i < trimmed.length(); i++) {
+            char c = trimmed.charAt(i);
+            if (escaping) {
+                escaping = false;
+                continue;
+            }
+            if (c == '\\' && inString) {
+                escaping = true;
+                continue;
+            }
+            if (c == '"') {
+                inString = !inString;
+                continue;
+            }
+            if (inString) {
+                continue;
+            }
+            if (c == '{') {
+                if (depth == 0) {
+                    objectStart = i;
+                }
+                depth++;
+            } else if (c == '}') {
+                depth--;
+                if (depth == 0 && objectStart >= 0) {
+                    entries.add(trimmed.substring(objectStart, i + 1));
+                    objectStart = -1;
+                }
+            }
+        }
+        return entries;
+    }
+
+    private String toJsonArray(List<String> entries) {
+        return "[" + String.join(",", entries) + "]";
+    }
+
+    private String baseName(String generatedClassName) {
+        if (generatedClassName.endsWith("Data")) {
+            return generatedClassName.substring(0, generatedClassName.length() - "Data".length());
+        }
+        return generatedClassName;
     }
 
     private int countOccurrences(String text, String search) {

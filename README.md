@@ -10,7 +10,7 @@ The current design treats the LLM as a code-generation assistant. Instead of ask
 
 This keeps the generated logic readable and debuggable by developers.
 
-The backend also supports three LLM involvement modes. See [MODES.md](MODES.md) for the detailed explanation.
+The backend also supports five LLM involvement modes. See [MODES.md](MODES.md) for the detailed explanation.
 
 ## Requirements
 
@@ -52,7 +52,7 @@ JUNIT_PLATFORM_CONSOLE_STANDALONE_JAR=/absolute/path/to/junit-platform-console-s
 | `src/main/java/mtllm/util/` | Small helpers for `.env`, JSON, and code fences |
 | `prompt.txt` | Active generation config |
 | `prompt.class-level.example.txt` | Template config |
-| `MODES.md` | Explanation of Mode 1, Mode 2, Mode 3, and Mode 4 |
+| `MODES.md` | Explanation of Mode 1, Mode 2, Mode 3, Mode 4, and Mode 5 |
 
 ## Prompt Config
 
@@ -82,12 +82,13 @@ Prefer `MRInput` plus `MROutput` because it matches the metamorphic-testing form
 
 ```text
 Mode: 1  source inputs only, printed as JSON
-Mode: 2  source inputs + follow-up inputs, printed as JSON
+Mode: 2  source inputs + follow-up inputs + executed pass/fail data, printed as JSON
 Mode: 3  full JUnit 5 candidate test class, then split by actual pass/fail results
 Mode: 4  JUnit tests with LLM-generated source inputs and developer-defined MR helpers
+Mode: 5  JSON data with LLM-generated source inputs and backend-executed follow-up/output values
 ```
 
-Mode 1 and Mode 2 generated code is compiled with plain `javac`, so it must use only the Java standard library and the SUT/support classes. The LLM is instructed to build JSON manually rather than importing Jackson, Gson, or other JSON libraries.
+Mode 1 and Mode 2 generated code is compiled with plain `javac`, so it must use only the Java standard library and the SUT/support classes. The LLM is instructed to build JSON manually rather than importing Jackson, Gson, or other JSON libraries. In Mode 2, the generated Java program also runs the SUT on each source/follow-up pair and computes a `passed` value from the generated MR assertion.
 
 For Mode 4, add:
 
@@ -98,6 +99,18 @@ DeveloperAssertMethod: OrderMetamorphicSpec.assertRelation
 ```
 
 The LLM then generates source-input JUnit tests that call those developer-owned methods instead of inventing the follow-up transformation or assertion itself.
+
+Mode 5 uses the same developer helper fields as Mode 4, but writes executed metamorphic data to
+`generated-data/<GeneratedClassName>.json`. The LLM generates source inputs; the generated Java
+data program calls the SUT and developer follow-up method to compute `followUp`, `sourceOutput`,
+`followUpOutput`, and `passed`.
+
+For Mode 2 and Mode 5, the backend also splits the full JSON into:
+
+```text
+generated-data/<GeneratedClassNameWithoutData>Passing.json
+generated-data/<GeneratedClassNameWithoutData>Failing.json
+```
 
 ## Run
 
@@ -143,6 +156,13 @@ and the JSON data output is written to:
 
 ```text
 generated-data/<GeneratedClassName>.json
+```
+
+For Mode 2, the JSON data is also split by actual `passed` value:
+
+```text
+generated-data/<GeneratedClassNameWithoutData>Passing.json
+generated-data/<GeneratedClassNameWithoutData>Failing.json
 ```
 
 `generated-tests/` is ignored by Git because it is runtime output. Maven and VS Code are configured to treat this folder as the generated JUnit test source root.
