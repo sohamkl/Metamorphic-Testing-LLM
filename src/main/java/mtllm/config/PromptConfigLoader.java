@@ -38,6 +38,13 @@ public final class PromptConfigLoader {
 
         Path sutClassFile = resolveOptionalPath(values.get("SUTClassFile"), repoRoot);
         List<Path> supportFiles = parseSupportFiles(values.get("SUTSupportFiles"), repoRoot);
+        Path developerMrFile = resolveOptionalPath(values.get("DeveloperMrFile"), repoRoot);
+        String developerMrSource = readOptionalSource(developerMrFile);
+
+        GenerationMode mode = GenerationMode.fromConfig(values.get("Mode"), values.get("Level"));
+        String developerFollowUpMethod = values.getOrDefault("DeveloperFollowUpMethod", "");
+        String developerAssertMethod = values.getOrDefault("DeveloperAssertMethod", "");
+        validateDeveloperMrConfig(mode, developerMrFile, developerFollowUpMethod, developerAssertMethod);
 
         return new PromptConfig(
                 sutClassFile,
@@ -50,8 +57,31 @@ public final class PromptConfigLoader {
                 parsePositiveInt(values.get("Count"), 5, "Count"),
                 firstNonBlank(values.get("InputDomain"), values.get("Constraints"), ""),
                 values.getOrDefault("GeneratedClassName", "GeneratedMetamorphicTest"),
-                GenerationMode.fromConfig(values.get("Mode"), values.get("Level")),
+                mode,
+                developerMrFile,
+                developerMrSource,
+                developerFollowUpMethod,
+                developerAssertMethod,
                 parseNonNegativeInt(values.get("MaxRepairAttempts"), 1, "MaxRepairAttempts"));
+    }
+
+    private static void validateDeveloperMrConfig(
+            GenerationMode mode,
+            Path developerMrFile,
+            String developerFollowUpMethod,
+            String developerAssertMethod) {
+        if (!mode.usesDeveloperMrHelpers()) {
+            return;
+        }
+        if (developerMrFile == null) {
+            throw new IllegalArgumentException("Mode 4 requires DeveloperMrFile.");
+        }
+        if (developerFollowUpMethod == null || developerFollowUpMethod.trim().isEmpty()) {
+            throw new IllegalArgumentException("Mode 4 requires DeveloperFollowUpMethod.");
+        }
+        if (developerAssertMethod == null || developerAssertMethod.trim().isEmpty()) {
+            throw new IllegalArgumentException("Mode 4 requires DeveloperAssertMethod.");
+        }
     }
 
     private static List<Path> parseSupportFiles(String raw, Path repoRoot) {
@@ -75,6 +105,16 @@ public final class PromptConfigLoader {
         }
         Path path = Path.of(raw.trim());
         return path.isAbsolute() ? path.normalize() : repoRoot.resolve(path).normalize();
+    }
+
+    private static String readOptionalSource(Path path) throws IOException {
+        if (path == null) {
+            return "";
+        }
+        if (!Files.isRegularFile(path)) {
+            throw new IllegalArgumentException("Missing DeveloperMrFile: " + path);
+        }
+        return Files.readString(path, StandardCharsets.UTF_8);
     }
 
     private static int parsePositiveInt(String raw, int fallback, String fieldName) {

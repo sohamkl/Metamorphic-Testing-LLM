@@ -71,6 +71,20 @@ public final class PromptBuilder {
                 prompt.append("First-level dependency/support file: ").append(supportFile.path()).append("\n");
                 prompt.append("```java\n").append(supportFile.source()).append("\n```\n\n");
             }
+
+            if (config.mode().usesDeveloperMrHelpers()) {
+                prompt.append("Developer-provided metamorphic helper file: ")
+                        .append(config.developerMrFile() == null ? "not provided" : config.developerMrFile())
+                        .append("\n");
+                prompt.append("Developer follow-up method to call: ")
+                        .append(config.developerFollowUpMethod())
+                        .append("\n");
+                prompt.append("Developer assertion method to call: ")
+                        .append(config.developerAssertMethod())
+                        .append("\n");
+                prompt.append("Developer MR helper source:\n");
+                prompt.append("```java\n").append(config.developerMrSource()).append("\n```\n\n");
+            }
         } else {
             prompt.append("System Under Test description:\n");
             prompt.append(config.sutDescription().isBlank()
@@ -94,33 +108,73 @@ public final class PromptBuilder {
             return;
         }
 
-        appendJUnitTask(prompt, config);
+        if (config.mode().usesDeveloperMrHelpers()) {
+            appendDeveloperMrJUnitTask(prompt, config);
+        } else {
+            appendJUnitTask(prompt, config);
+        }
+    }
+
+    private static void appendDeveloperMrJUnitTask(StringBuilder prompt, PromptConfig config) {
+        prompt.append("Generate a complete JUnit 5 test class with this exact public class name: ")
+                .append(config.generatedClassName()).append(".\n");
+        prompt.append("Selected mode: Mode 4 - candidate JUnit generation with developer-defined MR helpers.\n");
+        prompt.append("The developer has already written the follow-up transformation and assertion logic.\n");
+        prompt.append("You must call these exact methods:\n");
+        prompt.append("- Follow-up transformation: ").append(config.developerFollowUpMethod()).append("\n");
+        prompt.append("- Output relation assertion: ").append(config.developerAssertMethod()).append("\n\n");
+
+        prompt.append("The class must contain:\n");
+        prompt.append("- Individual JUnit 5 @Test methods with diverse deterministic candidate source inputs.\n");
+        prompt.append("- Each @Test method must construct one concrete source input directly inside the test body or through small source-construction helpers.\n");
+        prompt.append("- Each test must run the target SUT method on the source input.\n");
+        prompt.append("- Each test must call the developer follow-up method to create the follow-up input.\n");
+        prompt.append("- Each test must run the target SUT method on the follow-up input.\n");
+        prompt.append("- Each test must call the developer assertion method with the source output and follow-up output.\n");
+        prompt.append("- At least ").append(config.count()).append(" source-input test methods unless the input domain makes that impossible.\n");
+        prompt.append("- JUnit 5 imports from org.junit.jupiter.api.Test only, unless another JUnit import is genuinely needed.\n");
+        prompt.append("- No package declaration; import public SUT/helper classes by package name when needed.\n\n");
+
+        prompt.append("Strict Mode 4 rules:\n");
+        prompt.append("- Do not generate a generateFollowUp method.\n");
+        prompt.append("- Do not generate an assertMetamorphicRelation or assertRelation method.\n");
+        prompt.append("- Do not rewrite, duplicate, reinterpret, or inline the developer-provided MR helper logic.\n");
+        prompt.append("- Do not use assertEquals, assertNotEquals, or other assertion calls directly unless they are inside the developer-provided assertion method already.\n");
+        prompt.append("- The generated JUnit class should be only candidate source-input construction plus calls to the SUT and developer helper methods.\n");
+        prompt.append("- Do not try to decide which tests pass or fail. The backend will run the candidates and split actual passing/failing results into separate files.\n");
+        prompt.append("- Do not add inline comments that state computed totals, expected outputs, or follow-up outputs; they can be misleading when the SUT is buggy.\n\n");
+
+        prompt.append("Generation criteria:\n");
+        prompt.append("- Infer Java input and output types from the target method signature and SUT source.\n");
+        prompt.append("- Source inputs should follow the input domain and include normal cases, boundary cases, and edge cases.\n");
+        prompt.append("- Do not generate invalid inputs unless the input domain explicitly asks for invalid cases.\n");
+        prompt.append("- Make object inputs by using visible constructors, builders, factories, or simple helper methods.\n");
+        prompt.append("- Prefer readable deterministic fixtures over unseeded randomness.\n");
+        prompt.append("- Output only Java code. No markdown fences and no explanation.\n");
     }
 
     private static void appendJUnitTask(StringBuilder prompt, PromptConfig config) {
         prompt.append("Generate a complete JUnit 5 test class with this exact public class name: ")
                 .append(config.generatedClassName()).append(".\n");
-        prompt.append("Selected mode: Mode 3 - full JUnit metamorphic test generation, filtered to failing cases only.\n");
+        prompt.append("Selected mode: Mode 3 - full JUnit metamorphic candidate test generation.\n");
         prompt.append("The class must contain:\n");
-        prompt.append("- Individual JUnit 5 @Test methods for the source inputs that violate the MR.\n");
+        prompt.append("- Individual JUnit 5 @Test methods for diverse candidate source inputs.\n");
         prompt.append("- Do not use @ParameterizedTest, @MethodSource, @TestFactory, DynamicTest, or a candidateSources() provider in the final class.\n");
-        prompt.append("- Each @Test method must construct one concrete failing source input directly inside the test body.\n");
+        prompt.append("- Each @Test method must construct one concrete source input directly inside the test body or through small source-construction helpers.\n");
         prompt.append("- A follow-up-input helper, for example generateFollowUp(source).\n");
         prompt.append("- A small helper that runs the SUT on the source and follow-up input, for example assertMetamorphicRelationFor(source).\n");
         prompt.append("- A relation assertion helper, for example assertMetamorphicRelation(sourceOutput, followUpOutput).\n");
-        prompt.append("- Up to ").append(config.count()).append(" diverse deterministic failing test methods if that many MR-violating cases are identifiable.\n");
+        prompt.append("- At least ").append(config.count()).append(" diverse deterministic candidate test methods unless the input domain makes that impossible.\n");
         prompt.append("- JUnit 5 imports from org.junit.jupiter.api.Test and org.junit.jupiter.api.Assertions.\n");
         prompt.append("- No package declaration; import public SUT classes by package name when needed.\n\n");
 
         prompt.append("Generation criteria:\n");
         prompt.append("- Infer Java input and output types from the target method signature and SUT source.\n");
-        prompt.append("- Think through possible source inputs internally, but write only the concrete MR-violating inputs as normal @Test methods in the final code.\n");
-        prompt.append("- The generated test report should show only failing metamorphic cases as named JUnit test methods.\n");
-        prompt.append("- Do not include passing/control test cases in the failing-only generated class.\n");
-        prompt.append("- If no candidate violates the MR, generate a compilable class with no @Test methods and a short private helper comment explaining that no failing cases were found.\n");
-        prompt.append("- Do not create passing test methods. This mode is meant to keep the generated suite small when many candidates are possible.\n");
+        prompt.append("- Generate candidate tests; do not try to decide which tests pass or fail.\n");
+        prompt.append("- The backend will run the candidate class with JUnit and split actual passing/failing test methods into separate files.\n");
+        prompt.append("- Include both normal cases and edge cases when they are valid under the input domain.\n");
         prompt.append("- Important: assertMetamorphicRelation must assert that the stated MR output relation holds, for example assertEquals(expected, actual). Do not use assertNotEquals to make violating cases pass.\n");
-        prompt.append("- Each emitted @Test method must still assert the original MR so it fails and exposes the bug.\n");
+        prompt.append("- Each emitted @Test method must assert the original MR normally; do not invert assertions to make failures pass.\n");
         prompt.append("- Prefer readable deterministic fixtures over unseeded randomness.\n");
         prompt.append("- Include normal cases, boundary cases, and edge cases that make the MR meaningful.\n");
         prompt.append("- Do not add inline comments that state computed totals, expected outputs, or follow-up outputs; they can be misleading when the SUT is buggy.\n");

@@ -52,7 +52,7 @@ JUNIT_PLATFORM_CONSOLE_STANDALONE_JAR=/absolute/path/to/junit-platform-console-s
 | `src/main/java/mtllm/util/` | Small helpers for `.env`, JSON, and code fences |
 | `prompt.txt` | Active generation config |
 | `prompt.class-level.example.txt` | Template config |
-| `MODES.md` | Explanation of Mode 1, Mode 2, and Mode 3 |
+| `MODES.md` | Explanation of Mode 1, Mode 2, Mode 3, and Mode 4 |
 
 ## Prompt Config
 
@@ -83,10 +83,21 @@ Prefer `MRInput` plus `MROutput` because it matches the metamorphic-testing form
 ```text
 Mode: 1  source inputs only, printed as JSON
 Mode: 2  source inputs + follow-up inputs, printed as JSON
-Mode: 3  full JUnit 5 metamorphic test class, filtered to failing cases only
+Mode: 3  full JUnit 5 candidate test class, then split by actual pass/fail results
+Mode: 4  JUnit tests with LLM-generated source inputs and developer-defined MR helpers
 ```
 
 Mode 1 and Mode 2 generated code is compiled with plain `javac`, so it must use only the Java standard library and the SUT/support classes. The LLM is instructed to build JSON manually rather than importing Jackson, Gson, or other JSON libraries.
+
+For Mode 4, add:
+
+```text
+DeveloperMrFile: src/main/java/OrderMetamorphicSpec.java
+DeveloperFollowUpMethod: OrderMetamorphicSpec.generateFollowUp
+DeveloperAssertMethod: OrderMetamorphicSpec.assertRelation
+```
+
+The LLM then generates source-input JUnit tests that call those developer-owned methods instead of inventing the follow-up transformation or assertion itself.
 
 ## Run
 
@@ -109,15 +120,18 @@ javac -d out/classes src/main/java/*.java src/main/java/mtllm/*.java src/main/ja
 java -cp out/classes OpenaiRunner
 ```
 
-The generated Mode 3 JUnit class is written to:
+The generated Mode 3/4 candidate JUnit class is first written to:
 
 ```text
 generated-tests/<GeneratedClassName>.java
 ```
 
-When useful for demonstrations, passing and failing generated classes can both live in this same
-folder with clear class names, for example `GeneratedOrderUtilMetamorphicPassingTest` and
-`GeneratedOrderUtilMetamorphicFailingTest`.
+After Maven/JUnit executes it, the backend rewrites the actual outcomes into:
+
+```text
+generated-tests/<GeneratedClassNameWithoutTest>PassingTest.java
+generated-tests/<GeneratedClassNameWithoutTest>FailingTest.java
+```
 
 For Mode 1 and Mode 2, generated Java data-generator code is written to:
 
@@ -133,7 +147,7 @@ generated-data/<GeneratedClassName>.json
 
 `generated-tests/` is ignored by Git because it is runtime output. Maven and VS Code are configured to treat this folder as the generated JUnit test source root.
 
-If `JUNIT_PLATFORM_CONSOLE_STANDALONE_JAR` is configured, the tool compiles/runs generated tests through the JUnit Platform Console. Otherwise, it uses `mvn test -Dtest=<GeneratedClassName>`. In Mode 3, generated tests are expected to contain only MR-violating cases, so JUnit assertion failures are treated as successful bug discovery rather than broken generation. Compilation errors, invalid generated code, and infrastructure failures are still sent back to the LLM for up to `MaxRepairAttempts` repair attempts.
+If `JUNIT_PLATFORM_CONSOLE_STANDALONE_JAR` is configured, the tool compiles/runs generated tests through the JUnit Platform Console. Otherwise, it uses `mvn test -Dtest=<GeneratedClassName>`. With Maven, Mode 3 and Mode 4 use execution-based classification: JUnit assertion failures are treated as discovered failing cases, and the backend splits actual passing and failing `@Test` methods into separate files. Compilation errors, invalid generated code, and infrastructure failures are still sent back to the LLM for up to `MaxRepairAttempts` repair attempts.
 
 ## Current Scope
 

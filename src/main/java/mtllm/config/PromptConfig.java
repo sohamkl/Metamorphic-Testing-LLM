@@ -23,6 +23,10 @@ public final class PromptConfig {
     private final String inputDomain;
     private final String generatedClassName;
     private final GenerationMode mode;
+    private final Path developerMrFile;
+    private final String developerMrSource;
+    private final String developerFollowUpMethod;
+    private final String developerAssertMethod;
     private final int maxRepairAttempts;
 
     public PromptConfig(
@@ -37,6 +41,10 @@ public final class PromptConfig {
             String inputDomain,
             String generatedClassName,
             GenerationMode mode,
+            Path developerMrFile,
+            String developerMrSource,
+            String developerFollowUpMethod,
+            String developerAssertMethod,
             int maxRepairAttempts) {
         this.sutClassFile = sutClassFile;
         this.targetFunction = valueOrEmpty(targetFunction);
@@ -51,6 +59,10 @@ public final class PromptConfig {
                 ? "GeneratedMetamorphicTest"
                 : generatedClassName.trim();
         this.mode = mode == null ? GenerationMode.FULL_JUNIT : mode;
+        this.developerMrFile = developerMrFile;
+        this.developerMrSource = valueOrEmpty(developerMrSource);
+        this.developerFollowUpMethod = valueOrEmpty(developerFollowUpMethod);
+        this.developerAssertMethod = valueOrEmpty(developerAssertMethod);
         this.maxRepairAttempts = maxRepairAttempts;
     }
 
@@ -94,6 +106,22 @@ public final class PromptConfig {
 
     public GenerationMode mode() {
         return mode;
+    }
+
+    public Path developerMrFile() {
+        return developerMrFile;
+    }
+
+    public String developerMrSource() {
+        return developerMrSource;
+    }
+
+    public String developerFollowUpMethod() {
+        return developerFollowUpMethod;
+    }
+
+    public String developerAssertMethod() {
+        return developerAssertMethod;
     }
 
     public int maxRepairAttempts() {

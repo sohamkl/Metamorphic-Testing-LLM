@@ -15,9 +15,8 @@ import java.util.List;
  * Compiles and optionally executes the generated JUnit 5 test class.
  *
  * <p>In simple terms, this class checks whether the model's Java code is actually usable by
- * running javac and, when configured, the JUnit Platform Console. For Mode 3, a JUnit failure
- * can be a useful result because the generated suite intentionally contains only MR-violating
- * cases.</p>
+ * running Maven/JUnit. For JUnit generation modes, it then splits candidate tests into separate
+ * passing and failing files using actual execution results.</p>
  */
 public final class GeneratedTestRunner {
     private final Path repoRoot;
@@ -34,7 +33,7 @@ public final class GeneratedTestRunner {
 
     public TestRunResult compileAndRun(Path generatedTestFile, PromptConfig config, SutContext sutContext) throws Exception {
         if (junitConsoleJar.isBlank()) {
-            return runWithMavenIfAvailable(config);
+            return runWithMavenIfAvailable(generatedTestFile, config);
         }
         Files.createDirectories(classesDir);
 
@@ -45,7 +44,7 @@ public final class GeneratedTestRunner {
         return run(config.generatedClassName());
     }
 
-    private TestRunResult runWithMavenIfAvailable(PromptConfig config) throws Exception {
+    private TestRunResult runWithMavenIfAvailable(Path generatedTestFile, PromptConfig config) throws Exception {
         if (!Files.isRegularFile(repoRoot.resolve("pom.xml"))) {
             return TestRunResult.skipped(
                     "Generated test was written, but compile/run was skipped because neither "
@@ -58,15 +57,18 @@ public final class GeneratedTestRunner {
         command.add("-Dtest=" + config.generatedClassName());
 
         try {
+            Files.deleteIfExists(repoRoot.resolve("target")
+                    .resolve("surefire-reports")
+                    .resolve("TEST-" + config.generatedClassName() + ".xml"));
             ProcessResult result = runProcess(command, repoRoot);
             if (result.exitCode == 0) {
-                return TestRunResult.passed(result.output);
+                return splitActualResults(generatedTestFile, config, result.output);
             }
             if (isCompilationFailure(result.output)) {
                 return TestRunResult.failed("Maven compilation failed:\n" + result.output);
             }
             if (isExpectedTestFailureOutput(result.output)) {
-                return TestRunResult.passed("Generated failing-only suite found MR violations:\n" + result.output);
+                return splitActualResults(generatedTestFile, config, result.output);
             }
             return TestRunResult.failed("Maven test failed:\n" + result.output);
         } catch (IOException e) {
@@ -75,6 +77,18 @@ public final class GeneratedTestRunner {
                             + "Install Maven or configure JUNIT_PLATFORM_CONSOLE_STANDALONE_JAR. "
                             + "Details: " + e.getMessage());
         }
+    }
+
+    private TestRunResult splitActualResults(Path generatedTestFile, PromptConfig config, String mavenOutput) throws Exception {
+        ActualResultTestSplitter.SplitResult splitResult = ActualResultTestSplitter.split(
+                repoRoot,
+                generatedTestFile,
+                config);
+        return TestRunResult.passed(
+                "Generated candidate tests were executed and split by actual JUnit results.\n"
+                        + "Passing tests: " + splitResult.passingCount() + " -> " + splitResult.passingFile() + "\n"
+                        + "Failing tests: " + splitResult.failingCount() + " -> " + splitResult.failingFile() + "\n\n"
+                        + mavenOutput);
     }
 
     private TestRunResult compile(Path generatedTestFile, PromptConfig config, SutContext sutContext) throws Exception {
