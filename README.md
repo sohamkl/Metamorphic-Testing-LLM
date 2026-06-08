@@ -10,7 +10,7 @@ The current design treats the LLM as a code-generation assistant. Instead of ask
 
 This keeps the generated logic readable and debuggable by developers.
 
-The backend also supports five LLM involvement modes. See [MODES.md](MODES.md) for the detailed explanation.
+The backend supports four LLM involvement modes. See [MODES.md](MODES.md) for the detailed explanation.
 
 ## Requirements
 
@@ -52,7 +52,7 @@ JUNIT_PLATFORM_CONSOLE_STANDALONE_JAR=/absolute/path/to/junit-platform-console-s
 | `src/main/java/mtllm/util/` | Small helpers for `.env`, JSON, and code fences |
 | `prompt.txt` | Active generation config |
 | `prompt.class-level.example.txt` | Template config |
-| `MODES.md` | Explanation of Mode 1, Mode 2, Mode 3, Mode 4, and Mode 5 |
+| `MODES.md` | Explanation of Mode 1, Mode 2, Mode 3, and Mode 4 |
 
 ## Prompt Config
 
@@ -70,7 +70,7 @@ MR:
 Count: 8
 InputDomain: non-null int arrays; include empty arrays, duplicates, negatives, already sorted arrays, reverse sorted arrays
 GeneratedClassName: GeneratedSortUtilMetamorphicTest
-Mode: 3
+Mode: 4
 MaxRepairAttempts: 1
 ```
 
@@ -81,16 +81,15 @@ Prefer `MRInput` plus `MROutput` because it matches the metamorphic-testing form
 `Mode` controls how much the LLM generates:
 
 ```text
-Mode: 1  source inputs only, printed as JSON
-Mode: 2  source inputs + follow-up inputs + executed pass/fail data, printed as JSON
-Mode: 3  full JUnit 5 candidate test class, then split by actual pass/fail results
-Mode: 4  JUnit tests with LLM-generated source inputs and developer-defined MR helpers
-Mode: 5  JSON data with LLM-generated source inputs and backend-executed follow-up/output values
+Mode: 1  JSON data with LLM-generated source inputs and developer-defined MR helpers
+Mode: 2  JUnit tests with LLM-generated source inputs and developer-defined MR helpers
+Mode: 3  LLM-generated source/follow-up/assertion data, split by pass/fail JSON
+Mode: 4  full JUnit 5 candidate test class, then split by actual pass/fail results
 ```
 
-Mode 1 and Mode 2 generated code is compiled with plain `javac`, so it must use only the Java standard library and the SUT/support classes. The LLM is instructed to build JSON manually rather than importing Jackson, Gson, or other JSON libraries. In Mode 2, the generated Java program also runs the SUT on each source/follow-up pair and computes a `passed` value from the generated MR assertion.
+Mode 1 and Mode 3 generated code is compiled with plain `javac`, so it must use only the Java standard library and the SUT/support classes. The LLM is instructed to build JSON manually rather than importing Jackson, Gson, or other JSON libraries. In Mode 3, the generated Java program also runs the SUT on each source/follow-up pair and computes a `passed` value from the generated MR assertion.
 
-For Mode 4, add:
+For Mode 1 or Mode 2, add:
 
 ```text
 DeveloperMrFile: src/main/java/OrderMetamorphicSpec.java
@@ -98,14 +97,14 @@ DeveloperFollowUpMethod: OrderMetamorphicSpec.generateFollowUp
 DeveloperAssertMethod: OrderMetamorphicSpec.assertRelation
 ```
 
-The LLM then generates source-input JUnit tests that call those developer-owned methods instead of inventing the follow-up transformation or assertion itself.
+The LLM then generates source inputs that call those developer-owned methods instead of inventing the follow-up transformation or assertion itself.
 
-Mode 5 uses the same developer helper fields as Mode 4, but writes executed metamorphic data to
+Mode 1 uses the same developer helper fields as Mode 2, but writes executed metamorphic data to
 `generated-data/<GeneratedClassName>.json`. The LLM generates source inputs; the generated Java
 data program calls the SUT and developer follow-up method to compute `followUp`, `sourceOutput`,
 `followUpOutput`, and `passed`.
 
-For Mode 2 and Mode 5, the backend also splits the full JSON into:
+For Mode 1 and Mode 3, the backend also splits the full JSON into:
 
 ```text
 generated-data/<GeneratedClassNameWithoutData>Passing.json
@@ -133,7 +132,7 @@ javac -d out/classes src/main/java/*.java src/main/java/mtllm/*.java src/main/ja
 java -cp out/classes OpenaiRunner
 ```
 
-The generated Mode 3/4 candidate JUnit class is first written to:
+The generated Mode 2/4 candidate JUnit class is first written to:
 
 ```text
 generated-tests/<GeneratedClassName>.java
@@ -146,7 +145,7 @@ generated-tests/<GeneratedClassNameWithoutTest>PassingTest.java
 generated-tests/<GeneratedClassNameWithoutTest>FailingTest.java
 ```
 
-For Mode 1 and Mode 2, generated Java data-generator code is written to:
+For Mode 1 and Mode 3, generated Java data-generator code is written to:
 
 ```text
 generated-code/<GeneratedClassName>.java
@@ -158,7 +157,7 @@ and the JSON data output is written to:
 generated-data/<GeneratedClassName>.json
 ```
 
-For Mode 2, the JSON data is also split by actual `passed` value:
+For Mode 1 and Mode 3, the JSON data is also split by actual `passed` value:
 
 ```text
 generated-data/<GeneratedClassNameWithoutData>Passing.json
@@ -167,7 +166,7 @@ generated-data/<GeneratedClassNameWithoutData>Failing.json
 
 `generated-tests/` is ignored by Git because it is runtime output. Maven and VS Code are configured to treat this folder as the generated JUnit test source root.
 
-If `JUNIT_PLATFORM_CONSOLE_STANDALONE_JAR` is configured, the tool compiles/runs generated tests through the JUnit Platform Console. Otherwise, it uses `mvn test -Dtest=<GeneratedClassName>`. With Maven, Mode 3 and Mode 4 use execution-based classification: JUnit assertion failures are treated as discovered failing cases, and the backend splits actual passing and failing `@Test` methods into separate files. Compilation errors, invalid generated code, and infrastructure failures are still sent back to the LLM for up to `MaxRepairAttempts` repair attempts.
+If `JUNIT_PLATFORM_CONSOLE_STANDALONE_JAR` is configured, the tool compiles/runs generated tests through the JUnit Platform Console. Otherwise, it uses `mvn test -Dtest=<GeneratedClassName>`. With Maven, Mode 2 and Mode 4 use execution-based classification: JUnit assertion failures are treated as discovered failing cases, and the backend splits actual passing and failing `@Test` methods into separate files. Compilation errors, invalid generated code, and infrastructure failures are still sent back to the LLM for up to `MaxRepairAttempts` repair attempts.
 
 ## Current Scope
 

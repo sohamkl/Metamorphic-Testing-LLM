@@ -10,7 +10,7 @@ import java.nio.file.Path;
 /**
  * Writes non-JUnit generated Java code to disk.
  *
- * <p>In simple terms, this saves Mode 1 and Mode 2 data-generator classes under
+ * <p>In simple terms, this saves generated data-generator classes under
  * generated-code/ instead of generated-tests/.</p>
  */
 public final class GeneratedCodeWriter {

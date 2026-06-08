@@ -118,11 +118,6 @@ public final class DataGeneratorRunner {
                 && followUpCount < config.count()) {
             return "Expected at least " + config.count() + " entries with \"followUp\", found " + followUpCount + ".";
         }
-        if (!config.mode().generatesFollowUpData()
-                && !config.mode().generatesExecutedMtData()
-                && followUpCount > 0) {
-            return "Mode 1 should not include \"followUp\" entries, found " + followUpCount + ".";
-        }
 
         if (config.mode().generatesExecutedMtData()) {
             int sourceOutputCount = countOccurrences(trimmed, "\"sourceOutput\"");
