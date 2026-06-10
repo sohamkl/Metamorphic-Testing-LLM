@@ -40,7 +40,7 @@ JUNIT_PLATFORM_CONSOLE_STANDALONE_JAR=/absolute/path/to/junit-platform-console-s
 | Path | Purpose |
 |------|---------|
 | `pom.xml` | Maven build file with JUnit 5 configured |
-| `src/main/java/OpenaiRunner.java` | Compatibility entry point that delegates to `mtllm.App` |
+| `src/main/java/mtllm/OpenaiRunner.java` | Compatibility entry point that delegates to `mtllm.App` |
 | `src/main/java/mtllm/App.java` | Main backend orchestration |
 | `src/main/java/mtllm/config/` | Reads and stores `prompt.txt` settings |
 | `src/main/java/mtllm/sut/` | Loads SUT source and first-level dependencies |
@@ -142,14 +142,14 @@ mvn test
 Run the generator:
 
 ```bash
-mvn exec:java -Dexec.mainClass=OpenaiRunner
+mvn exec:java -Dexec.mainClass=mtllm.OpenaiRunner
 ```
 
 Or compile/run manually without Maven plugins:
 
 ```bash
 javac -d out/classes src/main/java/*.java src/main/java/mtllm/*.java src/main/java/mtllm/*/*.java
-java -cp out/classes OpenaiRunner
+java -cp out/classes mtllm.OpenaiRunner
 ```
 
 Generated JUnit candidate classes are first written to:
