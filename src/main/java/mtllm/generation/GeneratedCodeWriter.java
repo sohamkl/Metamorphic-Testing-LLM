@@ -10,8 +10,8 @@ import java.nio.file.Path;
 /**
  * Writes non-JUnit generated Java code to disk.
  *
- * <p>In simple terms, this saves generated data-generator classes under
- * generated-code/ instead of generated-tests/.</p>
+ * <p>In simple terms, this saves generated data-generator classes under the data-generator
+ * output folder instead of the generated JUnit test output folder.</p>
  */
 public final class GeneratedCodeWriter {
     private GeneratedCodeWriter() {

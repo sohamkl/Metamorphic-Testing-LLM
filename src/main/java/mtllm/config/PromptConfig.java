@@ -23,6 +23,9 @@ public final class PromptConfig {
     private final String inputDomain;
     private final String generatedClassName;
     private final GenerationMode mode;
+    private final boolean jsonRequired;
+    private final boolean testSuiteRequired;
+    private final MRProvider mrProvider;
     private final Path developerMrFile;
     private final String developerMrSource;
     private final String developerFollowUpMethod;
@@ -41,6 +44,9 @@ public final class PromptConfig {
             String inputDomain,
             String generatedClassName,
             GenerationMode mode,
+            boolean jsonRequired,
+            boolean testSuiteRequired,
+            MRProvider mrProvider,
             Path developerMrFile,
             String developerMrSource,
             String developerFollowUpMethod,
@@ -59,6 +65,9 @@ public final class PromptConfig {
                 ? "GeneratedMetamorphicTest"
                 : generatedClassName.trim();
         this.mode = mode == null ? GenerationMode.FULL_JUNIT : mode;
+        this.jsonRequired = jsonRequired;
+        this.testSuiteRequired = testSuiteRequired;
+        this.mrProvider = mrProvider == null ? MRProvider.LLM : mrProvider;
         this.developerMrFile = developerMrFile;
         this.developerMrSource = valueOrEmpty(developerMrSource);
         this.developerFollowUpMethod = valueOrEmpty(developerFollowUpMethod);
@@ -106,6 +115,18 @@ public final class PromptConfig {
 
     public GenerationMode mode() {
         return mode;
+    }
+
+    public boolean jsonRequired() {
+        return jsonRequired;
+    }
+
+    public boolean testSuiteRequired() {
+        return testSuiteRequired;
+    }
+
+    public MRProvider mrProvider() {
+        return mrProvider;
     }
 
     public Path developerMrFile() {

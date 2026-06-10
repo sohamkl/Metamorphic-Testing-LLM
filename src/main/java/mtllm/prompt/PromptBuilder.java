@@ -49,7 +49,7 @@ public final class PromptBuilder {
         } else {
             prompt.append("- Return a complete corrected Java data-generator class named ")
                     .append(config.generatedClassName()).append(".\n");
-            prompt.append("- Preserve the selected Mode ").append(config.mode().number()).append(" behavior.\n");
+            prompt.append("- Preserve the selected generation behavior.\n");
             prompt.append("- Keep main(String[] args) printing valid JSON to stdout only.\n");
             prompt.append("- Fix compilation errors, invalid types, runtime errors, and JSON validation issues.\n");
         }
@@ -123,7 +123,7 @@ public final class PromptBuilder {
     private static void appendDeveloperMrJUnitTask(StringBuilder prompt, PromptConfig config) {
         prompt.append("Generate a complete JUnit 5 test class with this exact public class name: ")
                 .append(config.generatedClassName()).append(".\n");
-        prompt.append("Selected mode: Mode 2 - candidate JUnit generation with developer-defined MR helpers.\n");
+        prompt.append("Selected workflow: JUnit test-suite generation with developer-defined MR helpers.\n");
         prompt.append("The developer has already written the follow-up transformation and assertion logic.\n");
         prompt.append("You must call these exact methods:\n");
         prompt.append("- Follow-up transformation: ").append(config.developerFollowUpMethod()).append("\n");
@@ -140,7 +140,7 @@ public final class PromptBuilder {
         prompt.append("- JUnit 5 imports from org.junit.jupiter.api.Test only, unless another JUnit import is genuinely needed.\n");
         prompt.append("- No package declaration; import public SUT/helper classes by package name when needed.\n\n");
 
-        prompt.append("Strict Mode 2 rules:\n");
+        prompt.append("Strict developer-MR JUnit rules:\n");
         prompt.append("- Do not generate a generateFollowUp method.\n");
         prompt.append("- Do not generate an assertMetamorphicRelation or assertRelation method.\n");
         prompt.append("- Do not rewrite, duplicate, reinterpret, or inline the developer-provided MR helper logic.\n");
@@ -161,7 +161,7 @@ public final class PromptBuilder {
     private static void appendJUnitTask(StringBuilder prompt, PromptConfig config) {
         prompt.append("Generate a complete JUnit 5 test class with this exact public class name: ")
                 .append(config.generatedClassName()).append(".\n");
-        prompt.append("Selected mode: Mode 4 - full JUnit metamorphic candidate test generation.\n");
+        prompt.append("Selected workflow: full JUnit metamorphic candidate test generation with LLM-generated MR helpers.\n");
         prompt.append("The class must contain:\n");
         prompt.append("- Individual JUnit 5 @Test methods for diverse candidate source inputs.\n");
         prompt.append("- Do not use @ParameterizedTest, @MethodSource, @TestFactory, DynamicTest, or a candidateSources() provider in the final class.\n");
@@ -192,7 +192,7 @@ public final class PromptBuilder {
     private static void appendDeveloperMrExecutedMtDataTask(StringBuilder prompt, PromptConfig config) {
         prompt.append("Generate a complete, compilable Java data-generator class with this exact public class name: ")
                 .append(config.generatedClassName()).append(".\n");
-        prompt.append("Selected mode: Mode 1 - executed metamorphic data generation with developer-defined MR helpers.\n");
+        prompt.append("Selected workflow: executed JSON data generation with developer-defined MR helpers.\n");
         prompt.append("This class generates candidate SOURCE INPUTS, then computes follow-up inputs and outputs by running real Java code.\n\n");
 
         prompt.append("Developer-owned helper methods that must be called exactly:\n");
@@ -211,7 +211,7 @@ public final class PromptBuilder {
         prompt.append("  4. call ").append(config.developerAssertMethod()).append(" to compute whether the MR passed\n");
         prompt.append("  5. print source, followUp, sourceOutput, followUpOutput, and passed in JSON\n\n");
 
-        prompt.append("Strict Mode 1 rules:\n");
+        prompt.append("Strict developer-MR JSON rules:\n");
         prompt.append("- Do not invent sourceOutput or followUpOutput values manually.\n");
         prompt.append("- Do not generate your own follow-up transformation; call the developer method.\n");
         prompt.append("- Do not generate JUnit tests or assertions.\n");
@@ -241,7 +241,7 @@ public final class PromptBuilder {
     private static void appendLlmExecutedMtDataTask(StringBuilder prompt, PromptConfig config) {
         prompt.append("Generate a complete, compilable Java data-generator class with this exact public class name: ")
                 .append(config.generatedClassName()).append(".\n");
-        prompt.append("Selected mode: Mode 3 - executed source/follow-up data generation.\n");
+        prompt.append("Selected workflow: executed JSON data generation with LLM-generated MR helpers.\n");
         prompt.append("This class generates SOURCE INPUTS and FOLLOW-UP INPUTS, then computes outputs by running real Java code.\n\n");
 
         prompt.append("The class must contain:\n");
@@ -257,7 +257,7 @@ public final class PromptBuilder {
         prompt.append("  4. call assertMetamorphicRelation(sourceOutput, followUpOutput) to compute whether the MR passed\n");
         prompt.append("  5. print source, followUp, sourceOutput, followUpOutput, and passed in JSON\n\n");
 
-        prompt.append("Strict Mode 3 rules:\n");
+        prompt.append("Strict LLM-MR JSON rules:\n");
         prompt.append("- Do not invent sourceOutput or followUpOutput values manually.\n");
         prompt.append("- Do not generate JUnit tests.\n");
         prompt.append("- The passed field must be computed by calling assertMetamorphicRelation and catching AssertionError.\n");

@@ -99,7 +99,7 @@ public final class SutContextLoader {
             for (Path entry : stream) {
                 if (Files.isDirectory(entry)) {
                     if (!entry.getFileName().toString().equals(".git")
-                            && !entry.getFileName().toString().equals("generated-tests")) {
+                            && !entry.getFileName().toString().equals("generated")) {
                         collectJavaFiles(entry, excludeFile, result);
                     }
                 } else if (entry.toString().endsWith(".java") && !entry.normalize().equals(excludeFile.normalize())) {

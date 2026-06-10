@@ -41,7 +41,10 @@ public final class PromptConfigLoader {
         Path developerMrFile = resolveOptionalPath(values.get("DeveloperMrFile"), repoRoot);
         String developerMrSource = readOptionalSource(developerMrFile);
 
-        GenerationMode mode = GenerationMode.fromConfig(values.get("Mode"), values.get("Level"));
+        boolean jsonRequired = parseBoolean(values.get("JsonRequired"), false, "JsonRequired");
+        boolean testSuiteRequired = parseBoolean(values.get("TestSuiteRequired"), true, "TestSuiteRequired");
+        MRProvider mrProvider = MRProvider.fromConfig(values.get("MRProvider"));
+        GenerationMode mode = deriveMode(jsonRequired, testSuiteRequired, mrProvider);
         String developerFollowUpMethod = values.getOrDefault("DeveloperFollowUpMethod", "");
         String developerAssertMethod = values.getOrDefault("DeveloperAssertMethod", "");
         validateDeveloperMrConfig(mode, developerMrFile, developerFollowUpMethod, developerAssertMethod);
@@ -58,11 +61,34 @@ public final class PromptConfigLoader {
                 firstNonBlank(values.get("InputDomain"), values.get("Constraints"), ""),
                 values.getOrDefault("GeneratedClassName", "GeneratedMetamorphicTest"),
                 mode,
+                jsonRequired,
+                testSuiteRequired,
+                mrProvider,
                 developerMrFile,
                 developerMrSource,
                 developerFollowUpMethod,
                 developerAssertMethod,
                 parseNonNegativeInt(values.get("MaxRepairAttempts"), 1, "MaxRepairAttempts"));
+    }
+
+    private static GenerationMode deriveMode(boolean jsonRequired, boolean testSuiteRequired, MRProvider mrProvider) {
+        if (!jsonRequired && !testSuiteRequired) {
+            throw new IllegalArgumentException("At least one output is required: set JsonRequired or TestSuiteRequired to true.");
+        }
+        if (jsonRequired && testSuiteRequired) {
+            throw new IllegalArgumentException(
+                    "JsonRequired=true and TestSuiteRequired=true is not implemented yet. Choose one output for now.");
+        }
+        if (jsonRequired && mrProvider == MRProvider.DEV) {
+            return GenerationMode.DEVELOPER_MR_DATA;
+        }
+        if (testSuiteRequired && mrProvider == MRProvider.DEV) {
+            return GenerationMode.DEVELOPER_MR_JUNIT;
+        }
+        if (jsonRequired) {
+            return GenerationMode.INPUTS_AND_FOLLOWUP;
+        }
+        return GenerationMode.FULL_JUNIT;
     }
 
     private static void validateDeveloperMrConfig(
@@ -74,13 +100,13 @@ public final class PromptConfigLoader {
             return;
         }
         if (developerMrFile == null) {
-            throw new IllegalArgumentException("Mode " + mode.number() + " requires DeveloperMrFile.");
+            throw new IllegalArgumentException("MRProvider: DEV requires DeveloperMrFile.");
         }
         if (developerFollowUpMethod == null || developerFollowUpMethod.trim().isEmpty()) {
-            throw new IllegalArgumentException("Mode " + mode.number() + " requires DeveloperFollowUpMethod.");
+            throw new IllegalArgumentException("MRProvider: DEV requires DeveloperFollowUpMethod.");
         }
         if (developerAssertMethod == null || developerAssertMethod.trim().isEmpty()) {
-            throw new IllegalArgumentException("Mode " + mode.number() + " requires DeveloperAssertMethod.");
+            throw new IllegalArgumentException("MRProvider: DEV requires DeveloperAssertMethod.");
         }
     }
 
@@ -138,6 +164,20 @@ public final class PromptConfigLoader {
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException(fieldName + " must be a number: " + raw);
         }
+    }
+
+    private static boolean parseBoolean(String raw, boolean fallback, String fieldName) {
+        if (raw == null || raw.trim().isEmpty()) {
+            return fallback;
+        }
+        String value = raw.trim();
+        if (value.equalsIgnoreCase("true") || value.equalsIgnoreCase("yes") || value.equalsIgnoreCase("y")) {
+            return true;
+        }
+        if (value.equalsIgnoreCase("false") || value.equalsIgnoreCase("no") || value.equalsIgnoreCase("n")) {
+            return false;
+        }
+        throw new IllegalArgumentException(fieldName + " must be true or false: " + raw);
     }
 
     private static String firstNonBlank(String... values) {

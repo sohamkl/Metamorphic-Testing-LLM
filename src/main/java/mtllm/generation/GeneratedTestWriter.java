@@ -11,7 +11,7 @@ import java.nio.file.Path;
  * Writes the LLM-generated JUnit class to disk.
  *
  * <p>In simple terms, this class takes the Java code returned by the model and saves it as a
- * .java file under generated-tests/.</p>
+ * .java file under the generated JUnit test output folder.</p>
  */
 public final class GeneratedTestWriter {
     private GeneratedTestWriter() {
