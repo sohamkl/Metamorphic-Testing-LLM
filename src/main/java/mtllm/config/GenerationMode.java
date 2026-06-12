@@ -10,14 +10,16 @@ public enum GenerationMode {
     DEVELOPER_MR_DATA,
     DEVELOPER_MR_JUNIT,
     INPUTS_AND_FOLLOWUP,
-    FULL_JUNIT;
+    FULL_JUNIT,
+    DEVELOPER_MR_BOTH,
+    LLM_BOTH;
 
     public boolean generatesJUnit() {
         return this == FULL_JUNIT || this == DEVELOPER_MR_JUNIT;
     }
 
     public boolean usesDeveloperMrHelpers() {
-        return this == DEVELOPER_MR_JUNIT || this == DEVELOPER_MR_DATA;
+        return this == DEVELOPER_MR_JUNIT || this == DEVELOPER_MR_DATA || this == DEVELOPER_MR_BOTH;
     }
 
     public boolean generatesFollowUpData() {
@@ -30,5 +32,9 @@ public enum GenerationMode {
 
     public boolean usesDeveloperMrDataHelpers() {
         return this == DEVELOPER_MR_DATA;
+    }
+
+    public boolean generatesBothOutputs() {
+        return this == DEVELOPER_MR_BOTH || this == LLM_BOTH;
     }
 }

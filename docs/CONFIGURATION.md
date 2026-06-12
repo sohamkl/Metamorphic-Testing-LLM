@@ -6,6 +6,7 @@ The public configuration no longer uses numbered modes. Developers choose the ou
 JsonRequired: true|false
 TestSuiteRequired: true|false
 MRProvider: DEV|LLM
+OutputRoot: examples/pricing/generated
 ```
 
 `MRProvider` means who writes the metamorphic relation implementation:
@@ -15,7 +16,26 @@ DEV = developer provides Java MR helper methods
 LLM = LLM generates the follow-up transformation and assertion code from MRInput and MROutput
 ```
 
-At least one output must be requested. For now, the backend supports either JSON output or JUnit test-suite output in one run. Supporting both in the same run is planned next.
+At least one output must be requested. The backend supports JSON output, JUnit test-suite output, or both in one run.
+
+`OutputRoot` controls where generated artifacts are written. For example:
+
+```text
+OutputRoot: examples/pricing/generated
+```
+
+creates:
+
+```text
+examples/pricing/generated/data-generator-code/
+examples/pricing/generated/json-data/
+examples/pricing/generated/junit-tests/
+examples/pricing/generated/junit-support/
+examples/pricing/generated/reports/
+```
+
+If `OutputRoot` is omitted and the SUT is inside `examples/<name>/src`, the backend defaults to
+`examples/<name>/generated`.
 
 ## JSON + Developer MR
 
@@ -41,9 +61,10 @@ passed
 Outputs:
 
 ```text
-generated/json-data/<GeneratedClassName>.json
-generated/json-data/<GeneratedClassNameWithoutData>Passing.json
-generated/json-data/<GeneratedClassNameWithoutData>Failing.json
+<OutputRoot>/json-data/<GeneratedClassName>.json
+<OutputRoot>/json-data/<GeneratedClassNameWithoutData>Passing.json
+<OutputRoot>/json-data/<GeneratedClassNameWithoutData>Failing.json
+<OutputRoot>/reports/<GeneratedClassNameWithoutData>Report.html
 ```
 
 This is the lowest LLM-responsibility option because the developer controls the MR transformation and assertion.
@@ -64,9 +85,12 @@ The LLM generates JUnit source-input tests. Each test calls the developer-owned 
 Outputs:
 
 ```text
-generated/junit-tests/<GeneratedClassNameWithoutTest>PassingTest.java
-generated/junit-tests/<GeneratedClassNameWithoutTest>FailingTest.java
+<OutputRoot>/junit-tests/<GeneratedClassNameWithoutTest>PassingTest.java
+<OutputRoot>/junit-tests/<GeneratedClassNameWithoutTest>FailingTest.java
 ```
+
+SUT/support/MR files needed for compilation are copied into `<OutputRoot>/junit-support`, not into
+`<OutputRoot>/junit-tests`.
 
 This is useful when developers want runnable tests but still want to own MR correctness.
 
@@ -83,9 +107,10 @@ The LLM generates source inputs, follow-up transformation code, and assertion co
 Outputs:
 
 ```text
-generated/json-data/<GeneratedClassName>.json
-generated/json-data/<GeneratedClassNameWithoutData>Passing.json
-generated/json-data/<GeneratedClassNameWithoutData>Failing.json
+<OutputRoot>/json-data/<GeneratedClassName>.json
+<OutputRoot>/json-data/<GeneratedClassNameWithoutData>Passing.json
+<OutputRoot>/json-data/<GeneratedClassNameWithoutData>Failing.json
+<OutputRoot>/reports/<GeneratedClassNameWithoutData>Report.html
 ```
 
 This is useful for inspecting generated data without creating JUnit files, but the generated MR code still needs review.
@@ -103,19 +128,31 @@ The LLM generates the full JUnit candidate test class, including source inputs, 
 Outputs:
 
 ```text
-generated/junit-tests/<GeneratedClassNameWithoutTest>PassingTest.java
-generated/junit-tests/<GeneratedClassNameWithoutTest>FailingTest.java
+<OutputRoot>/junit-tests/<GeneratedClassNameWithoutTest>PassingTest.java
+<OutputRoot>/junit-tests/<GeneratedClassNameWithoutTest>FailingTest.java
 ```
 
 This is the highest LLM-responsibility option and the fastest end-to-end JUnit demo.
 
-## Current Limitation
+## JSON + JUnit Together
 
-This combination is intentionally rejected for now:
+This combination generates both executed JSON data/report output and generated JUnit test-suite output:
 
 ```text
 JsonRequired: true
 TestSuiteRequired: true
 ```
 
-The next implementation step is to support generating both JSON data and JUnit tests in one run.
+Internally, the backend runs this as two generation passes:
+
+```text
+1. JSON/data/report generation
+2. JUnit test-suite generation
+```
+
+If `GeneratedClassName` ends in `Data`, the JUnit class name is derived by replacing that suffix with `Test`. For example:
+
+```text
+GeneratedPricingEngineDeveloperMrData
+GeneratedPricingEngineDeveloperMrTest
+```

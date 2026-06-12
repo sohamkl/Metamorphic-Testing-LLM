@@ -69,7 +69,11 @@ public final class ActualResultTestSplitter {
                 StandardCharsets.UTF_8);
         Files.deleteIfExists(generatedTestFile);
 
-        return new SplitResult(passingFile, failingFile, passingMethods.size(), failingMethods.size());
+        return new SplitResult(
+                passingFile,
+                failingFile,
+                methodNames(passingMethods),
+                methodNames(failingMethods));
     }
 
     private static TestOutcomes readOutcomes(Path reportFile) throws Exception {
@@ -177,17 +181,25 @@ public final class ActualResultTestSplitter {
         return generatedClassName;
     }
 
+    private static List<String> methodNames(List<TestMethod> methods) {
+        return methods.stream().map(method -> method.name).toList();
+    }
+
     public static final class SplitResult {
         private final Path passingFile;
         private final Path failingFile;
-        private final int passingCount;
-        private final int failingCount;
+        private final List<String> passingMethodNames;
+        private final List<String> failingMethodNames;
 
-        private SplitResult(Path passingFile, Path failingFile, int passingCount, int failingCount) {
+        private SplitResult(
+                Path passingFile,
+                Path failingFile,
+                List<String> passingMethodNames,
+                List<String> failingMethodNames) {
             this.passingFile = passingFile;
             this.failingFile = failingFile;
-            this.passingCount = passingCount;
-            this.failingCount = failingCount;
+            this.passingMethodNames = List.copyOf(passingMethodNames);
+            this.failingMethodNames = List.copyOf(failingMethodNames);
         }
 
         public Path passingFile() {
@@ -199,11 +211,19 @@ public final class ActualResultTestSplitter {
         }
 
         public int passingCount() {
-            return passingCount;
+            return passingMethodNames.size();
         }
 
         public int failingCount() {
-            return failingCount;
+            return failingMethodNames.size();
+        }
+
+        public List<String> passingMethodNames() {
+            return passingMethodNames;
+        }
+
+        public List<String> failingMethodNames() {
+            return failingMethodNames;
         }
     }
 

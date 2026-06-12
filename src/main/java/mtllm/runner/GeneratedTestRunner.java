@@ -21,19 +21,23 @@ import java.util.List;
 public final class GeneratedTestRunner {
     private final Path repoRoot;
     private final Path classesDir;
+    private final Path supportSourceDir;
     private final String junitConsoleJar;
     private final String mavenCommand;
+    private ActualResultTestSplitter.SplitResult lastSplitResult;
 
-    public GeneratedTestRunner(Path repoRoot, Path classesDir, String junitConsoleJar, String mavenCommand) {
+    public GeneratedTestRunner(Path repoRoot, Path classesDir, Path supportSourceDir, String junitConsoleJar, String mavenCommand) {
         this.repoRoot = repoRoot;
         this.classesDir = classesDir;
+        this.supportSourceDir = supportSourceDir;
         this.junitConsoleJar = junitConsoleJar == null ? "" : junitConsoleJar.trim();
         this.mavenCommand = mavenCommand == null || mavenCommand.trim().isEmpty() ? "mvn" : mavenCommand.trim();
     }
 
     public TestRunResult compileAndRun(Path generatedTestFile, PromptConfig config, SutContext sutContext) throws Exception {
+        lastSplitResult = null;
         if (junitConsoleJar.isBlank()) {
-            return runWithMavenIfAvailable(generatedTestFile, config);
+            return runWithMavenIfAvailable(generatedTestFile, config, sutContext);
         }
         Files.createDirectories(classesDir);
 
@@ -44,12 +48,14 @@ public final class GeneratedTestRunner {
         return run(config.generatedClassName());
     }
 
-    private TestRunResult runWithMavenIfAvailable(Path generatedTestFile, PromptConfig config) throws Exception {
+    private TestRunResult runWithMavenIfAvailable(Path generatedTestFile, PromptConfig config, SutContext sutContext) throws Exception {
         if (!Files.isRegularFile(repoRoot.resolve("pom.xml"))) {
             return TestRunResult.skipped(
                     "Generated test was written, but compile/run was skipped because neither "
                             + "JUNIT_PLATFORM_CONSOLE_STANDALONE_JAR nor pom.xml is configured.");
         }
+
+        prepareMavenTestSources(generatedTestFile, config, sutContext);
 
         List<String> command = new ArrayList<>();
         command.add(mavenCommand);
@@ -79,16 +85,59 @@ public final class GeneratedTestRunner {
         }
     }
 
+    private void prepareMavenTestSources(Path generatedTestFile, PromptConfig config, SutContext sutContext) throws IOException {
+        Files.createDirectories(generatedTestFile.getParent());
+        Files.createDirectories(supportSourceDir);
+        clearJavaFiles(supportSourceDir);
+        Path stagedTestSourceDir = repoRoot.resolve("target").resolve("mtllm-test-sources").resolve("junit-tests");
+        Path stagedSupportSourceDir = repoRoot.resolve("target").resolve("mtllm-test-sources").resolve("junit-support");
+        Files.createDirectories(stagedTestSourceDir);
+        Files.createDirectories(stagedSupportSourceDir);
+        clearJavaFiles(stagedTestSourceDir);
+        clearJavaFiles(stagedSupportSourceDir);
+        copyJavaFileIfPresent(generatedTestFile, stagedTestSourceDir);
+        copyJavaFileIfPresent(config.sutClassFile(), supportSourceDir);
+        copyJavaFileIfPresent(config.sutClassFile(), stagedSupportSourceDir);
+        for (SutContext.SourceFile supportFile : sutContext.supportFiles()) {
+            copyJavaFileIfPresent(supportFile.path(), supportSourceDir);
+            copyJavaFileIfPresent(supportFile.path(), stagedSupportSourceDir);
+        }
+        if (config.mode().usesDeveloperMrHelpers()) {
+            copyJavaFileIfPresent(config.developerMrFile(), supportSourceDir);
+            copyJavaFileIfPresent(config.developerMrFile(), stagedSupportSourceDir);
+        }
+    }
+
+    private void copyJavaFileIfPresent(Path sourceFile, Path targetDir) throws IOException {
+        if (sourceFile == null || !Files.isRegularFile(sourceFile)) {
+            return;
+        }
+        Files.copy(sourceFile, targetDir.resolve(sourceFile.getFileName()), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+    }
+
+    private void clearJavaFiles(Path targetDir) throws IOException {
+        try (var stream = Files.list(targetDir)) {
+            for (Path file : stream.filter(path -> path.getFileName().toString().endsWith(".java")).toList()) {
+                Files.deleteIfExists(file);
+            }
+        }
+    }
+
     private TestRunResult splitActualResults(Path generatedTestFile, PromptConfig config, String mavenOutput) throws Exception {
         ActualResultTestSplitter.SplitResult splitResult = ActualResultTestSplitter.split(
                 repoRoot,
                 generatedTestFile,
                 config);
+        lastSplitResult = splitResult;
         return TestRunResult.passed(
                 "Generated candidate tests were executed and split by actual JUnit results.\n"
                         + "Passing tests: " + splitResult.passingCount() + " -> " + splitResult.passingFile() + "\n"
                         + "Failing tests: " + splitResult.failingCount() + " -> " + splitResult.failingFile() + "\n\n"
                         + mavenOutput);
+    }
+
+    public ActualResultTestSplitter.SplitResult lastSplitResult() {
+        return lastSplitResult;
     }
 
     private TestRunResult compile(Path generatedTestFile, PromptConfig config, SutContext sutContext) throws Exception {

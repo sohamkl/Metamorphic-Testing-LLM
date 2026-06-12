@@ -39,6 +39,7 @@ public final class PromptConfigLoader {
         Path sutClassFile = resolveOptionalPath(values.get("SUTClassFile"), repoRoot);
         List<Path> supportFiles = parseSupportFiles(values.get("SUTSupportFiles"), repoRoot);
         Path developerMrFile = resolveOptionalPath(values.get("DeveloperMrFile"), repoRoot);
+        Path outputRoot = resolveOutputRoot(values.get("OutputRoot"), repoRoot, sutClassFile);
         String developerMrSource = readOptionalSource(developerMrFile);
 
         boolean jsonRequired = parseBoolean(values.get("JsonRequired"), false, "JsonRequired");
@@ -68,7 +69,36 @@ public final class PromptConfigLoader {
                 developerMrSource,
                 developerFollowUpMethod,
                 developerAssertMethod,
+                outputRoot,
                 parseNonNegativeInt(values.get("MaxRepairAttempts"), 1, "MaxRepairAttempts"));
+    }
+
+    private static Path resolveOutputRoot(String raw, Path repoRoot, Path sutClassFile) {
+        Path configured = resolveOptionalPath(raw, repoRoot);
+        if (configured != null) {
+            return configured;
+        }
+        Path exampleRoot = inferExampleRoot(sutClassFile, repoRoot);
+        if (exampleRoot != null) {
+            return exampleRoot.resolve("generated").normalize();
+        }
+        return repoRoot.resolve("generated").normalize();
+    }
+
+    private static Path inferExampleRoot(Path sutClassFile, Path repoRoot) {
+        if (sutClassFile == null) {
+            return null;
+        }
+        Path relative;
+        try {
+            relative = repoRoot.relativize(sutClassFile);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+        if (relative.getNameCount() >= 3 && relative.getName(0).toString().equals("examples")) {
+            return repoRoot.resolve(relative.getName(0)).resolve(relative.getName(1)).normalize();
+        }
+        return null;
     }
 
     private static GenerationMode deriveMode(boolean jsonRequired, boolean testSuiteRequired, MRProvider mrProvider) {
@@ -76,8 +106,7 @@ public final class PromptConfigLoader {
             throw new IllegalArgumentException("At least one output is required: set JsonRequired or TestSuiteRequired to true.");
         }
         if (jsonRequired && testSuiteRequired) {
-            throw new IllegalArgumentException(
-                    "JsonRequired=true and TestSuiteRequired=true is not implemented yet. Choose one output for now.");
+            return mrProvider == MRProvider.DEV ? GenerationMode.DEVELOPER_MR_BOTH : GenerationMode.LLM_BOTH;
         }
         if (jsonRequired && mrProvider == MRProvider.DEV) {
             return GenerationMode.DEVELOPER_MR_DATA;

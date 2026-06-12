@@ -1,6 +1,7 @@
 package mtllm.runner;
 
 import mtllm.config.PromptConfig;
+import mtllm.report.HtmlReportWriter;
 import mtllm.sut.SutContext;
 
 import java.io.ByteArrayOutputStream;
@@ -21,15 +22,19 @@ public final class DataGeneratorRunner {
     private final Path repoRoot;
     private final Path classesDir;
     private final Path outputDir;
+    private final Path reportsDir;
+    private ExecutedDataSummary lastSummary = ExecutedDataSummary.empty();
 
-    public DataGeneratorRunner(Path repoRoot, Path classesDir, Path outputDir) {
+    public DataGeneratorRunner(Path repoRoot, Path classesDir, Path outputDir, Path reportsDir) {
         this.repoRoot = repoRoot;
         this.classesDir = classesDir;
         this.outputDir = outputDir;
+        this.reportsDir = reportsDir;
     }
 
     public TestRunResult compileRunAndValidate(Path generatedFile, PromptConfig config, SutContext sutContext)
             throws Exception {
+        lastSummary = ExecutedDataSummary.empty();
         Files.createDirectories(classesDir);
 
         TestRunResult compileResult = compile(generatedFile, config, sutContext);
@@ -53,14 +58,42 @@ public final class DataGeneratorRunner {
         String prettyJson = prettyPrintJsonLike(runResult.output()) + System.lineSeparator();
         Files.writeString(outputFile, prettyJson, StandardCharsets.UTF_8);
 
-        String splitMessage = "";
+        SplitResult splitResult = SplitResult.empty();
         if (config.mode().generatesExecutedMtData()) {
-            splitMessage = splitExecutedMtData(runResult.output(), config);
+            splitResult = splitExecutedMtData(runResult.output(), config);
+        }
+
+        String reportMessage = "";
+        if (config.mode().generatesExecutedMtData()) {
+            Path reportFile = HtmlReportWriter.writeExecutedDataReport(
+                    reportsDir,
+                    config,
+                    sutContext,
+                    splitResult.allEntries,
+                    splitResult.passingEntries,
+                    splitResult.failingEntries,
+                    outputFile,
+                    splitResult.passingFile,
+                    splitResult.failingFile);
+            lastSummary = new ExecutedDataSummary(
+                    splitResult.allEntries,
+                    splitResult.passingEntries,
+                    splitResult.failingEntries,
+                    outputFile,
+                    splitResult.passingFile,
+                    splitResult.failingFile,
+                    reportFile);
+            reportMessage = "\nWrote HTML report to " + reportFile;
         }
 
         return TestRunResult.passed("Wrote generated data JSON to " + outputFile
-                + splitMessage
+                + splitResult.message()
+                + reportMessage
                 + "\n\n" + runResult.output());
+    }
+
+    public ExecutedDataSummary lastSummary() {
+        return lastSummary;
     }
 
     private TestRunResult compile(Path generatedFile, PromptConfig config, SutContext sutContext) throws Exception {
@@ -140,7 +173,7 @@ public final class DataGeneratorRunner {
         return null;
     }
 
-    private String splitExecutedMtData(String rawJson, PromptConfig config) throws IOException {
+    private SplitResult splitExecutedMtData(String rawJson, PromptConfig config) throws IOException {
         List<String> entries = splitTopLevelObjects(rawJson);
         List<String> passing = new ArrayList<>();
         List<String> failing = new ArrayList<>();
@@ -159,10 +192,7 @@ public final class DataGeneratorRunner {
         Files.writeString(passingFile, prettyPrintJsonLike(toJsonArray(passing)) + System.lineSeparator(), StandardCharsets.UTF_8);
         Files.writeString(failingFile, prettyPrintJsonLike(toJsonArray(failing)) + System.lineSeparator(), StandardCharsets.UTF_8);
 
-        return "\nWrote passing data JSON to " + passingFile
-                + "\nWrote failing data JSON to " + failingFile
-                + "\nPassing entries: " + passing.size()
-                + "\nFailing entries: " + failing.size();
+        return new SplitResult(entries, passing, failing, passingFile, failingFile);
     }
 
     private boolean hasPassedValue(String entry, boolean expectedValue) {
@@ -323,6 +353,104 @@ public final class DataGeneratorRunner {
         private ProcessResult(int exitCode, String output) {
             this.exitCode = exitCode;
             this.output = output == null ? "" : output;
+        }
+    }
+
+    public static final class ExecutedDataSummary {
+        private final List<String> allEntries;
+        private final List<String> passingEntries;
+        private final List<String> failingEntries;
+        private final Path fullJsonFile;
+        private final Path passingJsonFile;
+        private final Path failingJsonFile;
+        private final Path reportFile;
+
+        private ExecutedDataSummary(
+                List<String> allEntries,
+                List<String> passingEntries,
+                List<String> failingEntries,
+                Path fullJsonFile,
+                Path passingJsonFile,
+                Path failingJsonFile,
+                Path reportFile) {
+            this.allEntries = List.copyOf(allEntries);
+            this.passingEntries = List.copyOf(passingEntries);
+            this.failingEntries = List.copyOf(failingEntries);
+            this.fullJsonFile = fullJsonFile;
+            this.passingJsonFile = passingJsonFile;
+            this.failingJsonFile = failingJsonFile;
+            this.reportFile = reportFile;
+        }
+
+        private static ExecutedDataSummary empty() {
+            return new ExecutedDataSummary(List.of(), List.of(), List.of(), null, null, null, null);
+        }
+
+        public boolean present() {
+            return reportFile != null;
+        }
+
+        public List<String> allEntries() {
+            return allEntries;
+        }
+
+        public List<String> passingEntries() {
+            return passingEntries;
+        }
+
+        public List<String> failingEntries() {
+            return failingEntries;
+        }
+
+        public Path fullJsonFile() {
+            return fullJsonFile;
+        }
+
+        public Path passingJsonFile() {
+            return passingJsonFile;
+        }
+
+        public Path failingJsonFile() {
+            return failingJsonFile;
+        }
+
+        public Path reportFile() {
+            return reportFile;
+        }
+    }
+
+    private static final class SplitResult {
+        private final List<String> allEntries;
+        private final List<String> passingEntries;
+        private final List<String> failingEntries;
+        private final Path passingFile;
+        private final Path failingFile;
+
+        private SplitResult(
+                List<String> allEntries,
+                List<String> passingEntries,
+                List<String> failingEntries,
+                Path passingFile,
+                Path failingFile) {
+            this.allEntries = allEntries;
+            this.passingEntries = passingEntries;
+            this.failingEntries = failingEntries;
+            this.passingFile = passingFile;
+            this.failingFile = failingFile;
+        }
+
+        private static SplitResult empty() {
+            return new SplitResult(List.of(), List.of(), List.of(), null, null);
+        }
+
+        private String message() {
+            if (passingFile == null || failingFile == null) {
+                return "";
+            }
+            return "\nWrote passing data JSON to " + passingFile
+                    + "\nWrote failing data JSON to " + failingFile
+                    + "\nPassing entries: " + passingEntries.size()
+                    + "\nFailing entries: " + failingEntries.size();
         }
     }
 }

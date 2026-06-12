@@ -53,22 +53,25 @@ public final class App {
 
             PromptConfig config = PromptConfigLoader.load(promptPath, repoRoot);
             SutContext sutContext = SutContextLoader.load(config, repoRoot);
+            Path outputRoot = config.outputRoot();
             LlmClient llmClient = new OpenAiClient(apiKey, model, baseUrl);
             GeneratedTestRunner testRunner = new GeneratedTestRunner(
                     repoRoot,
-                    repoRoot.resolve("generated/junit-tests/classes"),
+                    outputRoot.resolve("junit-tests/classes"),
+                    outputRoot.resolve("junit-support"),
                     junitJar,
                     mavenCommand);
             DataGeneratorRunner dataGeneratorRunner = new DataGeneratorRunner(
                     repoRoot,
-                    repoRoot.resolve("generated/data-generator-code/classes"),
-                    repoRoot.resolve("generated/json-data"));
+                    outputRoot.resolve("data-generator-code/classes"),
+                    outputRoot.resolve("json-data"),
+                    outputRoot.resolve("reports"));
             RepairLoop repairLoop = new RepairLoop(
                     llmClient,
                     testRunner,
                     dataGeneratorRunner,
-                    repoRoot.resolve("generated/junit-tests"),
-                    repoRoot.resolve("generated/data-generator-code"));
+                    outputRoot.resolve("junit-tests"),
+                    outputRoot.resolve("data-generator-code"));
 
             TestRunResult result = repairLoop.generateRunAndRepair(config, sutContext);
             System.out.println("\n--- Result: " + result.status() + " ---");

@@ -30,6 +30,7 @@ public final class PromptConfig {
     private final String developerMrSource;
     private final String developerFollowUpMethod;
     private final String developerAssertMethod;
+    private final Path outputRoot;
     private final int maxRepairAttempts;
 
     public PromptConfig(
@@ -51,6 +52,7 @@ public final class PromptConfig {
             String developerMrSource,
             String developerFollowUpMethod,
             String developerAssertMethod,
+            Path outputRoot,
             int maxRepairAttempts) {
         this.sutClassFile = sutClassFile;
         this.targetFunction = valueOrEmpty(targetFunction);
@@ -72,6 +74,7 @@ public final class PromptConfig {
         this.developerMrSource = valueOrEmpty(developerMrSource);
         this.developerFollowUpMethod = valueOrEmpty(developerFollowUpMethod);
         this.developerAssertMethod = valueOrEmpty(developerAssertMethod);
+        this.outputRoot = outputRoot;
         this.maxRepairAttempts = maxRepairAttempts;
     }
 
@@ -145,8 +148,36 @@ public final class PromptConfig {
         return developerAssertMethod;
     }
 
+    public Path outputRoot() {
+        return outputRoot;
+    }
+
     public int maxRepairAttempts() {
         return maxRepairAttempts;
+    }
+
+    public PromptConfig withOutputMode(GenerationMode newMode, boolean newJsonRequired, boolean newTestSuiteRequired, String newGeneratedClassName) {
+        return new PromptConfig(
+                sutClassFile,
+                targetFunction,
+                sutSupportFiles,
+                sutDescription,
+                mrInput,
+                mrOutput,
+                mr,
+                count,
+                inputDomain,
+                newGeneratedClassName,
+                newMode,
+                newJsonRequired,
+                newTestSuiteRequired,
+                mrProvider,
+                developerMrFile,
+                developerMrSource,
+                developerFollowUpMethod,
+                developerAssertMethod,
+                outputRoot,
+                maxRepairAttempts);
     }
 
     private static String valueOrEmpty(String value) {

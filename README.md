@@ -50,10 +50,12 @@ JUNIT_PLATFORM_CONSOLE_STANDALONE_JAR=/absolute/path/to/junit-platform-console-s
 | `src/main/java/mtllm/runner/` | Compiles, runs, and repairs generated tests |
 | `src/main/java/mtllm/util/` | Small helpers for `.env`, JSON, and code fences |
 | `examples/pricing/` | Example shopping-cart SUT, MR helper, and prompt |
-| `generated/data-generator-code/` | Generated Java code that creates and evaluates JSON data |
-| `generated/json-data/` | Generated JSON data and pass/fail splits |
-| `generated/junit-tests/` | Generated JUnit tests and pass/fail splits |
-| `generated/reports/` | Reserved for HTML or other human-readable reports |
+| `examples/pricing/generated/data-generator-code/` | Generated Java code that creates and evaluates pricing JSON data |
+| `examples/pricing/generated/json-data/` | Generated pricing JSON data and pass/fail splits |
+| `examples/pricing/generated/junit-tests/` | Generated pricing JUnit tests and pass/fail splits |
+| `examples/pricing/generated/junit-support/` | Copied pricing SUT/support/MR sources used only to compile generated JUnit tests |
+| `examples/pricing/generated/reports/` | Generated pricing HTML reports |
+| `src/main/resources/reports/` | FreeMarker templates for generated HTML reports |
 | `prompt.txt` | Active generation config |
 | `prompt.class-level.example.txt` | Template config |
 | `docs/CONFIGURATION.md` | Explanation of output/MR-provider configuration combinations |
@@ -74,6 +76,7 @@ MR:
 Count: 8
 InputDomain: non-null int arrays; include empty arrays, duplicates, negatives, already sorted arrays, reverse sorted arrays
 GeneratedClassName: GeneratedSortUtilMetamorphicTest
+OutputRoot: examples/sorting/generated
 JsonRequired: false
 TestSuiteRequired: true
 MRProvider: LLM
@@ -105,10 +108,18 @@ The current supported combinations are:
 |---|---|---|---|
 | true | false | DEV | JSON data using developer MR helpers |
 | false | true | DEV | JUnit tests using developer MR helpers |
+| true | true | DEV | JSON/report output and JUnit tests using developer MR helpers |
 | true | false | LLM | JSON data using LLM-generated follow-up/assertion logic |
 | false | true | LLM | JUnit tests using LLM-generated follow-up/assertion logic |
+| true | true | LLM | JSON/report output and JUnit tests using LLM-generated MR logic |
 
 Mode-style numbers are no longer needed in `prompt.txt`. Internally, the backend still maps these fields to generation strategies.
+
+When both `JsonRequired` and `TestSuiteRequired` are true, the backend performs two generation passes. If the configured class name ends in `Data`, the JUnit class name is derived by replacing that suffix with `Test`.
+
+`OutputRoot` controls where generated files are written. If it is omitted and the SUT is under
+`examples/<name>/src`, the backend defaults to `examples/<name>/generated`. Otherwise it falls back
+to the root-level `generated` folder.
 
 Generated data code is compiled with plain `javac`, so it must use only the Java standard library and the SUT/support classes. The LLM is instructed to build JSON manually rather than importing Jackson, Gson, or other JSON libraries.
 
@@ -122,14 +133,22 @@ DeveloperAssertMethod: PricingMetamorphicSpec.assertRelation
 
 The LLM then generates source inputs that call those developer-owned methods instead of inventing the follow-up transformation or assertion itself.
 
-With `JsonRequired: true`, JSON is written to `generated/json-data/<GeneratedClassName>.json`. The generated Java data program also computes `followUp`, `sourceOutput`, `followUpOutput`, and `passed`.
+With `JsonRequired: true`, JSON is written to `<OutputRoot>/json-data/<GeneratedClassName>.json`. The generated Java data program also computes `followUp`, `sourceOutput`, `followUpOutput`, and `passed`.
 
 The backend also splits the full JSON into:
 
 ```text
-generated/json-data/<GeneratedClassNameWithoutData>Passing.json
-generated/json-data/<GeneratedClassNameWithoutData>Failing.json
+<OutputRoot>/json-data/<GeneratedClassNameWithoutData>Passing.json
+<OutputRoot>/json-data/<GeneratedClassNameWithoutData>Failing.json
 ```
+
+The backend also writes a FreeMarker-rendered HTML report for executed JSON data:
+
+```text
+<OutputRoot>/reports/<GeneratedClassNameWithoutData>Report.html
+```
+
+The report summarizes the SUT, target method, MR, configuration, passing count, failing count, and expandable pass/fail case details.
 
 ## Run
 
@@ -145,46 +164,47 @@ Run the generator:
 mvn exec:java -Dexec.mainClass=mtllm.OpenaiRunner
 ```
 
-Or compile/run manually without Maven plugins:
-
-```bash
-javac -d out/classes src/main/java/*.java src/main/java/mtllm/*.java src/main/java/mtllm/*/*.java
-java -cp out/classes mtllm.OpenaiRunner
-```
+Use Maven exec for normal runs because it includes runtime dependencies such as FreeMarker automatically.
 
 Generated JUnit candidate classes are first written to:
 
 ```text
-generated/junit-tests/<GeneratedClassName>.java
+<OutputRoot>/junit-tests/<GeneratedClassName>.java
 ```
 
 After Maven/JUnit executes it, the backend rewrites the actual outcomes into:
 
 ```text
-generated/junit-tests/<GeneratedClassNameWithoutTest>PassingTest.java
-generated/junit-tests/<GeneratedClassNameWithoutTest>FailingTest.java
+<OutputRoot>/junit-tests/<GeneratedClassNameWithoutTest>PassingTest.java
+<OutputRoot>/junit-tests/<GeneratedClassNameWithoutTest>FailingTest.java
 ```
 
 Generated Java data-generator source is written to:
 
 ```text
-generated/data-generator-code/<GeneratedClassName>.java
+<OutputRoot>/data-generator-code/<GeneratedClassName>.java
 ```
 
 and the JSON data output is written to:
 
 ```text
-generated/json-data/<GeneratedClassName>.json
+<OutputRoot>/json-data/<GeneratedClassName>.json
 ```
 
 JSON data is also split by actual `passed` value:
 
 ```text
-generated/json-data/<GeneratedClassNameWithoutData>Passing.json
-generated/json-data/<GeneratedClassNameWithoutData>Failing.json
+<OutputRoot>/json-data/<GeneratedClassNameWithoutData>Passing.json
+<OutputRoot>/json-data/<GeneratedClassNameWithoutData>Failing.json
 ```
 
-`generated/` is runtime output. Maven and VS Code are configured to treat `generated/junit-tests/` as the generated JUnit test source root.
+Executed JSON runs also produce:
+
+```text
+<OutputRoot>/reports/<GeneratedClassNameWithoutData>Report.html
+```
+
+Generated artifacts are written under `OutputRoot`, usually inside the relevant example folder. During Maven test execution, the current generated test/support files are staged into `target/mtllm-test-sources` so old examples do not clash with the active run.
 
 If `JUNIT_PLATFORM_CONSOLE_STANDALONE_JAR` is configured, the tool compiles/runs generated tests through the JUnit Platform Console. Otherwise, it uses `mvn test -Dtest=<GeneratedClassName>`. With Maven, JUnit output uses execution-based classification: JUnit assertion failures are treated as discovered failing cases, and the backend splits actual passing and failing `@Test` methods into separate files. Compilation errors, invalid generated code, and infrastructure failures are still sent back to the LLM for up to `MaxRepairAttempts` repair attempts.
 
