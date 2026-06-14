@@ -203,6 +203,7 @@ public final class PromptBuilder {
         prompt.append("The class must contain:\n");
         prompt.append("- A generateSources() method that returns a List of source inputs.\n");
         prompt.append("- generateSources() must generate at least ").append(config.count()).append(" diverse source inputs.\n");
+        appendSourceCountRules(prompt, config);
         prompt.append("- A main(String[] args) method that prints valid JSON to stdout only.\n");
         prompt.append("- The main method must, for each source input:\n");
         prompt.append("  1. call the target SUT method on the source input to compute sourceOutput\n");
@@ -247,6 +248,7 @@ public final class PromptBuilder {
         prompt.append("The class must contain:\n");
         prompt.append("- A generateSources() method that returns a List of source inputs.\n");
         prompt.append("- generateSources() must generate at least ").append(config.count()).append(" diverse source inputs.\n");
+        appendSourceCountRules(prompt, config);
         prompt.append("- A generateFollowUp(source) method that transforms each source input according to MRInput.\n");
         prompt.append("- An assertMetamorphicRelation(sourceOutput, followUpOutput) method that checks MROutput.\n");
         prompt.append("- A main(String[] args) method that prints valid JSON to stdout only.\n");
@@ -284,6 +286,16 @@ public final class PromptBuilder {
         prompt.append("- Make object inputs by using visible constructors, builders, factories, or simple helper methods.\n");
         prompt.append("- Prefer readable deterministic fixtures over unseeded randomness.\n");
         prompt.append("- Output only Java code. No markdown fences and no explanation.\n");
+    }
+
+    private static void appendSourceCountRules(StringBuilder prompt, PromptConfig config) {
+        prompt.append("- The generated code must not stop below the requested count. If Count is large, use deterministic loops, helper factories, or small parameter grids instead of hand-writing every case.\n");
+        prompt.append("- Before returning or printing results, make sure the source list contains at least ")
+                .append(config.count())
+                .append(" entries; add more valid varied cases if needed.\n");
+        prompt.append("- It is acceptable to generate more than ")
+                .append(config.count())
+                .append(" entries, but never fewer.\n");
     }
 
 }

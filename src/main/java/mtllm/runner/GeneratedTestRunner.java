@@ -128,12 +128,21 @@ public final class GeneratedTestRunner {
                 repoRoot,
                 generatedTestFile,
                 config);
+        stageSplitTestsForMaven(splitResult);
         lastSplitResult = splitResult;
         return TestRunResult.passed(
                 "Generated candidate tests were executed and split by actual JUnit results.\n"
                         + "Passing tests: " + splitResult.passingCount() + " -> " + splitResult.passingFile() + "\n"
                         + "Failing tests: " + splitResult.failingCount() + " -> " + splitResult.failingFile() + "\n\n"
                         + mavenOutput);
+    }
+
+    private void stageSplitTestsForMaven(ActualResultTestSplitter.SplitResult splitResult) throws IOException {
+        Path stagedTestSourceDir = repoRoot.resolve("target").resolve("mtllm-test-sources").resolve("junit-tests");
+        Files.createDirectories(stagedTestSourceDir);
+        clearJavaFiles(stagedTestSourceDir);
+        copyJavaFileIfPresent(splitResult.passingFile(), stagedTestSourceDir);
+        copyJavaFileIfPresent(splitResult.failingFile(), stagedTestSourceDir);
     }
 
     public ActualResultTestSplitter.SplitResult lastSplitResult() {
