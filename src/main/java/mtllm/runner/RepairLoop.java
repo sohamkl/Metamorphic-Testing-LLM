@@ -3,6 +3,7 @@ package mtllm.runner;
 import mtllm.config.PromptConfig;
 import mtllm.config.GenerationMode;
 import mtllm.generation.GeneratedCodeWriter;
+import mtllm.generation.GeneratedJUnitCallQualifier;
 import mtllm.generation.GeneratedTestWriter;
 import mtllm.llm.LlmClient;
 import mtllm.prompt.PromptBuilder;
@@ -134,6 +135,7 @@ public final class RepairLoop {
     private Path writeGeneratedFile(PromptConfig config, String code) throws Exception {
         Path generatedFile;
         if (config.mode().generatesJUnit()) {
+            code = GeneratedJUnitCallQualifier.qualifyDeveloperMrCalls(code, config);
             generatedFile = GeneratedTestWriter.write(generatedTestsDir, config.generatedClassName(), code);
             System.out.println("Wrote generated JUnit test to " + generatedFile);
         } else {
