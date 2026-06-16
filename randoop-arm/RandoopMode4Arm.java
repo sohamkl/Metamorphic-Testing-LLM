@@ -102,7 +102,7 @@ public final class RandoopMode4Arm {
             // LlmValueSeeder so the LLM must infer edge cases from the code, not from a comment.
             List<String> sutSources = new ArrayList<>();
             for (String cn : sutClasses) {
-                Path p = findRepoFile(Path.of("src/main/java/" + cn + ".java"));
+                Path p = findRepoFile(Path.of("examples/order/src/" + cn + ".java"));
                 if (Files.exists(p)) {
                     sutSources.add(Files.readString(p, StandardCharsets.UTF_8));
                 } else {
