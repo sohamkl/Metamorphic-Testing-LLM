@@ -26,7 +26,7 @@ public final class Mode4TestEmitter {
             sb.append("    public void test_").append(i).append("() {\n");
             sb.append("        Order source = ").append(constructionCode(sources.get(i))).append(";\n");
             sb.append("        double sourceOutput = OrderUtil.calculateTotal(source);\n");
-            sb.append("        Order followUp = OrderMetamorphicSpec.INSTANCE.generateFollowUp(source);\n");
+            sb.append("        Order followUp = OrderMetamorphicSpec.generateFollowUp(source);\n");
             sb.append("        double followUpOutput = OrderUtil.calculateTotal(followUp);\n");
             sb.append("        OrderMetamorphicSpec.assertRelation(sourceOutput, followUpOutput);\n");
             sb.append("    }\n\n");

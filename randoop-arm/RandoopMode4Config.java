@@ -1,5 +1,3 @@
-import mtllm.spec.MetamorphicSpec;
-
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
@@ -11,11 +9,12 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BiConsumer;
 import java.util.function.Function;
 
 /**
  * Config-driven Mode 4 Randoop runner -- the developer changes ONLY {@code prompt.txt}
- * (plus their {@link MetamorphicSpec} implementation file, which is where the domain logic lives).
+ * (plus their self-contained developer-MR file, which is where the domain logic lives).
  * No Java edits are needed to point the harvester/evaluator/LLM-seeder at a different object SUT.
  *
  * <p>Everything is derived from the same {@code prompt.txt} keys Soham's pipeline already uses:</p>
@@ -23,14 +22,15 @@ import java.util.function.Function;
  *   <li>{@code SUTClassFile} + {@code SUTSupportFiles} -&gt; the class set Randoop builds with, and
  *       the sources shown to the LLM seeder.</li>
  *   <li>{@code TargetFunction} -&gt; the SUT method name + input parameter type (and static-ness).</li>
- *   <li>{@code DeveloperMrFile} -&gt; the {@link MetamorphicSpec} implementation class (its
- *       {@code INSTANCE} field if present, else a no-arg constructor).</li>
+ *   <li>{@code DeveloperMrFile} + {@code DeveloperFollowUpMethod} / {@code DeveloperAssertMethod}
+ *       -&gt; the developer-MR class and the names of its follow-up transform and assertion methods.</li>
  * </ul>
  *
- * <p>The de-dup signature uses the reflection {@link StructuralSignature} auto-default, so no
- * signature is configured. Generics are erased at runtime; the spec is used through the raw
- * {@link MetamorphicSpec} interface, whose synthetic bridge methods cast back to the concrete
- * types -- so reflection + erasure compose cleanly.</p>
+ * <p>The developer-MR is resolved <em>by method name via reflection</em> (matching Soham's
+ * name-based contract), not through a framework interface -- so the spec is a plain self-contained
+ * class with static {@code generateFollowUp}/{@code assertRelation} methods, and the same file
+ * compiles standalone in Soham's pipeline. The de-dup signature uses the reflection
+ * {@link StructuralSignature} auto-default, so no signature is configured.</p>
  *
  * <p>Scope: object SUTs whose target method takes a single reference-type argument and is public.
  * Primitive/array input types and multi-arg target methods are out of scope for this runner.</p>
@@ -63,6 +63,8 @@ public final class RandoopMode4Config {
         String targetFunction = require(cfg, "TargetFunction");
         String developerMrFile = require(cfg, "DeveloperMrFile");
         List<String> supportFiles = splitCsv(cfg.getOrDefault("SUTSupportFiles", ""));
+        String followUpName = simpleMethodName(cfg.getOrDefault("DeveloperFollowUpMethod", "generateFollowUp"));
+        String assertName = simpleMethodName(cfg.getOrDefault("DeveloperAssertMethod", "assertRelation"));
 
         String declaringClassName = classNameOf(sutClassFile);   // e.g. OrderUtil
         String specClassName = classNameOf(developerMrFile);      // e.g. OrderMetamorphicSpec
@@ -81,28 +83,24 @@ public final class RandoopMode4Config {
         Method sutMethod = declaringClass.getMethod(sig.methodName, inputClass);
         Object receiver = sig.isStatic ? null : declaringClass.getDeclaredConstructor().newInstance();
 
+        // Developer MR resolved by NAME (method references via reflection), not via a framework
+        // interface -- so the spec stays a plain self-contained class (Soham's contract). One
+        // self-contained spec therefore satisfies both Soham's pipeline and this harness.
         Class<?> specClass = Class.forName(specClassName);
-        MetamorphicSpec<Object, Object> spec = (MetamorphicSpec<Object, Object>) loadSpec(specClass);
+        Class<?> outputType = sutMethod.getReturnType();
+        Method followUpMethod = specClass.getMethod(followUpName, inputClass);
+        Method assertMethod = findAssertMethod(specClass, assertName, outputType);
+        Function<Object, Object> followUp = src -> invoke(followUpMethod, null, src);
+        BiConsumer<Object, Object> assertRelation = (a, b) -> invoke(assertMethod, null, a, b);
 
-        // SUT as a Function<I,O>; unwrap InvocationTargetException so the SUT's real exception
-        // (not the reflection wrapper) reaches the evaluator's pass/error classification.
-        Function<Object, Object> sut = in -> {
-            try {
-                return sutMethod.invoke(receiver, in);
-            } catch (InvocationTargetException e) {
-                Throwable cause = e.getCause() != null ? e.getCause() : e;
-                if (cause instanceof RuntimeException re) throw re;
-                if (cause instanceof Error err) throw err;
-                throw new RuntimeException(cause);
-            } catch (IllegalAccessException e) {
-                throw new RuntimeException(e);
-            }
-        };
+        // SUT as a Function<I,O>; invoke() unwraps InvocationTargetException so the SUT's real
+        // exception (not the reflection wrapper) reaches the evaluator's pass/error classification.
+        Function<Object, Object> sut = in -> invoke(sutMethod, receiver, in);
 
         RandoopHarvester<Object> harvester =
                 new RandoopHarvester<>((Class<Object>) inputClass, sutClasses);
         Mode4Evaluator<Object, Object> evaluator =
-                new Mode4Evaluator<>(sut, spec, harvester::signatureOf, null);
+                new Mode4Evaluator<>(sut, followUp, assertRelation, harvester::signatureOf, null);
 
         System.out.println("=== Config-driven Mode 4 (from " + promptPath + ") ===");
         System.out.println("input type     : " + inputClass.getName());
@@ -145,13 +143,61 @@ public final class RandoopMode4Config {
         Mode4Evaluator.printReport("LLM-SEEDED Randoop", evaluator.evaluate(llm));
     }
 
-    /** Load a spec instance: prefer a public static INSTANCE field, else a no-arg constructor. */
-    private static Object loadSpec(Class<?> specClass) throws Exception {
+    /**
+     * Invoke a reflected method (static when receiver==null), unwrapping InvocationTargetException
+     * so the real cause -- including the AssertionError that signals an MR violation -- propagates
+     * to the evaluator's pass/bug/error classification rather than the reflection wrapper.
+     */
+    private static Object invoke(Method m, Object receiver, Object... args) {
         try {
-            return specClass.getField("INSTANCE").get(null);
-        } catch (NoSuchFieldException e) {
-            return specClass.getDeclaredConstructor().newInstance();
+            return m.invoke(receiver, args);
+        } catch (InvocationTargetException e) {
+            Throwable cause = e.getCause() != null ? e.getCause() : e;
+            if (cause instanceof RuntimeException re) throw re;
+            if (cause instanceof Error err) throw err;   // AssertionError lands here
+            throw new RuntimeException(cause);
+        } catch (IllegalAccessException e) {
+            throw new RuntimeException(e);
         }
+    }
+
+    /**
+     * Find the developer's assertRelation(outputType, outputType). The assertion's parameter type
+     * must match the SUT's return type; we also try the primitive/boxed counterpart so a spec
+     * written with {@code double} params still resolves against a {@code double}-returning SUT
+     * (and vice versa) -- the boxing gotcha when going name-based instead of interface-based.
+     */
+    private static Method findAssertMethod(Class<?> specClass, String name, Class<?> outputType)
+            throws NoSuchMethodException {
+        try {
+            return specClass.getMethod(name, outputType, outputType);
+        } catch (NoSuchMethodException e) {
+            Class<?> alt = altType(outputType);
+            if (alt != null) {
+                return specClass.getMethod(name, alt, alt);
+            }
+            throw e;
+        }
+    }
+
+    /** Primitive <-> wrapper counterpart for the common numeric/boolean output types, else null. */
+    private static Class<?> altType(Class<?> t) {
+        if (t == double.class) return Double.class;
+        if (t == Double.class) return double.class;
+        if (t == int.class) return Integer.class;
+        if (t == Integer.class) return int.class;
+        if (t == long.class) return Long.class;
+        if (t == Long.class) return long.class;
+        if (t == boolean.class) return Boolean.class;
+        if (t == Boolean.class) return boolean.class;
+        return null;
+    }
+
+    /** "OrderMetamorphicSpec.generateFollowUp" or "X.INSTANCE.foo" -> simple method name "foo". */
+    private static String simpleMethodName(String configured) {
+        String s = configured.trim();
+        int dot = s.lastIndexOf('.');
+        return dot >= 0 ? s.substring(dot + 1) : s;
     }
 
     // ---- config parsing (mirrors mtllm.config.PromptConfigLoader's key:value format) ----

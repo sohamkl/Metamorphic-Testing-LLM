@@ -57,7 +57,8 @@ public final class RandoopMode4Arm {
         RandoopHarvester<Order> harvester = new RandoopHarvester<>(Order.class, sutClasses);
         Mode4Evaluator<Order, Double> evaluator = new Mode4Evaluator<>(
                 OrderUtil::calculateTotal,
-                OrderMetamorphicSpec.INSTANCE,
+                OrderMetamorphicSpec::generateFollowUp,
+                OrderMetamorphicSpec::assertRelation,
                 harvester::signatureOf,
                 o -> o.getItems().size());
 

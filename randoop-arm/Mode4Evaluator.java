@@ -1,9 +1,8 @@
-import mtllm.spec.MetamorphicSpec;
-
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.function.ToIntFunction;
 
@@ -18,9 +17,11 @@ import java.util.function.ToIntFunction;
  * machinery, so the comparison numbers are reliable and fast.</p>
  *
  * <p>Generic over the SUT input type {@code I} and output type {@code O}. To evaluate a new SUT
- * the caller supplies the SUT call as a {@code Function<I,O>}, the developer's
- * {@link MetamorphicSpec}, a signature function (for counting distinct failure shapes), and an
- * optional "size" function used only for the diversity histogram.</p>
+ * the caller supplies the SUT call as a {@code Function<I,O>}, the developer's follow-up transform
+ * ({@code Function<I,I>}) and output-relation assertion ({@code BiConsumer<O,O>}), a signature
+ * function (for counting distinct failure shapes), and an optional "size" function used only for
+ * the diversity histogram. The developer's MR methods are passed by reference (or reflection) so
+ * the spec stays a plain self-contained class -- no framework interface required.</p>
  *
  * @param <I> SUT input type
  * @param <O> SUT output type
@@ -28,22 +29,26 @@ import java.util.function.ToIntFunction;
 public final class Mode4Evaluator<I, O> {
 
     private final Function<? super I, ? extends O> sut;
-    private final MetamorphicSpec<I, O> spec;
+    private final Function<? super I, ? extends I> followUp;
+    private final BiConsumer<? super O, ? super O> assertRelation;
     private final Function<? super I, String> signature;
     private final ToIntFunction<? super I> sizeOf; // nullable -> no histogram
 
     /**
-     * @param sut       the system under test, as input -&gt; output
-     * @param spec      the developer-owned metamorphic relation
-     * @param signature distinct-shape key for failing inputs (use the harvester's signature)
-     * @param sizeOf    optional input "size" for the diversity histogram; null to skip it
+     * @param sut            the system under test, as input -&gt; output
+     * @param followUp       the developer's follow-up transform (source input -&gt; follow-up input)
+     * @param assertRelation the developer's output-relation assertion; throws AssertionError when violated
+     * @param signature      distinct-shape key for failing inputs (use the harvester's signature)
+     * @param sizeOf         optional input "size" for the diversity histogram; null to skip it
      */
     public Mode4Evaluator(Function<? super I, ? extends O> sut,
-                          MetamorphicSpec<I, O> spec,
+                          Function<? super I, ? extends I> followUp,
+                          BiConsumer<? super O, ? super O> assertRelation,
                           Function<? super I, String> signature,
                           ToIntFunction<? super I> sizeOf) {
         this.sut = sut;
-        this.spec = spec;
+        this.followUp = followUp;
+        this.assertRelation = assertRelation;
         this.signature = signature;
         this.sizeOf = sizeOf;
     }
@@ -80,9 +85,9 @@ public final class Mode4Evaluator<I, O> {
             }
             try {
                 O sourceOutput = sut.apply(source);
-                I followUp = spec.generateFollowUp(source);
-                O followUpOutput = sut.apply(followUp);
-                spec.assertRelation(sourceOutput, followUpOutput);
+                I followUpInput = followUp.apply(source);
+                O followUpOutput = sut.apply(followUpInput);
+                assertRelation.accept(sourceOutput, followUpOutput);
                 passed++;
             } catch (AssertionError violated) {
                 bugRevealing++;
