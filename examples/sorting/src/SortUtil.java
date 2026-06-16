@@ -10,7 +10,7 @@ public class SortUtil {
 
     public static void main(String[] args) {
         int[] a = {3, 1, 10, 2};
-        System.out.println(Arrays.toString(sortArray(a))); // [1, 2, 3, 10]
-        System.out.println(Arrays.toString(a));            // [3, 1, 10, 2]
+        System.out.println(Arrays.toString(sortArray(a)));
+        System.out.println(Arrays.toString(a));
     }
 }
