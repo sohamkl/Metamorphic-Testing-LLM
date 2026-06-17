@@ -126,6 +126,7 @@ public final class PromptBuilder {
         prompt.append("Selected workflow: JUnit test-suite generation with developer-defined MR helpers.\n");
         prompt.append("The developer has already written the follow-up transformation and assertion logic.\n");
         prompt.append("You must call these exact methods:\n");
+        prompt.append("- SUT method: ").append(targetMethodCallName(config)).append("\n");
         prompt.append("- Follow-up transformation: ").append(config.developerFollowUpMethod()).append("\n");
         prompt.append("- Output relation assertion: ").append(config.developerAssertMethod()).append("\n\n");
 
@@ -141,6 +142,12 @@ public final class PromptBuilder {
         prompt.append("- No package declaration; import public SUT/helper classes by package name when needed.\n\n");
 
         prompt.append("Strict developer-MR JUnit rules:\n");
+        prompt.append("- Always call the SUT method with its owning class name, for example ")
+                .append(targetMethodCallName(config)).append("(source), not a bare method call.\n");
+        prompt.append("- Always call the developer MR methods with their owning class names, for example ")
+                .append(config.developerFollowUpMethod()).append("(source) and ")
+                .append(config.developerAssertMethod()).append("(sourceOutput, followUpOutput).\n");
+        prompt.append("- Do not use static imports for the SUT method or developer MR methods.\n");
         prompt.append("- Do not generate a generateFollowUp method.\n");
         prompt.append("- Do not generate an assertMetamorphicRelation or assertRelation method.\n");
         prompt.append("- Do not rewrite, duplicate, reinterpret, or inline the developer-provided MR helper logic.\n");
@@ -203,6 +210,7 @@ public final class PromptBuilder {
         prompt.append("The class must contain:\n");
         prompt.append("- A generateSources() method that returns a List of source inputs.\n");
         prompt.append("- generateSources() must generate at least ").append(config.count()).append(" diverse source inputs.\n");
+        appendSourceCountRules(prompt, config);
         prompt.append("- A main(String[] args) method that prints valid JSON to stdout only.\n");
         prompt.append("- The main method must, for each source input:\n");
         prompt.append("  1. call the target SUT method on the source input to compute sourceOutput\n");
@@ -247,6 +255,7 @@ public final class PromptBuilder {
         prompt.append("The class must contain:\n");
         prompt.append("- A generateSources() method that returns a List of source inputs.\n");
         prompt.append("- generateSources() must generate at least ").append(config.count()).append(" diverse source inputs.\n");
+        appendSourceCountRules(prompt, config);
         prompt.append("- A generateFollowUp(source) method that transforms each source input according to MRInput.\n");
         prompt.append("- An assertMetamorphicRelation(sourceOutput, followUpOutput) method that checks MROutput.\n");
         prompt.append("- A main(String[] args) method that prints valid JSON to stdout only.\n");
@@ -284,6 +293,52 @@ public final class PromptBuilder {
         prompt.append("- Make object inputs by using visible constructors, builders, factories, or simple helper methods.\n");
         prompt.append("- Prefer readable deterministic fixtures over unseeded randomness.\n");
         prompt.append("- Output only Java code. No markdown fences and no explanation.\n");
+    }
+
+    private static void appendSourceCountRules(StringBuilder prompt, PromptConfig config) {
+        prompt.append("- The generated code must not stop below the requested count. If Count is large, use deterministic loops, helper factories, or small parameter grids instead of hand-writing every case.\n");
+        prompt.append("- Before returning or printing results, make sure the source list contains at least ")
+                .append(config.count())
+                .append(" entries; add more valid varied cases if needed.\n");
+        prompt.append("- It is acceptable to generate more than ")
+                .append(config.count())
+                .append(" entries, but never fewer.\n");
+    }
+
+    private static String targetMethodCallName(PromptConfig config) {
+        String targetFunction = config.targetFunction().trim();
+        if (targetFunction.isBlank()) {
+            return "the target SUT method";
+        }
+
+        String withoutParameters = targetFunction;
+        int openParen = withoutParameters.indexOf('(');
+        if (openParen >= 0) {
+            withoutParameters = withoutParameters.substring(0, openParen).trim();
+        }
+
+        String[] tokens = withoutParameters.split("\\s+");
+        String methodReference = tokens[tokens.length - 1].trim();
+        if (methodReference.contains(".")) {
+            return methodReference;
+        }
+
+        String className = classNameFromPath(config.sutClassFile());
+        if (className.isBlank()) {
+            return methodReference;
+        }
+        return className + "." + methodReference;
+    }
+
+    private static String classNameFromPath(java.nio.file.Path path) {
+        if (path == null) {
+            return "";
+        }
+        String fileName = path.getFileName().toString();
+        if (fileName.endsWith(".java")) {
+            return fileName.substring(0, fileName.length() - ".java".length());
+        }
+        return fileName;
     }
 
 }
