@@ -6,6 +6,8 @@ import mtllm.llm.LlmClient;
 import mtllm.llm.OpenAiClient;
 import mtllm.util.DotEnv;
 
+import randoop.sequence.Variable;
+
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
@@ -75,25 +77,90 @@ public final class RandoopDataGenerator {
             seederClient = new OpenAiClient(apiKey, model, baseUrl);
         }
 
-        String json = new RandoopDataGenerator(15000).generate(config, repoRoot, seederClient, seeded);
-        Files.writeString(outJson, json, StandardCharsets.UTF_8);
+        Result result = new RandoopDataGenerator(15000).generateAll(config, repoRoot, seederClient, seeded);
+        Files.writeString(outJson, result.json(), StandardCharsets.UTF_8);
+
+        // Object JUnit suite (approach C): emit passing/failing classes directly from the in-process
+        // MR verdicts -- Randoop + the developer MR decide pass/fail deterministically, so there is no
+        // guess to verify by re-running (unlike the LLM path). The classes land in the example's
+        // registered junit-tests source dir so `mvn test` picks them up.
+        if (config.testSuiteRequired()) {
+            Path junitDir = config.outputRoot().resolve("junit-tests");
+            Files.createDirectories(junitDir);
+            Files.writeString(junitDir.resolve(result.passingClassName() + ".java"),
+                    result.passingSource(), StandardCharsets.UTF_8);
+            Files.writeString(junitDir.resolve(result.failingClassName() + ".java"),
+                    result.failingSource(), StandardCharsets.UTF_8);
+            System.err.println("[randoop] wrote JUnit suite: "
+                    + result.passingClassName() + " (" + result.passingCount() + " passing), "
+                    + result.failingClassName() + " (" + result.failingCount() + " failing)");
+        }
     }
 
     /**
-     * Harvest sources and emit the executed-MT JSON array.
+     * Backward-compatible JSON-only entry: harvest, evaluate, and return the executed-MT JSON array.
      *
      * @param seeded       if true, ask the LLM (via {@code seederClient}) for domain seed values and
      *                     run multi-seed harvesting; if false, raw Randoop.
      * @param seederClient LLM client for the hybrid seeding step; ignored when {@code seeded} is false.
      */
-    @SuppressWarnings("unchecked")
     public String generate(PromptConfig config, Path repoRoot, LlmClient seederClient, boolean seeded)
             throws Exception {
-        String sutClassName = classNameOf(config.sutClassFile());
-        String specClassName = classNameOf(config.developerMrFile());
+        return generateAll(config, repoRoot, seederClient, seeded).json();
+    }
 
-        Class<?> sutClass = Class.forName(sutClassName);
-        Class<?> specClass = Class.forName(specClassName);
+    /**
+     * Harvest once and produce every requested artifact from the same evaluated cases: the
+     * executed-MT JSON array always, and the rendered passing/failing JUnit test-class sources for
+     * the object suite (approach C). Sharing one harvest+evaluate pass keeps the JSON entries and the
+     * JUnit {@code @Test} methods in lock-step -- same distinct shapes, same pass/fail verdicts.
+     */
+    public Result generateAll(PromptConfig config, Path repoRoot, LlmClient seederClient, boolean seeded)
+            throws Exception {
+        MethodBundle bundle = resolveMethods(config);
+        List<RandoopHarvester.Harvested<Object>> harvested =
+                harvestSources(config, repoRoot, seederClient, seeded, bundle);
+
+        List<Evaluated> kept = new ArrayList<>();
+        for (RandoopHarvester.Harvested<Object> h : harvested) {
+            Evaluated evaluated = evaluate(h, bundle);
+            if (evaluated != null) {
+                kept.add(evaluated);
+            }
+        }
+
+        String json = emitJson(kept);
+
+        String base = baseName(config.generatedClassName());
+        String sutCallee = sutCallee(bundle);
+        String followUpCallee = bundle.specClass.getSimpleName() + "." + bundle.followUpMethod.getName();
+        String assertCallee = bundle.specClass.getSimpleName() + "." + bundle.assertMethod.getName();
+
+        List<RandoopJUnitEmitter.Case> passingCases = new ArrayList<>();
+        List<RandoopJUnitEmitter.Case> failingCases = new ArrayList<>();
+        for (Evaluated e : kept) {
+            RandoopJUnitEmitter.Case testCase = toCase(e.harvested);
+            if (testCase == null) {
+                continue;   // no usable construction variable; cannot render this shape as a test
+            }
+            (e.passed ? passingCases : failingCases).add(testCase);
+        }
+
+        String passingClass = base + "PassingTest";
+        String failingClass = base + "FailingTest";
+        String passingSource = RandoopJUnitEmitter.renderClass(
+                passingClass, passingCases, sutCallee, followUpCallee, assertCallee);
+        String failingSource = RandoopJUnitEmitter.renderClass(
+                failingClass, failingCases, sutCallee, followUpCallee, assertCallee);
+
+        return new Result(json, passingClass, failingClass, passingSource, failingSource,
+                passingCases.size(), failingCases.size());
+    }
+
+    /** Reflect the SUT method (+ receiver) and the developer MR follow-up/assert methods by name. */
+    private MethodBundle resolveMethods(PromptConfig config) throws Exception {
+        Class<?> sutClass = Class.forName(classNameOf(config.sutClassFile()));
+        Class<?> specClass = Class.forName(classNameOf(config.developerMrFile()));
 
         Method sutMethod = singleArgMethod(sutClass, methodName(config.targetFunction()));
         Class<?> inputType = sutMethod.getParameterTypes()[0];
@@ -104,17 +171,22 @@ public final class RandoopDataGenerator {
 
         Method followUpMethod = specClass.getMethod(simpleName(config.developerFollowUpMethod()), inputType);
         Method assertMethod = findAssertMethod(specClass, simpleName(config.developerAssertMethod()), outputType);
+        return new MethodBundle(sutClass, specClass, sutMethod, sutReceiver, followUpMethod, assertMethod, inputType);
+    }
 
+    /** Harvest structurally-distinct sources (raw, or LLM-seeded multi-seed) paired with sequences. */
+    @SuppressWarnings("unchecked")
+    private List<RandoopHarvester.Harvested<Object>> harvestSources(
+            PromptConfig config, Path repoRoot, LlmClient seederClient, boolean seeded, MethodBundle bundle)
+            throws Exception {
         Set<String> classNames = new LinkedHashSet<>();
-        classNames.add(sutClassName);
+        classNames.add(classNameOf(config.sutClassFile()));
         for (Path support : config.sutSupportFiles()) {
             classNames.add(classNameOf(support));
         }
-
         RandoopHarvester<Object> harvester =
-                new RandoopHarvester<>((Class<Object>) inputType, classNames);
+                new RandoopHarvester<>((Class<Object>) bundle.inputType, classNames);
 
-        List<Object> sources;
         if (seeded && seederClient != null) {
             // Prefer the developer's InputDomain description (concise, authoritative, scales to any
             // SUT size); fall back to reading the SUT source code when no domain is provided.
@@ -126,53 +198,95 @@ public final class RandoopDataGenerator {
                 seeds = LlmValueSeeder.generateSeedsFromCode(seederClient, readSutSources(repoRoot, config));
             }
             int perSeedBudget = Math.max(2000, timeLimitMillis / RANDOM_SEEDS.length);
-            sources = harvester.harvestMultiSeed(perSeedBudget, seeds, RANDOM_SEEDS);
-        } else {
-            sources = harvester.harvest(timeLimitMillis);
+            return harvester.harvestSequencesMultiSeed(perSeedBudget, seeds, RANDOM_SEEDS);
         }
-
-        return emitJson(sources, sutMethod, sutReceiver, followUpMethod, assertMethod);
+        return harvester.harvestSequences(timeLimitMillis, null, 0L);
     }
 
-    private String emitJson(List<Object> sources, Method sutMethod, Object sutReceiver,
-                            Method followUpMethod, Method assertMethod) {
+    /**
+     * Run the SUT + developer MR on one harvested source. Returns null (skip) when the SUT or
+     * transform throws or the assertion errors unexpectedly; an {@code AssertionError} from the
+     * assertion is the MR-violated (failing) verdict, not a skip.
+     */
+    private Evaluated evaluate(RandoopHarvester.Harvested<Object> h, MethodBundle b) {
+        Object source = h.value();
+        Object sourceOutput;
+        Object followUp;
+        Object followUpOutput;
+        try {
+            sourceOutput = invoke(b.sutMethod, b.sutReceiver, source);
+            followUp = invoke(b.followUpMethod, null, source);
+            followUpOutput = invoke(b.sutMethod, b.sutReceiver, followUp);
+        } catch (Throwable transformOrSutError) {
+            return null;
+        }
+        boolean passed;
+        try {
+            invoke(b.assertMethod, null, sourceOutput, followUpOutput);
+            passed = true;
+        } catch (AssertionError relationViolated) {
+            passed = false;
+        } catch (Throwable unexpected) {
+            return null;
+        }
+        return new Evaluated(h, source, followUp, sourceOutput, followUpOutput, passed);
+    }
+
+    private String emitJson(List<Evaluated> cases) {
         StringBuilder json = new StringBuilder("[");
         boolean first = true;
-        for (Object source : sources) {
-            Object sourceOutput;
-            Object followUp;
-            Object followUpOutput;
-            boolean passed;
-            try {
-                sourceOutput = invoke(sutMethod, sutReceiver, source);
-                followUp = invoke(followUpMethod, null, source);
-                followUpOutput = invoke(sutMethod, sutReceiver, followUp);
-            } catch (Throwable transformOrSutError) {
-                // A source the SUT or transform can't handle is not a metamorphic result; skip it.
-                continue;
-            }
-            try {
-                invoke(assertMethod, null, sourceOutput, followUpOutput);
-                passed = true;
-            } catch (AssertionError relationViolated) {
-                passed = false;
-            } catch (Throwable unexpected) {
-                continue;
-            }
-
+        for (Evaluated e : cases) {
             if (!first) {
                 json.append(',');
             }
             first = false;
-            json.append("{\"source\":").append(JsonSerializer.toJson(source))
-                    .append(",\"followUp\":").append(JsonSerializer.toJson(followUp))
-                    .append(",\"sourceOutput\":").append(JsonSerializer.toJson(sourceOutput))
-                    .append(",\"followUpOutput\":").append(JsonSerializer.toJson(followUpOutput))
-                    .append(",\"passed\":").append(passed)
+            json.append("{\"source\":").append(JsonSerializer.toJson(e.source))
+                    .append(",\"followUp\":").append(JsonSerializer.toJson(e.followUp))
+                    .append(",\"sourceOutput\":").append(JsonSerializer.toJson(e.sourceOutput))
+                    .append(",\"followUpOutput\":").append(JsonSerializer.toJson(e.followUpOutput))
+                    .append(",\"passed\":").append(e.passed)
                     .append('}');
         }
         json.append(']');
         return json.toString();
+    }
+
+    /**
+     * Render the truncated Randoop construction code for a harvested shape: statements
+     * {@code 0..declIndex} of the variable that holds the object, which drops the trailing
+     * exploration statements Randoop appended after building it. Returns null when no variable was
+     * captured (cannot render the shape as a test).
+     */
+    private RandoopJUnitEmitter.Case toCase(RandoopHarvester.Harvested<Object> h) {
+        Variable v = h.variable();
+        if (v == null) {
+            return null;
+        }
+        int declIndex = v.getDeclIndex();
+        StringBuilder code = new StringBuilder();
+        for (int i = 0; i <= declIndex; i++) {
+            code.append(h.sequence().statementToCodeString(i)).append('\n');
+        }
+        return new RandoopJUnitEmitter.Case(code.toString(), v.getName());
+    }
+
+    /** Static SUT -> {@code Class.method}; instance SUT -> {@code new Class().method}. */
+    private static String sutCallee(MethodBundle b) {
+        String method = b.sutMethod.getName();
+        if (Modifier.isStatic(b.sutMethod.getModifiers())) {
+            return b.sutClass.getSimpleName() + "." + method;
+        }
+        return "new " + b.sutClass.getSimpleName() + "()." + method;
+    }
+
+    private static String baseName(String generatedClassName) {
+        if (generatedClassName.endsWith("Data")) {
+            return generatedClassName.substring(0, generatedClassName.length() - "Data".length());
+        }
+        if (generatedClassName.endsWith("Test")) {
+            return generatedClassName.substring(0, generatedClassName.length() - "Test".length());
+        }
+        return generatedClassName;
     }
 
     private List<String> readSutSources(Path repoRoot, PromptConfig config) throws Exception {
@@ -259,5 +373,53 @@ public final class RandoopDataGenerator {
         String s = qualified.trim();
         int dot = s.lastIndexOf('.');
         return dot >= 0 ? s.substring(dot + 1) : s;
+    }
+
+    /** All artifacts produced from one harvest pass: JSON plus the two JUnit class sources. */
+    public record Result(String json, String passingClassName, String failingClassName,
+                         String passingSource, String failingSource,
+                         int passingCount, int failingCount) {
+    }
+
+    /** Reflected SUT + developer-MR methods (resolved once, reused for JSON and JUnit emission). */
+    private static final class MethodBundle {
+        private final Class<?> sutClass;
+        private final Class<?> specClass;
+        private final Method sutMethod;
+        private final Object sutReceiver;
+        private final Method followUpMethod;
+        private final Method assertMethod;
+        private final Class<?> inputType;
+
+        private MethodBundle(Class<?> sutClass, Class<?> specClass, Method sutMethod, Object sutReceiver,
+                             Method followUpMethod, Method assertMethod, Class<?> inputType) {
+            this.sutClass = sutClass;
+            this.specClass = specClass;
+            this.sutMethod = sutMethod;
+            this.sutReceiver = sutReceiver;
+            this.followUpMethod = followUpMethod;
+            this.assertMethod = assertMethod;
+            this.inputType = inputType;
+        }
+    }
+
+    /** One harvested source after running the SUT + developer MR: outputs and the pass/fail verdict. */
+    private static final class Evaluated {
+        private final RandoopHarvester.Harvested<Object> harvested;
+        private final Object source;
+        private final Object followUp;
+        private final Object sourceOutput;
+        private final Object followUpOutput;
+        private final boolean passed;
+
+        private Evaluated(RandoopHarvester.Harvested<Object> harvested, Object source, Object followUp,
+                          Object sourceOutput, Object followUpOutput, boolean passed) {
+            this.harvested = harvested;
+            this.source = source;
+            this.followUp = followUp;
+            this.sourceOutput = sourceOutput;
+            this.followUpOutput = followUpOutput;
+            this.passed = passed;
+        }
     }
 }

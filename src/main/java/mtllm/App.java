@@ -119,12 +119,18 @@ public final class App {
                 config.outputRoot().resolve("randoop"));
 
         System.out.println("Generating source inputs with Randoop (" + config.inputGenerator() + ")...");
-        String json = runner.generate(config, promptPath);
-        TestRunResult result = dataGeneratorRunner.writeSplitAndReport(json, dataConfig, sutContext);
+        RandoopInputRunner.GenerationResult generation = runner.generate(config, promptPath);
+        TestRunResult result = dataGeneratorRunner.writeSplitAndReport(generation.json(), dataConfig, sutContext);
 
-        if (config.testSuiteRequired()) {
-            System.out.println("Note: Randoop input mode produced JSON data only. The Randoop "
-                    + "JUnit-suite path (generic object construction code) is phase 2 and was skipped.");
+        if (generation.suiteEmitted()) {
+            System.out.println("Wrote Randoop object JUnit suite:");
+            System.out.println("  passing -> " + generation.passingFile());
+            System.out.println("  failing -> " + generation.failingFile());
+            if (generation.suiteCompiled()) {
+                System.out.println("  suite compile-gate: PASSED");
+            } else {
+                System.out.println("  suite compile-gate: FAILED/skipped\n" + generation.suiteCompileOutput());
+            }
         }
         return result;
     }

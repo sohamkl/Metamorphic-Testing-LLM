@@ -16,10 +16,11 @@ The backend supports configurable JSON/JUnit outputs and developer- or LLM-provi
 
 | What | Why |
 |------|-----|
-| JDK 11+ | Compile and run the backend |
+| JDK 17+ | Compile and run the backend (the Randoop input-generation mode requires Java 17) |
 | Maven | Build the project and resolve JUnit 5 |
-| OpenAI API key | Generate the JUnit test class |
+| OpenAI API key | LLM input generation and HYBRID seeding (raw `RANDOOP` input generation makes no API calls) |
 | JUnit Platform Console Standalone jar | Optional alternative to Maven for compiling/running generated JUnit tests |
+| Randoop | Bundled — `lib/randoop-all-4.3.4.jar` is vendored and wired into `pom.xml` (system scope), so no separate install is needed for the `RANDOOP`/`HYBRID` input modes |
 
 ## Configuration
 
@@ -47,8 +48,10 @@ JUNIT_PLATFORM_CONSOLE_STANDALONE_JAR=/absolute/path/to/junit-platform-console-s
 | `src/main/java/mtllm/prompt/` | Builds initial and repair prompts |
 | `src/main/java/mtllm/llm/` | LLM provider interface and OpenAI client |
 | `src/main/java/mtllm/generation/` | Writes generated JUnit code |
+| `src/main/java/mtllm/randoop/` | Randoop input-generation mode: harvests objects, serializes them, and emits the object JUnit suite |
 | `src/main/java/mtllm/runner/` | Compiles, runs, and repairs generated tests |
 | `src/main/java/mtllm/util/` | Small helpers for `.env`, JSON, and code fences |
+| `lib/randoop-all-4.3.4.jar` | Vendored Randoop jar (system-scoped dependency in `pom.xml`) |
 | `examples/pricing/` | Example shopping-cart SUT, MR helper, and prompt |
 | `examples/pricing/generated/data-generator-code/` | Generated Java code that creates and evaluates pricing JSON data |
 | `examples/pricing/generated/json-data/` | Generated pricing JSON data and pass/fail splits |
@@ -114,6 +117,44 @@ The current supported combinations are:
 | true | true | LLM | JSON/report output and JUnit tests using LLM-generated MR logic |
 
 Mode-style numbers are no longer needed in `prompt.txt`. Internally, the backend still maps these fields to generation strategies.
+
+### Input generation: LLM, Randoop, or hybrid
+
+By default the **LLM** generates the source inputs. An optional `InputGenerator` field lets you generate them with [Randoop](https://randoop.github.io/randoop/) (feedback-directed random test generation) instead, or with a hybrid of both:
+
+```text
+InputGenerator: LLM
+```
+
+`InputGenerator` accepts:
+
+| Value | Source inputs come from | API calls |
+|---|---|---|
+| `LLM` (default) | the LLM (existing behavior) | yes |
+| `RANDOOP` | Randoop, building objects by calling the SUT's own constructors/methods | none (fully offline) |
+| `HYBRID` | the LLM suggests seed values, then Randoop builds objects from them at scale | one small seeding call |
+
+Key points:
+
+- **`RANDOOP` and `HYBRID` require `MRProvider: DEV`.** Randoop only generates source *inputs*; the metamorphic relation (follow-up transform + assertion) must be developer-owned. There is no LLM-written oracle on this path, so the run errors clearly if combined with `MRProvider: LLM`.
+- **Works for any object or array.** Randoop constructs inputs from the SUT's visible API, so object SUTs (e.g. an `Order` with a `List<LineItem>`), array SUTs (`double[][]`), and nested object graphs (`Cart` → `List<CartItem>`) are all supported with no per-SUT serialization code.
+- **Produces the same outputs as the LLM path.** With `JsonRequired: true` you get the JSON data + pass/fail split + HTML report; with `TestSuiteRequired: true` you get the object JUnit suite, emitted **pre-split** into `…PassingTest`/`…FailingTest` (Randoop knows each verdict in-process, so it does not need to run the suite to discover failures).
+- **Seeding source (HYBRID):** the LLM is asked for seed values from the `InputDomain` description when present, otherwise from the SUT source. `InputDomain` values are coarser (domain-level), while code-derived values can straddle exact boundaries.
+- The Randoop time budget is fixed at 15s; Randoop runs in a subprocess so the SUT classes are genuinely on its classpath.
+
+Example (Randoop builds the carts, developer owns the MR):
+
+```text
+SUTClassFile: examples/pricing/src/PricingEngine.java
+TargetFunction: public static BigDecimal calculateDiscountedSubtotal(Cart cart)
+InputGenerator: HYBRID
+JsonRequired: true
+TestSuiteRequired: true
+MRProvider: DEV
+DeveloperMrFile: examples/pricing/mr/PricingMetamorphicSpec.java
+DeveloperFollowUpMethod: PricingMetamorphicSpec.generateFollowUp
+DeveloperAssertMethod: PricingMetamorphicSpec.assertRelation
+```
 
 When both `JsonRequired` and `TestSuiteRequired` are true, the backend performs two generation passes. If the configured class name ends in `Data`, the JUnit class name is derived by replacing that suffix with `Test`.
 
