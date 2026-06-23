@@ -106,6 +106,15 @@ public final class GeneratedTestRunner {
             copyJavaFileIfPresent(config.developerMrFile(), supportSourceDir);
             copyJavaFileIfPresent(config.developerMrFile(), stagedSupportSourceDir);
         }
+        Path generatedDataDir = config.outputRoot().resolve("data-generator-code");
+        if (Files.isDirectory(generatedDataDir)) {
+            try (var stream = Files.list(generatedDataDir)) {
+                for (Path file : stream.filter(path -> path.getFileName().toString().endsWith(".java")).toList()) {
+                    copyJavaFileIfPresent(file, supportSourceDir);
+                    copyJavaFileIfPresent(file, stagedSupportSourceDir);
+                }
+            }
+        }
     }
 
     private void copyJavaFileIfPresent(Path sourceFile, Path targetDir) throws IOException {
