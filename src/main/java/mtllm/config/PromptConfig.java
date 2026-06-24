@@ -32,6 +32,7 @@ public final class PromptConfig {
     private final String developerAssertMethod;
     private final Path outputRoot;
     private final int maxRepairAttempts;
+    private final InputGenerator inputGenerator;
 
     public PromptConfig(
             Path sutClassFile,
@@ -53,7 +54,8 @@ public final class PromptConfig {
             String developerFollowUpMethod,
             String developerAssertMethod,
             Path outputRoot,
-            int maxRepairAttempts) {
+            int maxRepairAttempts,
+            InputGenerator inputGenerator) {
         this.sutClassFile = sutClassFile;
         this.targetFunction = valueOrEmpty(targetFunction);
         this.sutSupportFiles = Collections.unmodifiableList(new ArrayList<>(sutSupportFiles));
@@ -76,6 +78,7 @@ public final class PromptConfig {
         this.developerAssertMethod = valueOrEmpty(developerAssertMethod);
         this.outputRoot = outputRoot;
         this.maxRepairAttempts = maxRepairAttempts;
+        this.inputGenerator = inputGenerator == null ? InputGenerator.LLM : inputGenerator;
     }
 
     public Path sutClassFile() {
@@ -156,6 +159,10 @@ public final class PromptConfig {
         return maxRepairAttempts;
     }
 
+    public InputGenerator inputGenerator() {
+        return inputGenerator;
+    }
+
     public PromptConfig withOutputMode(GenerationMode newMode, boolean newJsonRequired, boolean newTestSuiteRequired, String newGeneratedClassName) {
         return new PromptConfig(
                 sutClassFile,
@@ -177,7 +184,8 @@ public final class PromptConfig {
                 developerFollowUpMethod,
                 developerAssertMethod,
                 outputRoot,
-                maxRepairAttempts);
+                maxRepairAttempts,
+                inputGenerator);
     }
 
     private static String valueOrEmpty(String value) {

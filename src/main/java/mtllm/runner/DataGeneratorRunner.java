@@ -53,14 +53,29 @@ public final class DataGeneratorRunner {
                     + "\n\nOutput:\n" + runResult.output());
         }
 
+        return writeSplitAndReport(runResult.output(), config, sutContext);
+    }
+
+    /**
+     * Write the executed-MT JSON, split it into passing/failing, and emit the HTML report.
+     *
+     * <p>Shared seam: the LLM data-generator path calls this after running the generated class;
+     * the Randoop input mode calls it directly with the JSON it produced in-process. The split and
+     * report run only for executed-MT modes ({@code generatesExecutedMtData()}).
+     * {@code executedJson} must be a JSON array of
+     * {@code {source, followUp, sourceOutput, followUpOutput, passed}} entries.</p>
+     */
+    public TestRunResult writeSplitAndReport(String executedJson, PromptConfig config, SutContext sutContext)
+            throws Exception {
+        lastSummary = ExecutedDataSummary.empty();
         Files.createDirectories(outputDir);
         Path outputFile = outputDir.resolve(config.generatedClassName() + ".json");
-        String prettyJson = prettyPrintJsonLike(runResult.output()) + System.lineSeparator();
+        String prettyJson = prettyPrintJsonLike(executedJson) + System.lineSeparator();
         Files.writeString(outputFile, prettyJson, StandardCharsets.UTF_8);
 
         SplitResult splitResult = SplitResult.empty();
         if (config.mode().generatesExecutedMtData()) {
-            splitResult = splitExecutedMtData(runResult.output(), config);
+            splitResult = splitExecutedMtData(executedJson, config);
         }
 
         String reportMessage = "";
@@ -91,7 +106,7 @@ public final class DataGeneratorRunner {
         return TestRunResult.passed("Wrote generated data JSON to " + outputFile
                 + splitResult.message()
                 + reportMessage
-                + "\n\n" + runResult.output());
+                + "\n\n" + executedJson);
     }
 
     public ExecutedDataSummary lastSummary() {

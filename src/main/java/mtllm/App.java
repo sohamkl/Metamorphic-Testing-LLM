@@ -1,9 +1,12 @@
 package mtllm;
 
+import mtllm.config.GenerationMode;
+import mtllm.config.MRProvider;
 import mtllm.config.PromptConfig;
 import mtllm.config.PromptConfigLoader;
 import mtllm.llm.LlmClient;
 import mtllm.llm.OpenAiClient;
+import mtllm.randoop.RandoopInputRunner;
 import mtllm.runner.DataGeneratorRunner;
 import mtllm.runner.GeneratedTestRunner;
 import mtllm.runner.RepairLoop;
@@ -73,7 +76,12 @@ public final class App {
                     outputRoot.resolve("junit-tests"),
                     outputRoot.resolve("data-generator-code"));
 
-            TestRunResult result = repairLoop.generateRunAndRepair(config, sutContext);
+            TestRunResult result;
+            if (config.inputGenerator().usesRandoop()) {
+                result = runRandoop(config, sutContext, repoRoot, promptPath, dataGeneratorRunner);
+            } else {
+                result = repairLoop.generateRunAndRepair(config, sutContext);
+            }
             System.out.println("\n--- Result: " + result.status() + " ---");
             if (!result.output().isBlank()) {
                 System.out.println(result.output());
@@ -83,5 +91,57 @@ public final class App {
             e.printStackTrace(System.err);
             System.exit(1);
         }
+    }
+
+    /**
+     * Randoop input-generation path (phase 1: JSON data). Harvests source inputs with Randoop in a
+     * subprocess, then runs the shared split/report seam. Requires MRProvider: DEV.
+     */
+    private static TestRunResult runRandoop(
+            PromptConfig config, SutContext sutContext, Path repoRoot, Path promptPath,
+            DataGeneratorRunner dataGeneratorRunner) throws Exception {
+        if (config.mrProvider() != MRProvider.DEV) {
+            return TestRunResult.failed("InputGenerator " + config.inputGenerator()
+                    + " requires MRProvider: DEV -- Randoop applies the developer-owned MR in-process; "
+                    + "there is no LLM-written oracle in this path.");
+        }
+
+        // Derive the executed-data sub-config so writeSplitAndReport runs the passing/failing split
+        // + report (the combined BOTH mode does not, by itself, generate executed MT data).
+        String baseName = stripGeneratedSuffix(config.generatedClassName());
+        PromptConfig dataConfig = config.withOutputMode(
+                GenerationMode.DEVELOPER_MR_DATA, true, false, baseName + "Data");
+
+        RandoopInputRunner runner = new RandoopInputRunner(
+                repoRoot,
+                repoRoot.resolve("lib/randoop-all-4.3.4.jar"),
+                repoRoot.resolve("target/classes"),
+                config.outputRoot().resolve("randoop"));
+
+        System.out.println("Generating source inputs with Randoop (" + config.inputGenerator() + ")...");
+        RandoopInputRunner.GenerationResult generation = runner.generate(config, promptPath);
+        TestRunResult result = dataGeneratorRunner.writeSplitAndReport(generation.json(), dataConfig, sutContext);
+
+        if (generation.suiteEmitted()) {
+            System.out.println("Wrote Randoop object JUnit suite:");
+            System.out.println("  passing -> " + generation.passingFile());
+            System.out.println("  failing -> " + generation.failingFile());
+            if (generation.suiteCompiled()) {
+                System.out.println("  suite compile-gate: PASSED");
+            } else {
+                System.out.println("  suite compile-gate: FAILED/skipped\n" + generation.suiteCompileOutput());
+            }
+        }
+        return result;
+    }
+
+    private static String stripGeneratedSuffix(String name) {
+        if (name.endsWith("Data")) {
+            return name.substring(0, name.length() - "Data".length());
+        }
+        if (name.endsWith("Test")) {
+            return name.substring(0, name.length() - "Test".length());
+        }
+        return name;
     }
 }
