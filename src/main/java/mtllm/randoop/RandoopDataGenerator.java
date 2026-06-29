@@ -49,7 +49,7 @@ public final class RandoopDataGenerator {
     }
 
     /**
-     * Subprocess entry point: {@code RandoopDataGenerator <prompt.txt> <out.json>}.
+     * Subprocess entry point: {@code RandoopDataGenerator <prompt.yaml> <out.json>}.
      *
      * <p>Run in a separate JVM by the pipeline so the SUT classes are genuinely on the classpath
      * (Randoop reflects them by name). Loads the config, builds an LLM client from {@code .env} when
@@ -58,7 +58,7 @@ public final class RandoopDataGenerator {
      */
     public static void main(String[] args) throws Exception {
         if (args.length < 2) {
-            throw new IllegalArgumentException("Usage: RandoopDataGenerator <prompt.txt> <out.json>");
+            throw new IllegalArgumentException("Usage: RandoopDataGenerator <prompt.yaml> <out.json>");
         }
         Path repoRoot = Path.of("").toAbsolutePath().normalize();
         Path promptPath = Path.of(args[0]).toAbsolutePath().normalize();

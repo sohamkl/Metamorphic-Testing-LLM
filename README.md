@@ -43,7 +43,7 @@ JUNIT_PLATFORM_CONSOLE_STANDALONE_JAR=/absolute/path/to/junit-platform-console-s
 | `pom.xml` | Maven build file with JUnit 5 configured |
 | `src/main/java/mtllm/OpenaiRunner.java` | Compatibility entry point that delegates to `mtllm.App` |
 | `src/main/java/mtllm/App.java` | Main backend orchestration |
-| `src/main/java/mtllm/config/` | Reads and stores `prompt.txt` settings |
+| `src/main/java/mtllm/config/` | Reads and stores `prompt.yaml` settings |
 | `src/main/java/mtllm/sut/` | Loads SUT source and first-level dependencies |
 | `src/main/java/mtllm/prompt/` | Builds initial and repair prompts |
 | `src/main/java/mtllm/llm/` | LLM provider interface and OpenAI client |
@@ -59,18 +59,18 @@ JUNIT_PLATFORM_CONSOLE_STANDALONE_JAR=/absolute/path/to/junit-platform-console-s
 | `examples/pricing/generated/junit-support/` | Copied pricing SUT/support/MR sources used only to compile generated JUnit tests |
 | `examples/pricing/generated/reports/` | Generated pricing HTML reports |
 | `src/main/resources/reports/` | FreeMarker templates for generated HTML reports |
-| `prompt.txt` | Active generation config |
-| `prompt.class-level.example.txt` | Template config |
+| `prompt.yaml` | Active generation config |
+| `prompt.class-level.example.yaml` | Template config |
 | `docs/CONFIGURATION.md` | Explanation of output/MR-provider configuration combinations |
 
 ## Prompt Config
 
-`prompt.txt` uses `Key: value` lines.
+`prompt.yaml` uses top-level YAML fields. `SUTSupportFiles` can be an empty list or a YAML list of paths.
 
-```text
+```yaml
 SUTClassFile: examples/sorting/src/SortUtil.java
 TargetFunction: public static int[] sortArray(int[] arr)
-SUTSupportFiles:
+SUTSupportFiles: []
 
 MRInput: the follow-up input is a permutation of the source input array
 MROutput: the sorted source output and sorted follow-up output are equal arrays
@@ -116,13 +116,13 @@ The current supported combinations are:
 | false | true | LLM | JUnit tests using LLM-generated follow-up/assertion logic |
 | true | true | LLM | JSON/report output and JUnit tests using LLM-generated MR logic |
 
-Mode-style numbers are no longer needed in `prompt.txt`. Internally, the backend still maps these fields to generation strategies.
+Mode-style numbers are no longer needed in `prompt.yaml`. Internally, the backend still maps these fields to generation strategies.
 
 ### Input generation: LLM, Randoop, or hybrid
 
 By default the **LLM** generates the source inputs. An optional `InputGenerator` field lets you generate them with [Randoop](https://randoop.github.io/randoop/) (feedback-directed random test generation) instead, or with a hybrid of both:
 
-```text
+```yaml
 InputGenerator: LLM
 ```
 

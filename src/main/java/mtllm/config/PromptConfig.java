@@ -6,7 +6,7 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * Holds all settings from prompt.txt after they have been parsed.
+ * Holds all settings from prompt.yaml after they have been parsed.
  *
  * <p>In simple terms, this class is the typed version of the user's test-generation request:
  * which SUT to test, which method to focus on, what MR to use, and how many examples to ask for.</p>

@@ -1,18 +1,19 @@
 package mtllm.config;
 
+import org.yaml.snakeyaml.Yaml;
+
 import java.io.IOException;
+import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
- * Reads prompt.txt and turns key-value lines into a PromptConfig object.
- *
- * <p>In simple terms, this class understands the small config-file format used by the prototype.</p>
+ * Reads prompt.yaml and turns top-level YAML entries into a PromptConfig object.
  */
 public final class PromptConfigLoader {
     private PromptConfigLoader() {
@@ -23,44 +24,33 @@ public final class PromptConfigLoader {
             throw new IllegalArgumentException("Missing prompt file: " + promptPath);
         }
 
-        Map<String, String> values = new LinkedHashMap<>();
-        for (String raw : Files.readAllLines(promptPath, StandardCharsets.UTF_8)) {
-            String line = raw.trim();
-            if (line.isEmpty() || line.startsWith("#")) {
-                continue;
-            }
-            int idx = line.indexOf(':');
-            if (idx <= 0) {
-                continue;
-            }
-            values.put(line.substring(0, idx).trim(), line.substring(idx + 1).trim());
-        }
+        Map<String, Object> values = parseYaml(promptPath);
 
-        Path sutClassFile = resolveOptionalPath(values.get("SUTClassFile"), repoRoot);
+        Path sutClassFile = resolveOptionalPath(stringValue(values, "SUTClassFile"), repoRoot);
         List<Path> supportFiles = parseSupportFiles(values.get("SUTSupportFiles"), repoRoot);
-        Path developerMrFile = resolveOptionalPath(values.get("DeveloperMrFile"), repoRoot);
-        Path outputRoot = resolveOutputRoot(values.get("OutputRoot"), repoRoot, sutClassFile);
+        Path developerMrFile = resolveOptionalPath(stringValue(values, "DeveloperMrFile"), repoRoot);
+        Path outputRoot = resolveOutputRoot(stringValue(values, "OutputRoot"), repoRoot, sutClassFile);
         String developerMrSource = readOptionalSource(developerMrFile);
 
-        boolean jsonRequired = parseBoolean(values.get("JsonRequired"), false, "JsonRequired");
-        boolean testSuiteRequired = parseBoolean(values.get("TestSuiteRequired"), true, "TestSuiteRequired");
-        MRProvider mrProvider = MRProvider.fromConfig(values.get("MRProvider"));
+        boolean jsonRequired = parseBoolean(stringValue(values, "JsonRequired"), false, "JsonRequired");
+        boolean testSuiteRequired = parseBoolean(stringValue(values, "TestSuiteRequired"), true, "TestSuiteRequired");
+        MRProvider mrProvider = MRProvider.fromConfig(stringValue(values, "MRProvider"));
         GenerationMode mode = deriveMode(jsonRequired, testSuiteRequired, mrProvider);
-        String developerFollowUpMethod = values.getOrDefault("DeveloperFollowUpMethod", "");
-        String developerAssertMethod = values.getOrDefault("DeveloperAssertMethod", "");
+        String developerFollowUpMethod = stringValue(values, "DeveloperFollowUpMethod");
+        String developerAssertMethod = stringValue(values, "DeveloperAssertMethod");
         validateDeveloperMrConfig(mode, developerMrFile, developerFollowUpMethod, developerAssertMethod);
 
         return new PromptConfig(
                 sutClassFile,
-                values.getOrDefault("TargetFunction", ""),
+                stringValue(values, "TargetFunction"),
                 supportFiles,
-                values.getOrDefault("SUT", ""),
-                values.getOrDefault("MRInput", ""),
-                values.getOrDefault("MROutput", ""),
-                values.getOrDefault("MR", ""),
-                parsePositiveInt(values.get("Count"), 5, "Count"),
-                firstNonBlank(values.get("InputDomain"), values.get("Constraints"), ""),
-                values.getOrDefault("GeneratedClassName", "GeneratedMetamorphicTest"),
+                firstNonBlank(stringValue(values, "SUTDescription"), stringValue(values, "SUT")),
+                stringValue(values, "MRInput"),
+                stringValue(values, "MROutput"),
+                stringValue(values, "MR"),
+                parsePositiveInt(stringValue(values, "Count"), 5, "Count"),
+                firstNonBlank(stringValue(values, "InputDomain"), stringValue(values, "Constraints")),
+                firstNonBlank(stringValue(values, "GeneratedClassName"), "GeneratedMetamorphicTest"),
                 mode,
                 jsonRequired,
                 testSuiteRequired,
@@ -70,8 +60,36 @@ public final class PromptConfigLoader {
                 developerFollowUpMethod,
                 developerAssertMethod,
                 outputRoot,
-                parseNonNegativeInt(values.get("MaxRepairAttempts"), 1, "MaxRepairAttempts"),
-                InputGenerator.fromConfig(values.get("InputGenerator")));
+                parseNonNegativeInt(stringValue(values, "MaxRepairAttempts"), 1, "MaxRepairAttempts"),
+                InputGenerator.fromConfig(stringValue(values, "InputGenerator")));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> parseYaml(Path promptPath) throws IOException {
+        Yaml yaml = new Yaml();
+        try (Reader reader = Files.newBufferedReader(promptPath, StandardCharsets.UTF_8)) {
+            Object loaded = yaml.load(reader);
+            if (loaded == null) {
+                return Map.of();
+            }
+            if (!(loaded instanceof Map<?, ?> map)) {
+                throw new IllegalArgumentException("Prompt YAML must contain top-level key-value fields: " + promptPath);
+            }
+            return (Map<String, Object>) map;
+        }
+    }
+
+    private static String stringValue(Map<String, Object> values, String key) {
+        Object value = values.get(key);
+        if (value == null) {
+            return "";
+        }
+        if (value instanceof List<?> list) {
+            return list.stream()
+                    .map(String::valueOf)
+                    .collect(Collectors.joining(","));
+        }
+        return String.valueOf(value).trim();
     }
 
     private static Path resolveOutputRoot(String raw, Path repoRoot, Path sutClassFile) {
@@ -140,19 +158,25 @@ public final class PromptConfigLoader {
         }
     }
 
-    private static List<Path> parseSupportFiles(String raw, Path repoRoot) {
-        List<Path> paths = new ArrayList<>();
-        if (raw == null || raw.trim().isEmpty()) {
-            return paths;
+    private static List<Path> parseSupportFiles(Object raw, Path repoRoot) {
+        if (raw == null) {
+            return List.of();
         }
-        String[] parts = raw.split(",");
-        for (String part : parts) {
-            Path path = resolveOptionalPath(part, repoRoot);
-            if (path != null) {
-                paths.add(path);
-            }
+        if (raw instanceof List<?> list) {
+            return list.stream()
+                    .map(String::valueOf)
+                    .map(part -> resolveOptionalPath(part, repoRoot))
+                    .filter(path -> path != null)
+                    .toList();
         }
-        return paths;
+        String value = String.valueOf(raw).trim();
+        if (value.isEmpty()) {
+            return List.of();
+        }
+        return Arrays.stream(value.split(","))
+                .map(part -> resolveOptionalPath(part, repoRoot))
+                .filter(path -> path != null)
+                .toList();
     }
 
     private static Path resolveOptionalPath(String raw, Path repoRoot) {
