@@ -31,7 +31,9 @@ public final class App {
     public static void main(String[] args) {
         try {
             Path repoRoot = Path.of("").toAbsolutePath().normalize();
-            Path promptPath = args.length > 0 ? Path.of(args[0]).toAbsolutePath().normalize() : repoRoot.resolve("prompt.txt");
+            Path promptPath = args.length > 0
+                    ? Path.of(args[0]).toAbsolutePath().normalize()
+                    : repoRoot.resolve("prompt.yaml");
 
             Map<String, String> env = DotEnv.load(repoRoot.resolve(".env"));
             PromptConfig config = PromptConfigLoader.load(promptPath, repoRoot);

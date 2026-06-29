@@ -1,7 +1,7 @@
 package mtllm.config;
 
 /**
- * Describes the internal generation strategy derived from prompt.txt fields.
+ * Describes the internal generation strategy derived from prompt.yaml fields.
  *
  * <p>In simple terms, this is no longer exposed directly to users. The loader
  * derives it from JsonRequired, TestSuiteRequired, and MRProvider.</p>

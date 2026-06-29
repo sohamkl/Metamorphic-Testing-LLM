@@ -78,7 +78,7 @@ public final class RandoopInputRunner {
         Path outJson = workDir.resolve("randoop-data.json");
         Files.deleteIfExists(outJson);
         String classpath = String.join(File.pathSeparator,
-                projectClasses.toString(), randoopJar.toString(), classesDir.toString());
+                projectClasses.toString(), randoopJar.toString(), runtimeDependencyClasspath(), classesDir.toString());
         List<String> java = new ArrayList<>(List.of(
                 "java", "-cp", classpath, "mtllm.randoop.RandoopDataGenerator",
                 promptPath.toString(), outJson.toString()));
@@ -103,6 +103,14 @@ public final class RandoopInputRunner {
 
         ProcessResult gate = compileSuiteGate(classesDir, passingFile, failingFile);
         return new GenerationResult(json, true, passingFile, failingFile, gate.exitCode == 0, gate.output);
+    }
+
+    /** Build a classpath of project runtime dependency jars needed by the generator subprocess. */
+    private static String runtimeDependencyClasspath() {
+        Path m2 = Path.of(System.getProperty("user.home"), ".m2", "repository");
+        List<String> jars = new ArrayList<>();
+        addLatestJar(jars, m2.resolve("org/yaml/snakeyaml"), "snakeyaml");
+        return String.join(File.pathSeparator, jars);
     }
 
     /**
