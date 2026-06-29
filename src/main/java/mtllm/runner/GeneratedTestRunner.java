@@ -106,14 +106,9 @@ public final class GeneratedTestRunner {
             copyJavaFileIfPresent(config.developerMrFile(), supportSourceDir);
             copyJavaFileIfPresent(config.developerMrFile(), stagedSupportSourceDir);
         }
-        Path generatedDataDir = config.outputRoot().resolve("data-generator-code");
-        if (Files.isDirectory(generatedDataDir)) {
-            try (var stream = Files.list(generatedDataDir)) {
-                for (Path file : stream.filter(path -> path.getFileName().toString().endsWith(".java")).toList()) {
-                    copyJavaFileIfPresent(file, supportSourceDir);
-                    copyJavaFileIfPresent(file, stagedSupportSourceDir);
-                }
-            }
+        for (Path file : generatedDataSourceFiles(config)) {
+            copyJavaFileIfPresent(file, supportSourceDir);
+            copyJavaFileIfPresent(file, stagedSupportSourceDir);
         }
     }
 
@@ -171,6 +166,12 @@ public final class GeneratedTestRunner {
         for (SutContext.SourceFile supportFile : sutContext.supportFiles()) {
             command.add(supportFile.path().toString());
         }
+        if (config.mode().usesDeveloperMrHelpers() && config.developerMrFile() != null) {
+            command.add(config.developerMrFile().toString());
+        }
+        for (Path file : generatedDataSourceFiles(config)) {
+            command.add(file.toString());
+        }
         command.add(generatedTestFile.toString());
 
         ProcessResult result = runProcess(command, repoRoot);
@@ -178,6 +179,18 @@ public final class GeneratedTestRunner {
             return TestRunResult.passed(result.output);
         }
         return TestRunResult.failed("Compilation failed:\n" + result.output);
+    }
+
+    private List<Path> generatedDataSourceFiles(PromptConfig config) throws IOException {
+        Path generatedDataDir = config.outputRoot().resolve("data-generator-code");
+        if (!Files.isDirectory(generatedDataDir)) {
+            return List.of();
+        }
+        try (var stream = Files.list(generatedDataDir)) {
+            return stream
+                    .filter(path -> path.getFileName().toString().endsWith(".java"))
+                    .toList();
+        }
     }
 
     private TestRunResult run(String generatedClassName) throws Exception {

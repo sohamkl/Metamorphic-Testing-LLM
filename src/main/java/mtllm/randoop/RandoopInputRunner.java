@@ -150,11 +150,40 @@ public final class RandoopInputRunner {
             versions.filter(Files::isDirectory)
                     .map(v -> v.resolve(artifact + "-" + v.getFileName() + ".jar"))
                     .filter(Files::isRegularFile)
-                    .max(Path::compareTo)
+                    .max((left, right) -> compareVersions(
+                            left.getParent().getFileName().toString(),
+                            right.getParent().getFileName().toString()))
                     .ifPresent(jar -> into.add(jar.toString()));
         } catch (IOException ignored) {
             // Treat an unreadable artifact dir as "jar not present".
         }
+    }
+
+    private static int compareVersions(String left, String right) {
+        String[] leftParts = left.split("[.-]");
+        String[] rightParts = right.split("[.-]");
+        int length = Math.max(leftParts.length, rightParts.length);
+        for (int i = 0; i < length; i++) {
+            String leftPart = i < leftParts.length ? leftParts[i] : "0";
+            String rightPart = i < rightParts.length ? rightParts[i] : "0";
+            int compared = compareVersionPart(leftPart, rightPart);
+            if (compared != 0) {
+                return compared;
+            }
+        }
+        return 0;
+    }
+
+    private static int compareVersionPart(String left, String right) {
+        boolean leftNumeric = left.chars().allMatch(Character::isDigit);
+        boolean rightNumeric = right.chars().allMatch(Character::isDigit);
+        if (leftNumeric && rightNumeric) {
+            return Integer.compare(Integer.parseInt(left), Integer.parseInt(right));
+        }
+        if (leftNumeric != rightNumeric) {
+            return leftNumeric ? 1 : -1;
+        }
+        return left.compareTo(right);
     }
 
     private static String baseName(String generatedClassName) {

@@ -34,8 +34,11 @@ public final class App {
             Path promptPath = args.length > 0 ? Path.of(args[0]).toAbsolutePath().normalize() : repoRoot.resolve("prompt.txt");
 
             Map<String, String> env = DotEnv.load(repoRoot.resolve(".env"));
+            PromptConfig config = PromptConfigLoader.load(promptPath, repoRoot);
             String apiKey = DotEnv.firstNonBlank(System.getenv("OPENAI_API_KEY"), env.get("OPENAI_API_KEY"));
-            if (apiKey.isBlank()) {
+            boolean needsApiKey = !config.inputGenerator().usesRandoop()
+                    || config.inputGenerator().seedsWithLlm();
+            if (needsApiKey && apiKey.isBlank()) {
                 throw new IllegalStateException("Missing OPENAI_API_KEY. Put it in .env or the environment.");
             }
 
@@ -54,10 +57,8 @@ public final class App {
                     env.get("MAVEN_CMD"),
                     "mvn");
 
-            PromptConfig config = PromptConfigLoader.load(promptPath, repoRoot);
             SutContext sutContext = SutContextLoader.load(config, repoRoot);
             Path outputRoot = config.outputRoot();
-            LlmClient llmClient = new OpenAiClient(apiKey, model, baseUrl);
             GeneratedTestRunner testRunner = new GeneratedTestRunner(
                     repoRoot,
                     outputRoot.resolve("junit-tests/classes"),
@@ -69,17 +70,18 @@ public final class App {
                     outputRoot.resolve("data-generator-code/classes"),
                     outputRoot.resolve("json-data"),
                     outputRoot.resolve("reports"));
-            RepairLoop repairLoop = new RepairLoop(
-                    llmClient,
-                    testRunner,
-                    dataGeneratorRunner,
-                    outputRoot.resolve("junit-tests"),
-                    outputRoot.resolve("data-generator-code"));
 
             TestRunResult result;
             if (config.inputGenerator().usesRandoop()) {
                 result = runRandoop(config, sutContext, repoRoot, promptPath, dataGeneratorRunner);
             } else {
+                LlmClient llmClient = new OpenAiClient(apiKey, model, baseUrl);
+                RepairLoop repairLoop = new RepairLoop(
+                        llmClient,
+                        testRunner,
+                        dataGeneratorRunner,
+                        outputRoot.resolve("junit-tests"),
+                        outputRoot.resolve("data-generator-code"));
                 result = repairLoop.generateRunAndRepair(config, sutContext);
             }
             System.out.println("\n--- Result: " + result.status() + " ---");

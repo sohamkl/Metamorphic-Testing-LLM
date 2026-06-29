@@ -208,7 +208,7 @@ public final class PromptBuilder {
                 .append(config.developerAssertMethod()).append("\n\n");
 
         prompt.append("The class must contain:\n");
-        prompt.append("- A public static generateSources() method that returns a List of source inputs.\n");
+        prompt.append("- A public static method named generateSources() that returns a List of source inputs.\n");
         prompt.append("- generateSources() must generate at least ").append(config.count()).append(" diverse source inputs.\n");
         appendSourceCountRules(prompt, config);
         prompt.append("- A main(String[] args) method that prints valid JSON to stdout only.\n");
@@ -253,7 +253,7 @@ public final class PromptBuilder {
         prompt.append("This class generates SOURCE INPUTS and FOLLOW-UP INPUTS, then computes outputs by running real Java code.\n\n");
 
         prompt.append("The class must contain:\n");
-        prompt.append("- A public static generateSources() method that returns a List of source inputs.\n");
+        prompt.append("- A public static method named generateSources() that returns a List of source inputs.\n");
         prompt.append("- generateSources() must generate at least ").append(config.count()).append(" diverse source inputs.\n");
         appendSourceCountRules(prompt, config);
         prompt.append("- A generateFollowUp(source) method that transforms each source input according to MRInput.\n");

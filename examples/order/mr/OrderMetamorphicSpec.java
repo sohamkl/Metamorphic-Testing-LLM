@@ -11,7 +11,10 @@ import java.util.List;
  *
  * <p>MR: doubling the quantity of every line item should double the order total.</p>
  */
-public class OrderMetamorphicSpec {
+public final class OrderMetamorphicSpec {
+
+    private OrderMetamorphicSpec() {
+    }
 
     public static Order generateFollowUp(Order source) {
         List<LineItem> followUpItems = source.getItems().stream()
