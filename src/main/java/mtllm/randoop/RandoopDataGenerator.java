@@ -126,6 +126,9 @@ public final class RandoopDataGenerator {
             Evaluated evaluated = evaluate(h, bundle);
             if (evaluated != null) {
                 kept.add(evaluated);
+                if (kept.size() >= config.count()) {
+                    break;
+                }
             }
         }
 

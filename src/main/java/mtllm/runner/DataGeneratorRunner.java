@@ -158,33 +158,9 @@ public final class DataGeneratorRunner {
             return "Output must be a JSON array that starts with [ and ends with ].";
         }
 
-        int sourceCount = countOccurrences(trimmed, "\"source\"");
-        if (sourceCount < config.count()) {
-            return "Expected at least " + config.count() + " entries with \"source\", found " + sourceCount + ".";
-        }
-
-        int followUpCount = countOccurrences(trimmed, "\"followUp\"");
-        if ((config.mode().generatesFollowUpData() || config.mode().generatesExecutedMtData())
-                && followUpCount < config.count()) {
-            return "Expected at least " + config.count() + " entries with \"followUp\", found " + followUpCount + ".";
-        }
-
-        if (config.mode().generatesExecutedMtData()) {
-            int sourceOutputCount = countOccurrences(trimmed, "\"sourceOutput\"");
-            if (sourceOutputCount < config.count()) {
-                return "Expected at least " + config.count()
-                        + " entries with \"sourceOutput\", found " + sourceOutputCount + ".";
-            }
-            int followUpOutputCount = countOccurrences(trimmed, "\"followUpOutput\"");
-            if (followUpOutputCount < config.count()) {
-                return "Expected at least " + config.count()
-                        + " entries with \"followUpOutput\", found " + followUpOutputCount + ".";
-            }
-            int passedCount = countOccurrences(trimmed, "\"passed\"");
-            if (passedCount < config.count()) {
-                return "Expected at least " + config.count()
-                        + " entries with \"passed\", found " + passedCount + ".";
-            }
+        int entryCount = splitTopLevelObjects(trimmed).size();
+        if (entryCount > config.count()) {
+            return "Expected at most " + config.count() + " top-level entries, found " + entryCount + ".";
         }
 
         return null;

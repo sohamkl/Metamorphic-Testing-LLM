@@ -36,6 +36,10 @@ public final class GeneratedTestRunner {
 
     public TestRunResult compileAndRun(Path generatedTestFile, PromptConfig config, SutContext sutContext) throws Exception {
         lastSplitResult = null;
+        String countValidationError = validateGeneratedTestCount(generatedTestFile, config);
+        if (countValidationError != null) {
+            return TestRunResult.failed("Generated JUnit validation failed:\n" + countValidationError);
+        }
         if (junitConsoleJar.isBlank()) {
             return runWithMavenIfAvailable(generatedTestFile, config, sutContext);
         }
@@ -46,6 +50,20 @@ public final class GeneratedTestRunner {
             return compileResult;
         }
         return run(config.generatedClassName());
+    }
+
+    private String validateGeneratedTestCount(Path generatedTestFile, PromptConfig config) throws IOException {
+        int testCount = 0;
+        for (String line : Files.readAllLines(generatedTestFile, StandardCharsets.UTF_8)) {
+            String trimmed = line.trim();
+            if ("@Test".equals(trimmed) || trimmed.startsWith("@Test(")) {
+                testCount++;
+            }
+        }
+        if (testCount > config.count()) {
+            return "Expected at most " + config.count() + " JUnit test methods, found " + testCount + ".";
+        }
+        return null;
     }
 
     private TestRunResult runWithMavenIfAvailable(Path generatedTestFile, PromptConfig config, SutContext sutContext) throws Exception {
