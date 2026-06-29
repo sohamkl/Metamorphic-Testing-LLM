@@ -62,10 +62,12 @@ JUNIT_PLATFORM_CONSOLE_STANDALONE_JAR=/absolute/path/to/junit-platform-console-s
 | `prompt.yaml` | Active generation config |
 | `prompt.class-level.example.yaml` | Template config |
 | `docs/CONFIGURATION.md` | Explanation of output/MR-provider configuration combinations |
+| `docs/PITEST.md` | PIT mutation testing profile, command, target scope, and report paths |
 
 ## Prompt Config
 
 `prompt.yaml` uses top-level YAML fields. `SUTSupportFiles` can be an empty list or a YAML list of paths.
+The backend parses this file with SnakeYAML into `PromptConfig`; the LLM receives the generated prompt built from those Java config values, not the raw YAML file.
 
 ```yaml
 SUTClassFile: examples/sorting/src/SortUtil.java
@@ -92,7 +94,7 @@ Prefer `MRInput` plus `MROutput` because it matches the metamorphic-testing form
 
 Output and MR ownership are controlled by three fields:
 
-```text
+```yaml
 JsonRequired: true
 TestSuiteRequired: false
 MRProvider: DEV
@@ -144,8 +146,14 @@ Key points:
 
 Example (Randoop builds the carts, developer owns the MR):
 
-```text
+```yaml
 SUTClassFile: examples/pricing/src/PricingEngine.java
+SUTSupportFiles:
+  - examples/pricing/src/Cart.java
+  - examples/pricing/src/CartItem.java
+  - examples/pricing/src/Customer.java
+  - examples/pricing/src/CustomerTier.java
+  - examples/pricing/src/DiscountCode.java
 TargetFunction: public static BigDecimal calculateDiscountedSubtotal(Cart cart)
 InputGenerator: HYBRID
 JsonRequired: true
@@ -166,7 +174,7 @@ Generated data code is compiled with plain `javac`, so it must use only the Java
 
 If `MRProvider: DEV`, add:
 
-```text
+```yaml
 DeveloperMrFile: examples/pricing/mr/PricingMetamorphicSpec.java
 DeveloperFollowUpMethod: PricingMetamorphicSpec.generateFollowUp
 DeveloperAssertMethod: PricingMetamorphicSpec.assertRelation
@@ -248,6 +256,33 @@ Executed JSON runs also produce:
 Generated artifacts are written under `OutputRoot`, usually inside the relevant example folder. During Maven test execution, the current generated test/support files are staged into `target/mtllm-test-sources` so old examples do not clash with the active run.
 
 If `JUNIT_PLATFORM_CONSOLE_STANDALONE_JAR` is configured, the tool compiles/runs generated tests through the JUnit Platform Console. Otherwise, it uses `mvn test -Dtest=<GeneratedClassName>`. With Maven, JUnit output uses execution-based classification: JUnit assertion failures are treated as discovered failing cases, and the backend splits actual passing and failing `@Test` methods into separate files. Compilation errors, invalid generated code, and infrastructure failures are still sent back to the LLM for up to `MaxRepairAttempts` repair attempts.
+
+## Mutation Testing with PIT
+
+PIT is available through the Maven `pitest` profile. Normal builds do not run mutation testing.
+
+Run PIT with:
+
+```bash
+mvn clean -Ppitest test-compile org.pitest:pitest-maven:mutationCoverage
+```
+
+The profile follows the PIT Maven quickstart flow and pins explicit plugin versions. It mutates the compiled example SUT classes currently registered as main sources:
+
+- `DijkstraAlgorithm*`
+- `MatrixRank`
+- `PricingEngine*`
+
+It runs only generated `*PassingTest` classes and excludes generated `*FailingTest` classes. This is intentional: the framework stores failing tests as bug-revealing artifacts, while PIT requires the selected test suite to be green before mutation analysis starts.
+
+Reports are written to:
+
+```text
+target/pit-reports/index.html
+target/pit-reports/mutations.xml
+```
+
+The current mutation threshold is `0`, so PIT produces reports without failing the build while generated metamorphic suites are still being evaluated. See [PITEST.md](docs/PITEST.md) for details.
 
 ## Current Scope
 
