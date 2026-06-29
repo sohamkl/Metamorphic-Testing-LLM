@@ -276,6 +276,8 @@
       <dd>${jsonRequired?c}</dd>
       <dt>Test suite required</dt>
       <dd>${testSuiteRequired?c}</dd>
+      <dt>Report basis</dt>
+      <dd>${reportBasis?html}</dd>
       <dt>Metamorphic relation</dt>
       <dd>${metamorphicRelation?html}</dd>
       <dt>Input domain</dt>
@@ -344,7 +346,20 @@
   <section>
     <h2>Failing Cases</h2>
     <div class="cases">
-      <#if failingEntries?size == 0>
+      <#if reportUsesTestSuite>
+        <#if failingTestNames?size == 0>
+          <div class="panel"><span class="badge pass">No failing tests</span></div>
+        <#else>
+          <details open>
+            <summary><span class="badge fail">Fail</span> Generated JUnit methods (${failingTestNames?size})</summary>
+            <ol class="method-list">
+              <#list failingTestNames as method>
+                <li>${method?html}</li>
+              </#list>
+            </ol>
+          </details>
+        </#if>
+      <#elseif failingEntries?size == 0>
         <div class="panel"><span class="badge pass">No failing cases</span></div>
       <#else>
         <#list failingEntries as entry>
@@ -363,7 +378,20 @@
   <section>
     <h2>Passing Cases</h2>
     <div class="cases">
-      <#if passingEntries?size == 0>
+      <#if reportUsesTestSuite>
+        <#if passingTestNames?size == 0>
+          <div class="panel"><span class="badge fail">No passing tests</span></div>
+        <#else>
+          <details open>
+            <summary><span class="badge pass">Pass</span> Generated JUnit methods (${passingTestNames?size})</summary>
+            <ol class="method-list">
+              <#list passingTestNames as method>
+                <li>${method?html}</li>
+              </#list>
+            </ol>
+          </details>
+        </#if>
+      <#elseif passingEntries?size == 0>
         <div class="panel"><span class="badge fail">No passing cases</span></div>
       <#else>
         <#list passingEntries as entry>

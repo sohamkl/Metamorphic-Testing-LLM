@@ -2,6 +2,7 @@ package mtllm.runner;
 
 import mtllm.config.PromptConfig;
 import mtllm.config.GenerationMode;
+import mtllm.generation.DataBackedJUnitWriter;
 import mtllm.generation.GeneratedCodeWriter;
 import mtllm.generation.GeneratedJUnitCallQualifier;
 import mtllm.generation.GeneratedTestWriter;
@@ -69,10 +70,22 @@ public final class RepairLoop {
                     + dataResult.output());
         }
 
+        DataGeneratorRunner.ExecutedDataSummary dataSummary = dataGeneratorRunner.lastSummary();
+        if (!dataSummary.present()) {
+            return TestRunResult.failed("JSON output generation passed, but no executed data summary was available.");
+        }
+
         Files.deleteIfExists(generatedTestsDir.resolve(baseName + "Data.java"));
-        TestRunResult junitResult = generateSingleOutput(junitConfig, sutContext);
+        Path generatedJunitFile = DataBackedJUnitWriter.write(
+                generatedTestsDir,
+                junitConfig,
+                dataConfig.generatedClassName(),
+                dataSummary);
+        System.out.println("Wrote data-backed JUnit test to " + generatedJunitFile);
+
+        TestRunResult junitResult = runGeneratedFile(generatedJunitFile, junitConfig, sutContext);
         if (junitResult.failed()) {
-            return TestRunResult.failed("JSON output generation passed, but JUnit generation failed.\n\n"
+            return TestRunResult.failed("JSON output generation passed, but data-backed JUnit generation failed.\n\n"
                     + "JSON result:\n" + dataResult.output()
                     + "\n\nJUnit result:\n" + junitResult.output());
         }

@@ -1,12 +1,18 @@
 import java.util.List;
 
 /**
- * Developer-owned metamorphic relation helper for OrderUtil examples.
+ * Developer-owned metamorphic relation for the OrderUtil SUT.
  *
- * <p>In simple terms, this file keeps the MR transformation and assertion under developer
- * control while the LLM only generates source-input JUnit tests that call these methods.</p>
+ * <p>Self-contained: default package, static methods, no framework import — so it compiles
+ * standalone under Soham's pipeline (which javac's the dev-MR file without {@code mtllm} on the
+ * classpath), matching PricingMetamorphicSpec / MatrixRankMetamorphicSpec. The Randoop harness
+ * now also calls these by name (method references / reflection) rather than via an interface,
+ * so this single self-contained spec satisfies both consumers.</p>
+ *
+ * <p>MR: doubling the quantity of every line item should double the order total.</p>
  */
 public final class OrderMetamorphicSpec {
+
     private OrderMetamorphicSpec() {
     }
 
@@ -18,13 +24,11 @@ public final class OrderMetamorphicSpec {
     }
 
     public static void assertRelation(double sourceOutput, double followUpOutput) {
-        double expectedFollowUpOutput = sourceOutput * 2;
-        if (Math.abs(expectedFollowUpOutput - followUpOutput) > 0.001) {
+        double expected = sourceOutput * 2;
+        if (Math.abs(expected - followUpOutput) > 0.001) {
             throw new AssertionError(
                     "Metamorphic relation violated: expected "
-                            + expectedFollowUpOutput
-                            + " but was "
-                            + followUpOutput);
+                            + expected + " but was " + followUpOutput);
         }
     }
 }

@@ -137,7 +137,7 @@ public final class PromptBuilder {
         prompt.append("- Each test must call the developer follow-up method to create the follow-up input.\n");
         prompt.append("- Each test must run the target SUT method on the follow-up input.\n");
         prompt.append("- Each test must call the developer assertion method with the source output and follow-up output.\n");
-        prompt.append("- At least ").append(config.count()).append(" source-input test methods unless the input domain makes that impossible.\n");
+        prompt.append("- At most ").append(config.count()).append(" source-input test methods.\n");
         prompt.append("- JUnit 5 imports from org.junit.jupiter.api.Test only, unless another JUnit import is genuinely needed.\n");
         prompt.append("- No package declaration; import public SUT/helper classes by package name when needed.\n\n");
 
@@ -176,7 +176,7 @@ public final class PromptBuilder {
         prompt.append("- A follow-up-input helper, for example generateFollowUp(source).\n");
         prompt.append("- A small helper that runs the SUT on the source and follow-up input, for example assertMetamorphicRelationFor(source).\n");
         prompt.append("- A relation assertion helper, for example assertMetamorphicRelation(sourceOutput, followUpOutput).\n");
-        prompt.append("- At least ").append(config.count()).append(" diverse deterministic candidate test methods unless the input domain makes that impossible.\n");
+        prompt.append("- At most ").append(config.count()).append(" diverse deterministic candidate test methods.\n");
         prompt.append("- JUnit 5 imports from org.junit.jupiter.api.Test and org.junit.jupiter.api.Assertions.\n");
         prompt.append("- No package declaration; import public SUT classes by package name when needed.\n\n");
 
@@ -208,8 +208,8 @@ public final class PromptBuilder {
                 .append(config.developerAssertMethod()).append("\n\n");
 
         prompt.append("The class must contain:\n");
-        prompt.append("- A generateSources() method that returns a List of source inputs.\n");
-        prompt.append("- generateSources() must generate at least ").append(config.count()).append(" diverse source inputs.\n");
+        prompt.append("- A public static method named generateSources() that returns a List of source inputs.\n");
+        prompt.append("- generateSources() must generate at most ").append(config.count()).append(" diverse source inputs.\n");
         appendSourceCountRules(prompt, config);
         prompt.append("- A main(String[] args) method that prints valid JSON to stdout only.\n");
         prompt.append("- The main method must, for each source input:\n");
@@ -233,7 +233,7 @@ public final class PromptBuilder {
         prompt.append("- Print a JSON array in this exact shape: ");
         prompt.append("[{\"source\": <value>, \"followUp\": <value>, \"sourceOutput\": <value>, \"followUpOutput\": <value>, \"passed\": <boolean>}].\n");
         prompt.append("- Every top-level array element must include all five keys: \"source\", \"followUp\", \"sourceOutput\", \"followUpOutput\", and \"passed\".\n");
-        prompt.append("- The array must contain at least ").append(config.count()).append(" top-level entries.\n");
+        prompt.append("- The array must contain no more than ").append(config.count()).append(" top-level entries.\n");
         prompt.append("- If inputs are objects, serialize them as JSON objects matching their visible fields/getters.\n");
         prompt.append("- Serialize numeric outputs as JSON numbers when possible; serialize complex outputs as JSON objects or strings.\n\n");
 
@@ -253,8 +253,8 @@ public final class PromptBuilder {
         prompt.append("This class generates SOURCE INPUTS and FOLLOW-UP INPUTS, then computes outputs by running real Java code.\n\n");
 
         prompt.append("The class must contain:\n");
-        prompt.append("- A generateSources() method that returns a List of source inputs.\n");
-        prompt.append("- generateSources() must generate at least ").append(config.count()).append(" diverse source inputs.\n");
+        prompt.append("- A public static method named generateSources() that returns a List of source inputs.\n");
+        prompt.append("- generateSources() must generate at most ").append(config.count()).append(" diverse source inputs.\n");
         appendSourceCountRules(prompt, config);
         prompt.append("- A generateFollowUp(source) method that transforms each source input according to MRInput.\n");
         prompt.append("- An assertMetamorphicRelation(sourceOutput, followUpOutput) method that checks MROutput.\n");
@@ -280,7 +280,7 @@ public final class PromptBuilder {
         prompt.append("- Print a JSON array in this exact shape: ");
         prompt.append("[{\"source\": <value>, \"followUp\": <value>, \"sourceOutput\": <value>, \"followUpOutput\": <value>, \"passed\": <boolean>}].\n");
         prompt.append("- Every top-level array element must include all five keys: \"source\", \"followUp\", \"sourceOutput\", \"followUpOutput\", and \"passed\".\n");
-        prompt.append("- The array must contain at least ").append(config.count()).append(" top-level entries.\n");
+        prompt.append("- The array must contain no more than ").append(config.count()).append(" top-level entries.\n");
         prompt.append("- If inputs are objects, serialize them as JSON objects matching their visible fields/getters.\n");
         prompt.append("- Serialize numeric outputs as JSON numbers when possible; serialize complex outputs as JSON objects or strings.\n\n");
 
@@ -296,13 +296,13 @@ public final class PromptBuilder {
     }
 
     private static void appendSourceCountRules(StringBuilder prompt, PromptConfig config) {
-        prompt.append("- The generated code must not stop below the requested count. If Count is large, use deterministic loops, helper factories, or small parameter grids instead of hand-writing every case.\n");
-        prompt.append("- Before returning or printing results, make sure the source list contains at least ")
+        prompt.append("- Treat Count as an upper limit, not a target or minimum.\n");
+        prompt.append("- Before returning or printing results, make sure the source list contains no more than ")
                 .append(config.count())
-                .append(" entries; add more valid varied cases if needed.\n");
-        prompt.append("- It is acceptable to generate more than ")
+                .append(" entries.\n");
+        prompt.append("- It is acceptable to generate fewer than ")
                 .append(config.count())
-                .append(" entries, but never fewer.\n");
+                .append(" entries when the input domain is narrow, but never more.\n");
     }
 
     private static String targetMethodCallName(PromptConfig config) {

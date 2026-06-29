@@ -70,7 +70,8 @@ public final class PromptConfigLoader {
                 developerFollowUpMethod,
                 developerAssertMethod,
                 outputRoot,
-                parseNonNegativeInt(values.get("MaxRepairAttempts"), 1, "MaxRepairAttempts"));
+                parseNonNegativeInt(values.get("MaxRepairAttempts"), 1, "MaxRepairAttempts"),
+                InputGenerator.fromConfig(values.get("InputGenerator")));
     }
 
     private static Path resolveOutputRoot(String raw, Path repoRoot, Path sutClassFile) {

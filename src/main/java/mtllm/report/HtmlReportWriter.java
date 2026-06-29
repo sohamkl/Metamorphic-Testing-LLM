@@ -70,6 +70,14 @@ public final class HtmlReportWriter {
         Files.createDirectories(reportsDir);
 
         Path reportFile = reportsDir.resolve(baseName(config.generatedClassName()) + "Report.html");
+        boolean reportUsesTestSuite = config.testSuiteRequired()
+                && (!passingTestNames.isEmpty() || !failingTestNames.isEmpty());
+        int totalCount = reportUsesTestSuite
+                ? passingTestNames.size() + failingTestNames.size()
+                : allEntries.size();
+        int passingCount = reportUsesTestSuite ? passingTestNames.size() : passingEntries.size();
+        int failingCount = reportUsesTestSuite ? failingTestNames.size() : failingEntries.size();
+
         Map<String, Object> model = new LinkedHashMap<>();
         model.put("title", baseName(config.generatedClassName()) + " Metamorphic Test Report");
         model.put("generatedAt", LocalDateTime.now().toString());
@@ -81,9 +89,13 @@ public final class HtmlReportWriter {
         model.put("mrProvider", config.mrProvider().name());
         model.put("jsonRequired", config.jsonRequired());
         model.put("testSuiteRequired", config.testSuiteRequired());
-        model.put("totalCount", allEntries.size());
-        model.put("passingCount", passingEntries.size());
-        model.put("failingCount", failingEntries.size());
+        model.put("reportUsesTestSuite", reportUsesTestSuite);
+        model.put("reportBasis", reportUsesTestSuite
+                ? "Generated JUnit test suite"
+                : "Executed JSON data");
+        model.put("totalCount", totalCount);
+        model.put("passingCount", passingCount);
+        model.put("failingCount", failingCount);
         model.put("allEntries", allEntries);
         model.put("passingEntries", passingEntries);
         model.put("failingEntries", failingEntries);
@@ -94,7 +106,9 @@ public final class HtmlReportWriter {
         model.put("passingTestNames", passingTestNames);
         model.put("failingTestNames", failingTestNames);
         model.put("totalTestNames", passingTestNames.size() + failingTestNames.size());
-        model.put("caseRows", caseRows(passingEntries, failingEntries, passingTestNames, failingTestNames, config));
+        model.put("caseRows", reportUsesTestSuite
+                ? testSuiteCaseRows(passingTestNames, failingTestNames, config)
+                : caseRows(passingEntries, failingEntries, passingTestNames, failingTestNames, config));
 
         Template template = templateConfiguration().getTemplate(TEMPLATE_NAME);
         try (Writer writer = Files.newBufferedWriter(reportFile, StandardCharsets.UTF_8)) {
@@ -116,6 +130,35 @@ public final class HtmlReportWriter {
         appendRows(rows, failingEntries, failingTestNames, "Fail", config);
         appendRows(rows, passingEntries, passingTestNames, "Pass", config);
         return rows;
+    }
+
+    private static List<ReportCaseRow> testSuiteCaseRows(
+            List<String> passingTestNames,
+            List<String> failingTestNames,
+            PromptConfig config) {
+        List<ReportCaseRow> rows = new ArrayList<>();
+        appendTestRows(rows, failingTestNames, "Fail", config);
+        appendTestRows(rows, passingTestNames, "Pass", config);
+        return rows;
+    }
+
+    private static void appendTestRows(
+            List<ReportCaseRow> rows,
+            List<String> testNames,
+            String status,
+            PromptConfig config) {
+        for (String testName : testNames) {
+            rows.add(new ReportCaseRow(
+                    rows.size() + 1,
+                    status,
+                    testName,
+                    "defined in generated JUnit test method",
+                    "computed when JUnit test runs",
+                    "created by developer MR helper inside generated JUnit test",
+                    "computed when JUnit test runs",
+                    expectedValueFromRelation(config),
+                    "not available: report is based on the generated JUnit suite, not JSON case data"));
+        }
     }
 
     private static void appendRows(
@@ -140,6 +183,11 @@ public final class HtmlReportWriter {
         }
     }
 
+    private static String expectedValueFromRelation(PromptConfig config) {
+        String relation = config.metamorphicRelationStatement();
+        return relation == null || relation.isBlank() ? "defined by metamorphic relation" : relation;
+    }
+
     private static String expectedValue(String json, PromptConfig config) {
         String expectedFollowUpOutput = fieldValue(json, "expectedFollowUpOutput");
         if (!expectedFollowUpOutput.equals("not provided")) {
@@ -153,8 +201,7 @@ public final class HtmlReportWriter {
         if (!expected.equals("not provided")) {
             return expected;
         }
-        String relation = config.metamorphicRelationStatement();
-        return relation == null || relation.isBlank() ? "defined by metamorphic relation" : relation;
+        return expectedValueFromRelation(config);
     }
 
     private static String fieldValue(String json, String key) {

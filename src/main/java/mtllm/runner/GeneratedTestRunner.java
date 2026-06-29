@@ -36,6 +36,10 @@ public final class GeneratedTestRunner {
 
     public TestRunResult compileAndRun(Path generatedTestFile, PromptConfig config, SutContext sutContext) throws Exception {
         lastSplitResult = null;
+        String countValidationError = validateGeneratedTestCount(generatedTestFile, config);
+        if (countValidationError != null) {
+            return TestRunResult.failed("Generated JUnit validation failed:\n" + countValidationError);
+        }
         if (junitConsoleJar.isBlank()) {
             return runWithMavenIfAvailable(generatedTestFile, config, sutContext);
         }
@@ -46,6 +50,20 @@ public final class GeneratedTestRunner {
             return compileResult;
         }
         return run(config.generatedClassName());
+    }
+
+    private String validateGeneratedTestCount(Path generatedTestFile, PromptConfig config) throws IOException {
+        int testCount = 0;
+        for (String line : Files.readAllLines(generatedTestFile, StandardCharsets.UTF_8)) {
+            String trimmed = line.trim();
+            if ("@Test".equals(trimmed) || trimmed.startsWith("@Test(")) {
+                testCount++;
+            }
+        }
+        if (testCount > config.count()) {
+            return "Expected at most " + config.count() + " JUnit test methods, found " + testCount + ".";
+        }
+        return null;
     }
 
     private TestRunResult runWithMavenIfAvailable(Path generatedTestFile, PromptConfig config, SutContext sutContext) throws Exception {
@@ -106,6 +124,10 @@ public final class GeneratedTestRunner {
             copyJavaFileIfPresent(config.developerMrFile(), supportSourceDir);
             copyJavaFileIfPresent(config.developerMrFile(), stagedSupportSourceDir);
         }
+        for (Path file : generatedDataSourceFiles(config)) {
+            copyJavaFileIfPresent(file, supportSourceDir);
+            copyJavaFileIfPresent(file, stagedSupportSourceDir);
+        }
     }
 
     private void copyJavaFileIfPresent(Path sourceFile, Path targetDir) throws IOException {
@@ -162,6 +184,12 @@ public final class GeneratedTestRunner {
         for (SutContext.SourceFile supportFile : sutContext.supportFiles()) {
             command.add(supportFile.path().toString());
         }
+        if (config.mode().usesDeveloperMrHelpers() && config.developerMrFile() != null) {
+            command.add(config.developerMrFile().toString());
+        }
+        for (Path file : generatedDataSourceFiles(config)) {
+            command.add(file.toString());
+        }
         command.add(generatedTestFile.toString());
 
         ProcessResult result = runProcess(command, repoRoot);
@@ -169,6 +197,18 @@ public final class GeneratedTestRunner {
             return TestRunResult.passed(result.output);
         }
         return TestRunResult.failed("Compilation failed:\n" + result.output);
+    }
+
+    private List<Path> generatedDataSourceFiles(PromptConfig config) throws IOException {
+        Path generatedDataDir = config.outputRoot().resolve("data-generator-code");
+        if (!Files.isDirectory(generatedDataDir)) {
+            return List.of();
+        }
+        try (var stream = Files.list(generatedDataDir)) {
+            return stream
+                    .filter(path -> path.getFileName().toString().endsWith(".java"))
+                    .toList();
+        }
     }
 
     private TestRunResult run(String generatedClassName) throws Exception {
