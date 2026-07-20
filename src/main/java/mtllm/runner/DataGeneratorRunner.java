@@ -42,6 +42,8 @@ public final class DataGeneratorRunner {
             return compileResult;
         }
 
+        RuntimeResourceCopier.copyFor(config, classesDir);
+
         TestRunResult runResult = run(config.generatedClassName());
         if (!runResult.passed()) {
             return runResult;

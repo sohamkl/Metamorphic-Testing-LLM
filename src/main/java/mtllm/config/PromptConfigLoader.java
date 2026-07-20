@@ -61,7 +61,8 @@ public final class PromptConfigLoader {
                 developerAssertMethod,
                 outputRoot,
                 parseNonNegativeInt(stringValue(values, "MaxRepairAttempts"), 1, "MaxRepairAttempts"),
-                InputGenerator.fromConfig(stringValue(values, "InputGenerator")));
+                InputGenerator.fromConfig(stringValue(values, "InputGenerator")),
+                parseStringList(values.get("RandoopTargetClasses")));
     }
 
     @SuppressWarnings("unchecked")
@@ -176,6 +177,27 @@ public final class PromptConfigLoader {
         return Arrays.stream(value.split(","))
                 .map(part -> resolveOptionalPath(part, repoRoot))
                 .filter(path -> path != null)
+                .toList();
+    }
+
+    private static List<String> parseStringList(Object raw) {
+        if (raw == null) {
+            return List.of();
+        }
+        if (raw instanceof List<?> list) {
+            return list.stream()
+                    .map(String::valueOf)
+                    .map(String::trim)
+                    .filter(value -> !value.isEmpty())
+                    .toList();
+        }
+        String value = String.valueOf(raw).trim();
+        if (value.isEmpty()) {
+            return List.of();
+        }
+        return Arrays.stream(value.split(","))
+                .map(String::trim)
+                .filter(part -> !part.isEmpty())
                 .toList();
     }
 

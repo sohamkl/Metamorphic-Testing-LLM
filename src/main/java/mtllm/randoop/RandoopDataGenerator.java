@@ -19,6 +19,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * RANDOOP input-generation mode: harvests source inputs with Randoop instead of the LLM, then
@@ -43,6 +45,8 @@ public final class RandoopDataGenerator {
 
     private final int timeLimitMillis;
     private static final long[] RANDOM_SEEDS = {0L, 1L, 2L, 3L, 4L};
+    private static final Pattern PACKAGE_DECLARATION =
+            Pattern.compile("(?m)^\\s*package\\s+([A-Za-z_$][\\w$]*(?:\\.[A-Za-z_$][\\w$]*)*)\\s*;");
 
     public RandoopDataGenerator(int timeLimitMillis) {
         this.timeLimitMillis = timeLimitMillis;
@@ -183,9 +187,13 @@ public final class RandoopDataGenerator {
             PromptConfig config, Path repoRoot, LlmClient seederClient, boolean seeded, MethodBundle bundle)
             throws Exception {
         Set<String> classNames = new LinkedHashSet<>();
-        classNames.add(classNameOf(config.sutClassFile()));
-        for (Path support : config.sutSupportFiles()) {
-            classNames.add(classNameOf(support));
+        if (!config.randoopTargetClasses().isEmpty()) {
+            classNames.addAll(config.randoopTargetClasses());
+        } else {
+            classNames.add(classNameOf(config.sutClassFile()));
+            for (Path support : config.sutSupportFiles()) {
+                classNames.add(classNameOf(support));
+            }
         }
         RandoopHarvester<Object> harvester =
                 new RandoopHarvester<>((Class<Object>) bundle.inputType, classNames);
@@ -353,10 +361,12 @@ public final class RandoopDataGenerator {
         return null;
     }
 
-    /** "examples/order/src/OrderUtil.java" -> "OrderUtil" (default-package simple class name). */
-    private static String classNameOf(Path file) {
+    /** Resolve a source file to its runtime name, including a declared Java package when present. */
+    private static String classNameOf(Path file) throws java.io.IOException {
         String name = file.getFileName().toString();
-        return name.endsWith(".java") ? name.substring(0, name.length() - ".java".length()) : name;
+        String simpleName = name.endsWith(".java") ? name.substring(0, name.length() - ".java".length()) : name;
+        Matcher packageMatcher = PACKAGE_DECLARATION.matcher(Files.readString(file, StandardCharsets.UTF_8));
+        return packageMatcher.find() ? packageMatcher.group(1) + "." + simpleName : simpleName;
     }
 
     /** "public static double calculateTotal(Order o)" / "Cls.foo" / "computeRank" -> "calculateTotal"/"foo"/"computeRank". */

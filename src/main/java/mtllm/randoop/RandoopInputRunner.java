@@ -1,6 +1,7 @@
 package mtllm.randoop;
 
 import mtllm.config.PromptConfig;
+import mtllm.runner.RuntimeResourceCopier;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -72,6 +73,7 @@ public final class RandoopInputRunner {
         if (compile.exitCode != 0) {
             throw new IllegalStateException("Randoop SUT compilation failed:\n" + compile.output);
         }
+        RuntimeResourceCopier.copyFor(config, classesDir);
 
         // 2. Run the generator in a subprocess; it writes the JSON to outJson and (when a test suite
         //    is required) the object JUnit suite into <outputRoot>/junit-tests.

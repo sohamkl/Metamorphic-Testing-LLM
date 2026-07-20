@@ -33,6 +33,7 @@ public final class PromptConfig {
     private final Path outputRoot;
     private final int maxRepairAttempts;
     private final InputGenerator inputGenerator;
+    private final List<String> randoopTargetClasses;
 
     public PromptConfig(
             Path sutClassFile,
@@ -55,7 +56,8 @@ public final class PromptConfig {
             String developerAssertMethod,
             Path outputRoot,
             int maxRepairAttempts,
-            InputGenerator inputGenerator) {
+            InputGenerator inputGenerator,
+            List<String> randoopTargetClasses) {
         this.sutClassFile = sutClassFile;
         this.targetFunction = valueOrEmpty(targetFunction);
         this.sutSupportFiles = Collections.unmodifiableList(new ArrayList<>(sutSupportFiles));
@@ -79,6 +81,7 @@ public final class PromptConfig {
         this.outputRoot = outputRoot;
         this.maxRepairAttempts = maxRepairAttempts;
         this.inputGenerator = inputGenerator == null ? InputGenerator.LLM : inputGenerator;
+        this.randoopTargetClasses = Collections.unmodifiableList(new ArrayList<>(randoopTargetClasses));
     }
 
     public Path sutClassFile() {
@@ -163,6 +166,10 @@ public final class PromptConfig {
         return inputGenerator;
     }
 
+    public List<String> randoopTargetClasses() {
+        return randoopTargetClasses;
+    }
+
     public PromptConfig withOutputMode(GenerationMode newMode, boolean newJsonRequired, boolean newTestSuiteRequired, String newGeneratedClassName) {
         return new PromptConfig(
                 sutClassFile,
@@ -185,7 +192,8 @@ public final class PromptConfig {
                 developerAssertMethod,
                 outputRoot,
                 maxRepairAttempts,
-                inputGenerator);
+                inputGenerator,
+                randoopTargetClasses);
     }
 
     private static String valueOrEmpty(String value) {
