@@ -62,7 +62,8 @@ public final class PromptConfigLoader {
                 outputRoot,
                 parseNonNegativeInt(stringValue(values, "MaxRepairAttempts"), 1, "MaxRepairAttempts"),
                 InputGenerator.fromConfig(stringValue(values, "InputGenerator")),
-                parseStringList(values.get("RandoopTargetClasses")));
+                parseStringList(values.get("RandoopTargetClasses")),
+                "");
     }
 
     @SuppressWarnings("unchecked")

@@ -34,6 +34,7 @@ public final class PromptConfig {
     private final int maxRepairAttempts;
     private final InputGenerator inputGenerator;
     private final List<String> randoopTargetClasses;
+    private final String randoopSeedExamples;
 
     public PromptConfig(
             Path sutClassFile,
@@ -57,7 +58,8 @@ public final class PromptConfig {
             Path outputRoot,
             int maxRepairAttempts,
             InputGenerator inputGenerator,
-            List<String> randoopTargetClasses) {
+            List<String> randoopTargetClasses,
+            String randoopSeedExamples) {
         this.sutClassFile = sutClassFile;
         this.targetFunction = valueOrEmpty(targetFunction);
         this.sutSupportFiles = Collections.unmodifiableList(new ArrayList<>(sutSupportFiles));
@@ -82,6 +84,7 @@ public final class PromptConfig {
         this.maxRepairAttempts = maxRepairAttempts;
         this.inputGenerator = inputGenerator == null ? InputGenerator.LLM : inputGenerator;
         this.randoopTargetClasses = Collections.unmodifiableList(new ArrayList<>(randoopTargetClasses));
+        this.randoopSeedExamples = valueOrEmpty(randoopSeedExamples);
     }
 
     public Path sutClassFile() {
@@ -170,6 +173,10 @@ public final class PromptConfig {
         return randoopTargetClasses;
     }
 
+    public String randoopSeedExamples() {
+        return randoopSeedExamples;
+    }
+
     public PromptConfig withOutputMode(GenerationMode newMode, boolean newJsonRequired, boolean newTestSuiteRequired, String newGeneratedClassName) {
         return new PromptConfig(
                 sutClassFile,
@@ -193,7 +200,35 @@ public final class PromptConfig {
                 outputRoot,
                 maxRepairAttempts,
                 inputGenerator,
-                randoopTargetClasses);
+                randoopTargetClasses,
+                randoopSeedExamples);
+    }
+
+    public PromptConfig withRandoopSeedExamples(String newRandoopSeedExamples) {
+        return new PromptConfig(
+                sutClassFile,
+                targetFunction,
+                sutSupportFiles,
+                sutDescription,
+                mrInput,
+                mrOutput,
+                mr,
+                count,
+                inputDomain,
+                generatedClassName,
+                mode,
+                jsonRequired,
+                testSuiteRequired,
+                mrProvider,
+                developerMrFile,
+                developerMrSource,
+                developerFollowUpMethod,
+                developerAssertMethod,
+                outputRoot,
+                maxRepairAttempts,
+                inputGenerator,
+                randoopTargetClasses,
+                newRandoopSeedExamples);
     }
 
     private static String valueOrEmpty(String value) {
