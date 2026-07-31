@@ -59,6 +59,12 @@ public final class PromptBuilder {
 
     private static void appendSutSection(StringBuilder prompt, PromptConfig config, SutContext sutContext) {
         prompt.append("You are generating developer-reviewable JUnit 5 metamorphic tests for a Java SUT.\n\n");
+
+        if (!config.sutDescription().isBlank()) {
+            prompt.append("System Under Test description:\n");
+            prompt.append(config.sutDescription()).append("\n\n");
+        }
+
         if (sutContext.classFile() != null) {
             prompt.append("System Under Test class file: ").append(sutContext.classFile()).append("\n");
             if (!config.targetFunction().isBlank()) {
@@ -85,12 +91,9 @@ public final class PromptBuilder {
                 prompt.append("Developer MR helper source:\n");
                 prompt.append("```java\n").append(config.developerMrSource()).append("\n```\n\n");
             }
-        } else {
+        } else if (config.sutDescription().isBlank()) {
             prompt.append("System Under Test description:\n");
-            prompt.append(config.sutDescription().isBlank()
-                    ? "No SUT class file was provided."
-                    : config.sutDescription());
-            prompt.append("\n\n");
+            prompt.append("No SUT class file was provided.\n\n");
         }
     }
 
@@ -180,6 +183,7 @@ public final class PromptBuilder {
         prompt.append("- Do not generate invalid inputs unless the input domain explicitly asks for invalid cases.\n");
         prompt.append("- Make object inputs by using visible constructors, builders, factories, or simple helper methods.\n");
         prompt.append("- Prefer readable deterministic fixtures over unseeded randomness.\n");
+        prompt.append("- Never use Instant.now(), the current date/time, random values, or other runtime-dependent values in test fixtures; use fixed literals and derive related timestamps from the same fixed base value.\n");
         prompt.append("- Output only Java code. No markdown fences and no explanation.\n");
     }
 
@@ -206,6 +210,7 @@ public final class PromptBuilder {
         prompt.append("- Important: assertMetamorphicRelation must assert that the stated MR output relation holds, for example assertEquals(expected, actual). Do not use assertNotEquals to make violating cases pass.\n");
         prompt.append("- Each emitted @Test method must assert the original MR normally; do not invert assertions to make failures pass.\n");
         prompt.append("- Prefer readable deterministic fixtures over unseeded randomness.\n");
+        prompt.append("- Never use Instant.now(), the current date/time, random values, or other runtime-dependent values in test fixtures; use fixed literals and derive related timestamps from the same fixed base value.\n");
         prompt.append("- Include normal cases, boundary cases, and edge cases that make the MR meaningful.\n");
         prompt.append("- Do not add inline comments that state computed totals, expected outputs, or follow-up outputs; they can be misleading when the SUT is buggy.\n");
         prompt.append("- Do not generate invalid inputs unless the input domain explicitly asks for invalid cases.\n");

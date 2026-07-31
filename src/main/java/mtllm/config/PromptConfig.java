@@ -15,6 +15,7 @@ public final class PromptConfig {
     private final Path sutClassFile;
     private final String targetFunction;
     private final List<Path> sutSupportFiles;
+    private final List<Path> sutClasspath;
     private final String sutDescription;
     private final String mrInput;
     private final String mrOutput;
@@ -40,6 +41,7 @@ public final class PromptConfig {
             Path sutClassFile,
             String targetFunction,
             List<Path> sutSupportFiles,
+            List<Path> sutClasspath,
             String sutDescription,
             String mrInput,
             String mrOutput,
@@ -63,6 +65,7 @@ public final class PromptConfig {
         this.sutClassFile = sutClassFile;
         this.targetFunction = valueOrEmpty(targetFunction);
         this.sutSupportFiles = Collections.unmodifiableList(new ArrayList<>(sutSupportFiles));
+        this.sutClasspath = Collections.unmodifiableList(new ArrayList<>(sutClasspath));
         this.sutDescription = valueOrEmpty(sutDescription);
         this.mrInput = valueOrEmpty(mrInput);
         this.mrOutput = valueOrEmpty(mrOutput);
@@ -97,6 +100,10 @@ public final class PromptConfig {
 
     public List<Path> sutSupportFiles() {
         return sutSupportFiles;
+    }
+
+    public List<Path> sutClasspath() {
+        return sutClasspath;
     }
 
     public String sutDescription() {
@@ -182,6 +189,7 @@ public final class PromptConfig {
                 sutClassFile,
                 targetFunction,
                 sutSupportFiles,
+                sutClasspath,
                 sutDescription,
                 mrInput,
                 mrOutput,
@@ -209,6 +217,7 @@ public final class PromptConfig {
                 sutClassFile,
                 targetFunction,
                 sutSupportFiles,
+                sutClasspath,
                 sutDescription,
                 mrInput,
                 mrOutput,

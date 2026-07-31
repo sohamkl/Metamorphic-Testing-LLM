@@ -174,8 +174,9 @@ public final class RandoopDataGenerator {
 
         String base = baseName(config.generatedClassName());
         String sutCallee = sutCallee(bundle);
-        String followUpCallee = bundle.specClass.getSimpleName() + "." + bundle.followUpMethod.getName();
-        String assertCallee = bundle.specClass.getSimpleName() + "." + bundle.assertMethod.getName();
+        String specClassName = sourceClassName(bundle.specClass);
+        String followUpCallee = specClassName + "." + bundle.followUpMethod.getName();
+        String assertCallee = specClassName + "." + bundle.assertMethod.getName();
 
         List<RandoopJUnitEmitter.Case> passingCases = new ArrayList<>();
         List<RandoopJUnitEmitter.Case> failingCases = new ArrayList<>();
@@ -368,10 +369,16 @@ public final class RandoopDataGenerator {
     /** Static SUT -> {@code Class.method}; instance SUT -> {@code new Class().method}. */
     private static String sutCallee(MethodBundle b) {
         String method = b.sutMethod.getName();
+        String className = sourceClassName(b.sutClass);
         if (Modifier.isStatic(b.sutMethod.getModifiers())) {
-            return b.sutClass.getSimpleName() + "." + method;
+            return className + "." + method;
         }
-        return "new " + b.sutClass.getSimpleName() + "()." + method;
+        return "new " + className + "()." + method;
+    }
+
+    private static String sourceClassName(Class<?> type) {
+        String canonicalName = type.getCanonicalName();
+        return canonicalName != null ? canonicalName : type.getName().replace('$', '.');
     }
 
     private static String baseName(String generatedClassName) {
