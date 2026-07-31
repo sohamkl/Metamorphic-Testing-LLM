@@ -49,6 +49,7 @@ public final class GeneratedTestRunner {
         if (!compileResult.passed()) {
             return compileResult;
         }
+        RuntimeResourceCopier.copyFor(config, classesDir);
         return run(config.generatedClassName());
     }
 
@@ -74,6 +75,8 @@ public final class GeneratedTestRunner {
         }
 
         prepareMavenTestSources(generatedTestFile, config, sutContext);
+
+        RuntimeResourceCopier.copyFor(config, repoRoot.resolve("target").resolve("test-classes"));
 
         List<String> command = new ArrayList<>();
         command.add(mavenCommand);

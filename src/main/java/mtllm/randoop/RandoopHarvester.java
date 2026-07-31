@@ -1,6 +1,8 @@
 package mtllm.randoop;
 
 import randoop.DummyVisitor;
+import randoop.ExecutionOutcome;
+import randoop.NormalExecution;
 import randoop.generation.ComponentManager;
 import randoop.generation.ForwardGenerator;
 import randoop.generation.SeedSequences;
@@ -11,7 +13,6 @@ import randoop.reflection.AccessibilityPredicate;
 import randoop.reflection.DefaultReflectionPredicate;
 import randoop.reflection.OperationModel;
 import randoop.sequence.ExecutableSequence;
-import randoop.sequence.ReferenceValue;
 import randoop.sequence.Variable;
 import randoop.test.DummyCheckGenerator;
 import randoop.types.ClassOrInterfaceType;
@@ -192,13 +193,17 @@ public final class RandoopHarvester<T> {
         Map<String, Harvested<T>> distinct = new LinkedHashMap<>();
         List<ExecutableSequence> regression = gen.getRegressionSequences();
         for (ExecutableSequence es : regression) {
-            for (ReferenceValue rv : es.getAllValues()) {
-                Object o = rv.getObjectValue();
+            for (int statementIndex = 0; statementIndex < es.size(); statementIndex++) {
+                ExecutionOutcome outcome = es.getResult(statementIndex);
+                if (!(outcome instanceof NormalExecution normal)) {
+                    continue;
+                }
+                Object o = normal.getRuntimeValue();
                 if (targetClass.isInstance(o) && seenIdentity.put(o, true) == null) {
                     T value = targetClass.cast(o);
                     String sig = signature.apply(value);
                     if (!distinct.containsKey(sig)) {
-                        Variable variable = es.getVariable(o);
+                        Variable variable = es.sequence.getVariable(statementIndex);
                         distinct.put(sig, new Harvested<>(value, es, variable));
                     }
                 }

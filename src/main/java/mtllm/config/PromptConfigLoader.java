@@ -26,8 +26,9 @@ public final class PromptConfigLoader {
 
         Map<String, Object> values = parseYaml(promptPath);
 
-        Path sutClassFile = resolveOptionalPath(stringValue(values, "SUTClassFile"), repoRoot);
+        Path sutClassFile = resolveRequiredSutClassFile(stringValue(values, "SUTClassFile"), repoRoot);
         List<Path> supportFiles = parseSupportFiles(values.get("SUTSupportFiles"), repoRoot);
+        List<Path> sutClasspath = parseClasspath(values.get("SUTClasspath"), repoRoot);
         Path developerMrFile = resolveOptionalPath(stringValue(values, "DeveloperMrFile"), repoRoot);
         Path outputRoot = resolveOutputRoot(stringValue(values, "OutputRoot"), repoRoot, sutClassFile);
         String developerMrSource = readOptionalSource(developerMrFile);
@@ -44,6 +45,7 @@ public final class PromptConfigLoader {
                 sutClassFile,
                 stringValue(values, "TargetFunction"),
                 supportFiles,
+                sutClasspath,
                 firstNonBlank(stringValue(values, "SUTDescription"), stringValue(values, "SUT")),
                 stringValue(values, "MRInput"),
                 stringValue(values, "MROutput"),
@@ -61,7 +63,9 @@ public final class PromptConfigLoader {
                 developerAssertMethod,
                 outputRoot,
                 parseNonNegativeInt(stringValue(values, "MaxRepairAttempts"), 1, "MaxRepairAttempts"),
-                InputGenerator.fromConfig(stringValue(values, "InputGenerator")));
+                InputGenerator.fromConfig(stringValue(values, "InputGenerator")),
+                parseStringList(values.get("RandoopTargetClasses")),
+                "");
     }
 
     @SuppressWarnings("unchecked")
@@ -179,12 +183,54 @@ public final class PromptConfigLoader {
                 .toList();
     }
 
+    private static List<Path> parseClasspath(Object raw, Path repoRoot) {
+        List<Path> entries = parseSupportFiles(raw, repoRoot);
+        for (Path entry : entries) {
+            if (!Files.exists(entry)) {
+                throw new IllegalArgumentException("Missing SUTClasspath entry: " + entry);
+            }
+        }
+        return entries;
+    }
+
+    private static List<String> parseStringList(Object raw) {
+        if (raw == null) {
+            return List.of();
+        }
+        if (raw instanceof List<?> list) {
+            return list.stream()
+                    .map(String::valueOf)
+                    .map(String::trim)
+                    .filter(value -> !value.isEmpty())
+                    .toList();
+        }
+        String value = String.valueOf(raw).trim();
+        if (value.isEmpty()) {
+            return List.of();
+        }
+        return Arrays.stream(value.split(","))
+                .map(String::trim)
+                .filter(part -> !part.isEmpty())
+                .toList();
+    }
+
     private static Path resolveOptionalPath(String raw, Path repoRoot) {
         if (raw == null || raw.trim().isEmpty()) {
             return null;
         }
         Path path = Path.of(raw.trim());
         return path.isAbsolute() ? path.normalize() : repoRoot.resolve(path).normalize();
+    }
+
+    private static Path resolveRequiredSutClassFile(String raw, Path repoRoot) {
+        Path path = resolveOptionalPath(raw, repoRoot);
+        if (path == null) {
+            throw new IllegalArgumentException("SUTClassFile is required.");
+        }
+        if (!Files.isRegularFile(path)) {
+            throw new IllegalArgumentException("Missing SUTClassFile: " + path);
+        }
+        return path;
     }
 
     private static String readOptionalSource(Path path) throws IOException {

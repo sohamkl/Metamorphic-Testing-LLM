@@ -1,0 +1,227 @@
+/*
+ * SPDX-License-Identifier: MIT
+ */
+package ta4jexamples.doc;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Stream;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+/**
+ * Regression tests for {@link ReadmeContentManager} line-ending behavior.
+ *
+ * <p>
+ * The README updater should preserve the dominant line separator already used
+ * in the target README file, regardless of source snippet line endings.
+ * </p>
+ */
+public class ReadmeContentManagerTest {
+
+    private static final String[] SNIPPET_IDS = { "ema-crossover", "rsi-strategy", "strategy-performance",
+            "advanced-strategy", "serialize-indicator", "serialize-rule", "serialize-strategy" };
+
+    @TempDir
+    private Path tempDir;
+
+    @Test
+    public void testUpdateReadmeSnippetsPreservesLfLineEndings() throws IOException {
+        String lineSeparator = "\n";
+        Path sourceFile = tempDir.resolve("ReadmeContentManager.java");
+        Path readmeFile = tempDir.resolve("README.md");
+
+        Files.writeString(sourceFile, buildSourceSnippets(lineSeparator), StandardCharsets.UTF_8);
+        Files.writeString(readmeFile, buildReadmeTemplate(lineSeparator), StandardCharsets.UTF_8);
+
+        boolean updated = ReadmeContentManager.updateReadmeSnippets(readmeFile, sourceFile);
+        assertTrue(updated);
+
+        String updatedContent = Files.readString(readmeFile, StandardCharsets.UTF_8);
+        LineEndingCounts counts = countLineEndings(updatedContent);
+        assertTrue(counts.lf() > 0);
+        assertEquals(0, counts.crlf());
+        assertTrue(updatedContent.contains(snippetBlock("ema-crossover", "ema_crossover", 1, lineSeparator)));
+    }
+
+    @Test
+    public void testUpdateReadmeSnippetsPreservesCrLfLineEndings() throws IOException {
+        String lineSeparator = "\r\n";
+        Path sourceFile = tempDir.resolve("ReadmeContentManager.java");
+        Path readmeFile = tempDir.resolve("README.md");
+
+        Files.writeString(sourceFile, buildSourceSnippets("\n"), StandardCharsets.UTF_8);
+        Files.writeString(readmeFile, buildReadmeTemplate(lineSeparator), StandardCharsets.UTF_8);
+
+        boolean updated = ReadmeContentManager.updateReadmeSnippets(readmeFile, sourceFile);
+        assertTrue(updated);
+
+        String updatedContent = Files.readString(readmeFile, StandardCharsets.UTF_8);
+        LineEndingCounts counts = countLineEndings(updatedContent);
+        assertTrue(counts.crlf() > 0);
+        assertEquals(0, counts.lf());
+        assertTrue(updatedContent.contains(snippetBlock("ema-crossover", "ema_crossover", 1, lineSeparator)));
+    }
+
+    @Test
+    public void testRepositoryJavaBaselineDocumentationAndWorkflowsStayAligned() throws IOException {
+        Path repositoryRoot = findRepositoryRoot();
+        String pom = readString(repositoryRoot.resolve("pom.xml"));
+        String readme = readString(repositoryRoot.resolve("README.md"));
+        String contributing = readString(repositoryRoot.resolve(".github").resolve("CONTRIBUTING.md"));
+        Map<String, String> expectedActionPins = Map.ofEntries(
+                Map.entry("actions/setup-java@", "actions/setup-java@v5"),
+                Map.entry("actions/checkout@", "actions/checkout@v6"), Map.entry("actions/cache@", "actions/cache@v5"),
+                Map.entry("actions/upload-artifact@", "actions/upload-artifact@v7"),
+                Map.entry("actions/github-script@", "actions/github-script@v9"),
+                Map.entry("softprops/action-gh-release@", "softprops/action-gh-release@v3"),
+                Map.entry("rhysd/actionlint@", "rhysd/actionlint@v1.7.12"));
+        List<String> forbiddenActionPins = List.of("actions/checkout@v5", "actions/cache@v4",
+                "actions/upload-artifact@v4", "actions/github-script@v8", "softprops/action-gh-release@v2",
+                "rhysd/actionlint@v1.7.9");
+        List<Path> setupJavaWorkflows = new ArrayList<>();
+
+        assertTrue(pom.contains("<maven.compiler.release>25</maven.compiler.release>"));
+        assertTrue(pom.contains("<requireJavaVersion>"));
+        assertTrue(pom.contains("<version>[25,)</version>"));
+        assertTrue(readme.contains("JDK-25%2B"));
+        assertTrue(readme.contains("Java 25+"));
+        assertTrue(readme.contains("scripts/run-full-build-quiet.sh"));
+        assertTrue(readme.contains("scripts/run-full-build-quiet.ps1"));
+        assertTrue(readme.contains(
+                "./mvnw -B clean license:format formatter:format verify -Dta4j.excludedTestTags=analysis-demo,benchmark,requires-display,requires-headless"));
+        assertTrue(readme.contains(
+                "./mvnw -B clean license:check formatter:validate verify -Dta4j.excludedTestTags=analysis-demo,benchmark,requires-display,requires-headless"));
+        assertTrue(readme.contains("./mvnw -B license:format formatter:format"));
+        assertTrue(contributing.contains("Java 25+"));
+
+        try (Stream<Path> workflowPaths = Files.list(repositoryRoot.resolve(".github").resolve("workflows"))) {
+            workflowPaths.filter(path -> path.getFileName().toString().endsWith(".yml")).forEach(path -> {
+                String workflow = readString(path);
+                if (workflow.contains("actions/setup-java")) {
+                    setupJavaWorkflows.add(path);
+                    assertTrue(workflow.contains("java-version: 25"), path + " should set up Java 25");
+                    assertFalse(workflow.contains("java-version: 21"), path + " should not set up Java 21");
+                }
+                expectedActionPins.forEach((actionPrefix, expectedPin) -> {
+                    if (workflow.contains(actionPrefix)) {
+                        assertTrue(workflow.contains(expectedPin) || containsFullShaActionPin(workflow, actionPrefix),
+                                path + " should use " + expectedPin + " or a full commit SHA");
+                    }
+                });
+                forbiddenActionPins.forEach((forbiddenPin) -> assertFalse(workflow.contains(forbiddenPin),
+                        path + " should not pin " + forbiddenPin));
+                if (path.getFileName().toString().equals("github-release.yml")) {
+                    assertTrue(workflow.contains("path: workflow-support"),
+                            path + " should stage workflow support files separately from the release tag checkout");
+                    assertTrue(workflow.contains("workflow-support/scripts/release/release_helpers.sh"), path
+                            + " should validate artifacts with workflow support files, not the checked-out tag tree");
+                }
+            });
+        }
+
+        assertFalse(setupJavaWorkflows.isEmpty());
+    }
+
+    private static boolean containsFullShaActionPin(String workflow, String actionPrefix) {
+        return workflow.lines()
+                .map(String::trim)
+                .filter(line -> line.startsWith("uses: " + actionPrefix))
+                .map(line -> line.substring(line.indexOf(actionPrefix) + actionPrefix.length()).trim())
+                .anyMatch(ref -> ref.matches("[0-9a-fA-F]{40}"));
+    }
+
+    private static String buildSourceSnippets(String lineSeparator) {
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < SNIPPET_IDS.length; i++) {
+            String snippetId = SNIPPET_IDS[i];
+            String variableName = snippetId.replace('-', '_');
+            builder.append("// START_SNIPPET: ").append(snippetId).append(lineSeparator);
+            builder.append("    int ")
+                    .append(variableName)
+                    .append(" = ")
+                    .append(i + 1)
+                    .append(";")
+                    .append(lineSeparator);
+            builder.append("// END_SNIPPET: ").append(snippetId).append(lineSeparator).append(lineSeparator);
+        }
+        return builder.toString();
+    }
+
+    private static String buildReadmeTemplate(String lineSeparator) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("# README").append(lineSeparator).append(lineSeparator);
+        for (String snippetId : SNIPPET_IDS) {
+            builder.append("<!-- START_SNIPPET: ").append(snippetId).append(" -->").append(lineSeparator);
+            builder.append("```java").append(lineSeparator);
+            builder.append("old").append(lineSeparator);
+            builder.append("```").append(lineSeparator);
+            builder.append("<!-- END_SNIPPET: ")
+                    .append(snippetId)
+                    .append(" -->")
+                    .append(lineSeparator)
+                    .append(lineSeparator);
+        }
+        return builder.toString();
+    }
+
+    private static String snippetBlock(String snippetId, String variableName, int value, String lineSeparator) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("<!-- START_SNIPPET: ").append(snippetId).append(" -->").append(lineSeparator);
+        builder.append("```java").append(lineSeparator);
+        builder.append("int ").append(variableName).append(" = ").append(value).append(";").append(lineSeparator);
+        builder.append("```").append(lineSeparator);
+        builder.append("<!-- END_SNIPPET: ").append(snippetId).append(" -->");
+        return builder.toString();
+    }
+
+    private static LineEndingCounts countLineEndings(String content) {
+        int crlf = 0;
+        int lf = 0;
+        for (int i = 0; i < content.length(); i++) {
+            if (content.charAt(i) == '\n') {
+                if (i > 0 && content.charAt(i - 1) == '\r') {
+                    crlf++;
+                } else {
+                    lf++;
+                }
+            }
+        }
+        return new LineEndingCounts(crlf, lf);
+    }
+
+    private static Path findRepositoryRoot() throws IOException {
+        Path current = Path.of("").toAbsolutePath();
+        Path candidate = current;
+        while (candidate != null) {
+            if (Files.exists(candidate.resolve("pom.xml")) && Files.exists(candidate.resolve("README.md"))
+                    && Files.isDirectory(candidate.resolve(".github"))) {
+                return candidate;
+            }
+            candidate = candidate.getParent();
+        }
+        throw new IOException("Unable to locate repository root from " + current);
+    }
+
+    private static String readString(Path path) {
+        try {
+            return Files.readString(path, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    private record LineEndingCounts(int crlf, int lf) {
+    }
+}

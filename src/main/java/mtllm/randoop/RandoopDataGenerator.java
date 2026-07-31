@@ -19,6 +19,9 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * RANDOOP input-generation mode: harvests source inputs with Randoop instead of the LLM, then
@@ -43,6 +46,8 @@ public final class RandoopDataGenerator {
 
     private final int timeLimitMillis;
     private static final long[] RANDOM_SEEDS = {0L, 1L, 2L, 3L, 4L};
+    private static final Pattern PACKAGE_DECLARATION =
+            Pattern.compile("(?m)^\\s*package\\s+([A-Za-z_$][\\w$]*(?:\\.[A-Za-z_$][\\w$]*)*)\\s*;");
 
     public RandoopDataGenerator(int timeLimitMillis) {
         this.timeLimitMillis = timeLimitMillis;
@@ -65,6 +70,13 @@ public final class RandoopDataGenerator {
         Path outJson = Path.of(args[1]).toAbsolutePath().normalize();
 
         PromptConfig config = PromptConfigLoader.load(promptPath, repoRoot);
+        if (args.length >= 3 && args[2].equals("--seeds-only")) {
+            String seedExamples = new RandoopDataGenerator(15000)
+                    .generateSeedExamples(config);
+            Files.writeString(outJson, seedExamples, StandardCharsets.UTF_8);
+            return;
+        }
+
         boolean seeded = config.inputGenerator().seedsWithLlm();
 
         LlmClient seederClient = null;
@@ -109,6 +121,32 @@ public final class RandoopDataGenerator {
         return generateAll(config, repoRoot, seederClient, seeded).json();
     }
 
+    /** Harvest raw Randoop examples for NEW_HYBRID before the LLM creates the final input set. */
+    @SuppressWarnings("unchecked")
+    public String generateSeedExamples(PromptConfig config) throws Exception {
+        Class<?> sutClass = Class.forName(classNameOf(config.sutClassFile()));
+        Method sutMethod = singleArgMethod(sutClass, methodName(config.targetFunction()));
+        Class<Object> inputType = (Class<Object>) sutMethod.getParameterTypes()[0];
+        Object sutReceiver = Modifier.isStatic(sutMethod.getModifiers())
+                ? null
+                : sutClass.getDeclaredConstructor().newInstance();
+        RandoopHarvester<Object> harvester = new RandoopHarvester<>(
+                inputType,
+                randoopClassNames(config));
+        List<RandoopHarvester.Harvested<Object>> harvested =
+                harvester.harvestSequences(timeLimitMillis, null, 0L);
+        List<RandoopHarvester.Harvested<Object>> executable = new ArrayList<>();
+        for (RandoopHarvester.Harvested<Object> candidate : harvested) {
+            try {
+                invoke(sutMethod, sutReceiver, candidate.value());
+                executable.add(candidate);
+            } catch (Throwable invalidSource) {
+                // Seed examples should demonstrate inputs accepted by the target method.
+            }
+        }
+        return emitSeedExamples(executable, config.count());
+    }
+
     /**
      * Harvest once and produce every requested artifact from the same evaluated cases: the
      * executed-MT JSON array always, and the rendered passing/failing JUnit test-class sources for
@@ -136,8 +174,9 @@ public final class RandoopDataGenerator {
 
         String base = baseName(config.generatedClassName());
         String sutCallee = sutCallee(bundle);
-        String followUpCallee = bundle.specClass.getSimpleName() + "." + bundle.followUpMethod.getName();
-        String assertCallee = bundle.specClass.getSimpleName() + "." + bundle.assertMethod.getName();
+        String specClassName = sourceClassName(bundle.specClass);
+        String followUpCallee = specClassName + "." + bundle.followUpMethod.getName();
+        String assertCallee = specClassName + "." + bundle.assertMethod.getName();
 
         List<RandoopJUnitEmitter.Case> passingCases = new ArrayList<>();
         List<RandoopJUnitEmitter.Case> failingCases = new ArrayList<>();
@@ -182,13 +221,8 @@ public final class RandoopDataGenerator {
     private List<RandoopHarvester.Harvested<Object>> harvestSources(
             PromptConfig config, Path repoRoot, LlmClient seederClient, boolean seeded, MethodBundle bundle)
             throws Exception {
-        Set<String> classNames = new LinkedHashSet<>();
-        classNames.add(classNameOf(config.sutClassFile()));
-        for (Path support : config.sutSupportFiles()) {
-            classNames.add(classNameOf(support));
-        }
         RandoopHarvester<Object> harvester =
-                new RandoopHarvester<>((Class<Object>) bundle.inputType, classNames);
+                new RandoopHarvester<>((Class<Object>) bundle.inputType, randoopClassNames(config));
 
         if (seeded && seederClient != null) {
             // Prefer the developer's InputDomain description (concise, authoritative, scales to any
@@ -204,6 +238,65 @@ public final class RandoopDataGenerator {
             return harvester.harvestSequencesMultiSeed(perSeedBudget, seeds, RANDOM_SEEDS);
         }
         return harvester.harvestSequences(timeLimitMillis, null, 0L);
+    }
+
+    private Set<String> randoopClassNames(PromptConfig config) throws Exception {
+        Set<String> classNames = new LinkedHashSet<>();
+        if (!config.randoopTargetClasses().isEmpty()) {
+            classNames.addAll(config.randoopTargetClasses());
+        } else {
+            classNames.add(classNameOf(config.sutClassFile()));
+            for (Path support : config.sutSupportFiles()) {
+                classNames.add(classNameOf(support));
+            }
+        }
+        return classNames;
+    }
+
+    private String emitSeedExamples(List<RandoopHarvester.Harvested<Object>> harvested, int limit) {
+        StringBuilder json = new StringBuilder("[");
+        int emitted = 0;
+        for (RandoopHarvester.Harvested<Object> candidate : harvested) {
+            if (emitted >= limit) {
+                break;
+            }
+            if (emitted > 0) {
+                json.append(',');
+            }
+            String constructionCode = constructionCode(candidate);
+            json.append("{\"value\":")
+                    .append(JsonSerializer.toJson(candidate.value()))
+                    .append(",\"constructionCode\":")
+                    .append(JsonSerializer.toJson(constructionCode))
+                    .append('}');
+            emitted++;
+        }
+        return json.append(']').toString();
+    }
+
+    private String constructionCode(RandoopHarvester.Harvested<Object> harvested) {
+        Variable variable = harvested.variable();
+        if (variable == null) {
+            return "";
+        }
+        Set<Integer> requiredStatements = new TreeSet<>();
+        collectRequiredStatements(harvested.sequence().sequence, variable.getDeclIndex(), requiredStatements);
+        StringBuilder code = new StringBuilder();
+        for (int statementIndex : requiredStatements) {
+            code.append(harvested.sequence().statementToCodeString(statementIndex)).append('\n');
+        }
+        code.append("// source input variable: ").append(variable.getName());
+        return code.toString();
+    }
+
+    private void collectRequiredStatements(
+            randoop.sequence.Sequence sequence, int statementIndex, Set<Integer> requiredStatements) {
+        if (!requiredStatements.add(statementIndex)) {
+            return;
+        }
+        for (Variable input : sequence.getInputs(statementIndex)) {
+            collectRequiredStatements(sequence, input.getDeclIndex(), requiredStatements);
+        }
     }
 
     /**
@@ -276,10 +369,16 @@ public final class RandoopDataGenerator {
     /** Static SUT -> {@code Class.method}; instance SUT -> {@code new Class().method}. */
     private static String sutCallee(MethodBundle b) {
         String method = b.sutMethod.getName();
+        String className = sourceClassName(b.sutClass);
         if (Modifier.isStatic(b.sutMethod.getModifiers())) {
-            return b.sutClass.getSimpleName() + "." + method;
+            return className + "." + method;
         }
-        return "new " + b.sutClass.getSimpleName() + "()." + method;
+        return "new " + className + "()." + method;
+    }
+
+    private static String sourceClassName(Class<?> type) {
+        String canonicalName = type.getCanonicalName();
+        return canonicalName != null ? canonicalName : type.getName().replace('$', '.');
     }
 
     private static String baseName(String generatedClassName) {
@@ -353,10 +452,12 @@ public final class RandoopDataGenerator {
         return null;
     }
 
-    /** "examples/order/src/OrderUtil.java" -> "OrderUtil" (default-package simple class name). */
-    private static String classNameOf(Path file) {
+    /** Resolve a source file to its runtime name, including a declared Java package when present. */
+    private static String classNameOf(Path file) throws java.io.IOException {
         String name = file.getFileName().toString();
-        return name.endsWith(".java") ? name.substring(0, name.length() - ".java".length()) : name;
+        String simpleName = name.endsWith(".java") ? name.substring(0, name.length() - ".java".length()) : name;
+        Matcher packageMatcher = PACKAGE_DECLARATION.matcher(Files.readString(file, StandardCharsets.UTF_8));
+        return packageMatcher.find() ? packageMatcher.group(1) + "." + simpleName : simpleName;
     }
 
     /** "public static double calculateTotal(Order o)" / "Cls.foo" / "computeRank" -> "calculateTotal"/"foo"/"computeRank". */

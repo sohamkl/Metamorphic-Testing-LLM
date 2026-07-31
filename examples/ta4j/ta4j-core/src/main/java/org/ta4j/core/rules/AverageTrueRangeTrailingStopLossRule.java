@@ -1,0 +1,122 @@
+/*
+ * SPDX-License-Identifier: MIT
+ */
+package org.ta4j.core.rules;
+
+import org.ta4j.core.BarSeries;
+import org.ta4j.core.Indicator;
+import org.ta4j.core.indicators.ATRIndicator;
+import org.ta4j.core.indicators.helpers.ClosePriceIndicator;
+import org.ta4j.core.indicators.numeric.BinaryOperationIndicator;
+import org.ta4j.core.num.Num;
+
+import static java.util.Objects.requireNonNull;
+
+/**
+ * A trailing stop-loss rule based on Average True Range (ATR).
+ *
+ * <p>
+ * This rule is satisfied when the reference price reaches the loss threshold as
+ * determined by a given multiple of the prevailing average true range. It can
+ * be used for both long and short positions.
+ *
+ * <p>
+ * This rule uses the {@code tradingRecord}.
+ *
+ * @since 0.22.3
+ */
+public class AverageTrueRangeTrailingStopLossRule extends BaseVolatilityTrailingStopLossRule {
+
+    private final Indicator<Num> referencePrice;
+    private final ATRIndicator atrIndicator;
+    private final Number atrCoefficient;
+    private final int barCount;
+
+    /**
+     * Constructor with default close price as reference.
+     *
+     * @param series         the bar series
+     * @param atrBarCount    the number of bars used for ATR calculation
+     * @param atrCoefficient the coefficient to multiply ATR
+     */
+    public AverageTrueRangeTrailingStopLossRule(BarSeries series, int atrBarCount, Number atrCoefficient) {
+        this(new ClosePriceIndicator(series), new ATRIndicator(series, atrBarCount), atrCoefficient);
+    }
+
+    /**
+     * Constructor with custom reference price.
+     *
+     * @param series         the bar series
+     * @param referencePrice the reference price indicator
+     * @param atrBarCount    the number of bars used for ATR calculation
+     * @param atrCoefficient the coefficient to multiply ATR
+     */
+    public AverageTrueRangeTrailingStopLossRule(final BarSeries series, final Indicator<Num> referencePrice,
+            final int atrBarCount, final Number atrCoefficient) {
+        this(referencePrice, new ATRIndicator(series, atrBarCount), atrCoefficient, Integer.MAX_VALUE);
+    }
+
+    /**
+     * Constructor with custom reference price and lookback.
+     *
+     * @param series         the bar series
+     * @param referencePrice the reference price indicator
+     * @param atrBarCount    the number of bars used for ATR calculation
+     * @param atrCoefficient the coefficient to multiply ATR
+     * @param barCount       the number of bars to look back for trailing
+     *                       calculation
+     * @since 0.22.3
+     */
+    public AverageTrueRangeTrailingStopLossRule(final BarSeries series, final Indicator<Num> referencePrice,
+            final int atrBarCount, final Number atrCoefficient, final int barCount) {
+        this(referencePrice, new ATRIndicator(series, atrBarCount), atrCoefficient, barCount);
+    }
+
+    /**
+     * Constructor with custom reference price and ATR indicator.
+     *
+     * @param referencePrice the reference price indicator
+     * @param atrIndicator   ATR indicator
+     * @param atrCoefficient the coefficient to multiply ATR
+     * @since 0.22.3
+     */
+    public AverageTrueRangeTrailingStopLossRule(final Indicator<Num> referencePrice, final ATRIndicator atrIndicator,
+            final Number atrCoefficient) {
+        this(referencePrice, atrIndicator, atrCoefficient, Integer.MAX_VALUE);
+    }
+
+    /**
+     * Constructor with custom reference price, ATR indicator, and lookback.
+     *
+     * @param referencePrice the reference price indicator
+     * @param atrIndicator   ATR indicator
+     * @param atrCoefficient the coefficient to multiply ATR
+     * @param barCount       the number of bars to look back for trailing
+     *                       calculation
+     * @since 0.22.3
+     */
+    public AverageTrueRangeTrailingStopLossRule(final Indicator<Num> referencePrice, final ATRIndicator atrIndicator,
+            final Number atrCoefficient, final int barCount) {
+        this(new Config(referencePrice, requireNonNull(atrIndicator), atrCoefficient, barCount));
+    }
+
+    private AverageTrueRangeTrailingStopLossRule(Config config) {
+        super(config.referencePrice(), BinaryOperationIndicator.product(config.atrIndicator(), config.atrCoefficient()),
+                config.barCount());
+        this.referencePrice = config.referencePrice();
+        this.atrIndicator = config.atrIndicator();
+        this.atrCoefficient = config.atrCoefficient();
+        this.barCount = config.barCount();
+    }
+
+    private record Config(Indicator<Num> referencePrice, ATRIndicator atrIndicator, Number atrCoefficient,
+            int barCount) {
+
+        private Config {
+            if (atrCoefficient == null || Double.isNaN(atrCoefficient.doubleValue())
+                    || atrCoefficient.doubleValue() <= 0) {
+                throw new IllegalArgumentException("atrCoefficient must be positive");
+            }
+        }
+    }
+}

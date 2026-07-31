@@ -18,9 +18,9 @@ The backend supports configurable JSON/JUnit outputs and developer- or LLM-provi
 |------|-----|
 | JDK 17+ | Compile and run the backend (the Randoop input-generation mode requires Java 17) |
 | Maven | Build the project and resolve JUnit 5 |
-| OpenAI API key | LLM input generation and HYBRID seeding (raw `RANDOOP` input generation makes no API calls) |
+| OpenAI API key | `LLM`, `HYBRID`, and `NEW_HYBRID` generation (raw `RANDOOP` makes no API calls) |
 | JUnit Platform Console Standalone jar | Optional alternative to Maven for compiling/running generated JUnit tests |
-| Randoop | Bundled — `lib/randoop-all-4.3.4.jar` is vendored and wired into `pom.xml` (system scope), so no separate install is needed for the `RANDOOP`/`HYBRID` input modes |
+| Randoop | Bundled — `lib/randoop-all-4.3.4.jar` is vendored and wired into `pom.xml` (system scope), so no separate install is needed for the Randoop-backed input modes |
 
 ## Configuration
 
@@ -120,7 +120,7 @@ The current supported combinations are:
 
 Mode-style numbers are no longer needed in `prompt.yaml`. Internally, the backend still maps these fields to generation strategies.
 
-### Input generation: LLM, Randoop, or hybrid
+### Input generation modes
 
 By default the **LLM** generates the source inputs. An optional `InputGenerator` field lets you generate them with [Randoop](https://randoop.github.io/randoop/) (feedback-directed random test generation) instead, or with a hybrid of both:
 
@@ -135,14 +135,29 @@ InputGenerator: LLM
 | `LLM` (default) | the LLM (existing behavior) | yes |
 | `RANDOOP` | Randoop, building objects by calling the SUT's own constructors/methods | none (fully offline) |
 | `HYBRID` | the LLM suggests seed values, then Randoop builds objects from them at scale | one small seeding call |
+| `NEW_HYBRID` | Randoop first discovers API-valid source examples; the LLM then generalizes them into the final constrained input set | final generation call plus any repair calls |
 
 Key points:
 
-- **`RANDOOP` and `HYBRID` require `MRProvider: DEV`.** Randoop only generates source *inputs*; the metamorphic relation (follow-up transform + assertion) must be developer-owned. There is no LLM-written oracle on this path, so the run errors clearly if combined with `MRProvider: LLM`.
+- **`RANDOOP` and `HYBRID` require `MRProvider: DEV`.** Randoop produces the final source inputs on these paths, so the metamorphic relation must be developer-owned. `NEW_HYBRID` feeds Randoop examples into the normal LLM generation/repair path and therefore supports both `DEV` and `LLM` MR providers.
 - **Works for any object or array.** Randoop constructs inputs from the SUT's visible API, so object SUTs (e.g. an `Order` with a `List<LineItem>`), array SUTs (`double[][]`), and nested object graphs (`Cart` → `List<CartItem>`) are all supported with no per-SUT serialization code.
-- **Produces the same outputs as the LLM path.** With `JsonRequired: true` you get the JSON data + pass/fail split + HTML report; with `TestSuiteRequired: true` you get the object JUnit suite, emitted **pre-split** into `…PassingTest`/`…FailingTest` (Randoop knows each verdict in-process, so it does not need to run the suite to discover failures).
+- **All modes honor the same output flags.** With `JsonRequired: true` you get JSON data, pass/fail splits, and an HTML report. `RANDOOP`/`HYBRID` emit their object JUnit suites pre-split because they know verdicts in-process; `LLM`/`NEW_HYBRID` use the existing generated-test execution and actual-result splitter.
 - **Seeding source (HYBRID):** the LLM is asked for seed values from the `InputDomain` description when present, otherwise from the SUT source. `InputDomain` values are coarser (domain-level), while code-derived values can straddle exact boundaries.
+- **Seeding source (NEW_HYBRID):** Randoop runs first without an API call, retains source objects accepted by the target method, and emits each runtime value plus its minimal Java construction trace. The LLM receives those examples together with `InputDomain`; the examples ground it in the real API, while `InputDomain` remains authoritative for semantic constraints and diversity.
+- **Optional `RandoopTargetClasses`:** use a YAML list of fully qualified class names to limit Randoop to construction-relevant APIs. If omitted, the SUT and all `SUTSupportFiles` are explored as before.
 - The Randoop time budget is fixed at 15s; Randoop runs in a subprocess so the SUT classes are genuinely on its classpath.
+
+`NEW_HYBRID` is useful for constrained object domains. Pure `LLM` generation understands prose constraints but can hallucinate constructors or factories. Existing `HYBRID` provides domain values before exploration, but Randoop must still combine them into semantically valid objects and may produce few usable cases. `NEW_HYBRID` reverses the order: Randoop demonstrates real construction paths first, then the LLM applies the domain rules and expands those grounded examples into diverse final inputs. It does not guarantee better results for every SUT, so it remains a separate evaluation mode rather than replacing either existing strategy.
+
+Example:
+
+```yaml
+InputGenerator: NEW_HYBRID
+RandoopTargetClasses:
+  - com.example.ConversionCase
+  - com.example.Money
+  - java.math.BigDecimal
+```
 
 Example (Randoop builds the carts, developer owns the MR):
 

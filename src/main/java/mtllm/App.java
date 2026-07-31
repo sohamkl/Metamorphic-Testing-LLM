@@ -74,7 +74,26 @@ public final class App {
                     outputRoot.resolve("reports"));
 
             TestRunResult result;
-            if (config.inputGenerator().usesRandoop()) {
+            if (config.inputGenerator().randoopSeedsLlm()) {
+                RandoopInputRunner seedRunner = new RandoopInputRunner(
+                        repoRoot,
+                        repoRoot.resolve("lib/randoop-all-4.3.4.jar"),
+                        repoRoot.resolve("target/classes"),
+                        config.outputRoot().resolve("new-hybrid-randoop"));
+                System.out.println("Generating API-grounded seed examples with Randoop (NEW_HYBRID)...");
+                String seedExamples = seedRunner.generateSeedExamples(config, promptPath);
+                System.out.println("Randoop seed examples harvested; asking the LLM to generate final source inputs...");
+
+                PromptConfig groundedConfig = config.withRandoopSeedExamples(seedExamples);
+                LlmClient llmClient = new OpenAiClient(apiKey, model, baseUrl);
+                RepairLoop repairLoop = new RepairLoop(
+                        llmClient,
+                        testRunner,
+                        dataGeneratorRunner,
+                        outputRoot.resolve("junit-tests"),
+                        outputRoot.resolve("data-generator-code"));
+                result = repairLoop.generateRunAndRepair(groundedConfig, sutContext);
+            } else if (config.inputGenerator().usesRandoop()) {
                 result = runRandoop(config, sutContext, repoRoot, promptPath, dataGeneratorRunner);
             } else {
                 LlmClient llmClient = new OpenAiClient(apiKey, model, baseUrl);

@@ -1,6 +1,7 @@
 package mtllm.randoop;
 
 import mtllm.config.PromptConfig;
+import mtllm.runner.RuntimeResourceCopier;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -48,41 +49,12 @@ public final class RandoopInputRunner {
 
     /** Compile the SUT, run the generator subprocess, and return the JSON + emitted suite info. */
     public GenerationResult generate(PromptConfig config, Path promptPath) throws Exception {
-        Path classesDir = workDir.resolve("classes");
-        Files.createDirectories(classesDir);
+        Path classesDir = compileSut(config);
 
-        // 1. Compile SUT + support + developer-MR into classesDir so the subprocess (and Randoop)
-        //    can load them by name.
-        List<String> javac = new ArrayList<>();
-        javac.add("javac");
-        javac.add("-encoding");
-        javac.add("UTF-8");
-        javac.add("-d");
-        javac.add(classesDir.toString());
-        if (config.sutClassFile() != null) {
-            javac.add(config.sutClassFile().toString());
-        }
-        for (Path support : config.sutSupportFiles()) {
-            javac.add(support.toString());
-        }
-        if (config.developerMrFile() != null) {
-            javac.add(config.developerMrFile().toString());
-        }
-        ProcessResult compile = runProcess(javac);
-        if (compile.exitCode != 0) {
-            throw new IllegalStateException("Randoop SUT compilation failed:\n" + compile.output);
-        }
-
-        // 2. Run the generator in a subprocess; it writes the JSON to outJson and (when a test suite
-        //    is required) the object JUnit suite into <outputRoot>/junit-tests.
+        // Run the generator in a subprocess; it writes the JSON to outJson and (when a test suite
+        // is required) the object JUnit suite into <outputRoot>/junit-tests.
         Path outJson = workDir.resolve("randoop-data.json");
-        Files.deleteIfExists(outJson);
-        String classpath = String.join(File.pathSeparator,
-                projectClasses.toString(), randoopJar.toString(), runtimeDependencyClasspath(), classesDir.toString());
-        List<String> java = new ArrayList<>(List.of(
-                "java", "-cp", classpath, "mtllm.randoop.RandoopDataGenerator",
-                promptPath.toString(), outJson.toString()));
-        ProcessResult run = runProcess(java);
+        ProcessResult run = runGenerator(config, promptPath, outJson, classesDir, List.of());
         if (!Files.exists(outJson)) {
             throw new IllegalStateException("Randoop generation produced no output file.\n" + run.output);
         }
@@ -101,8 +73,64 @@ public final class RandoopInputRunner {
                     + junitDir + ".\n" + run.output);
         }
 
-        ProcessResult gate = compileSuiteGate(classesDir, passingFile, failingFile);
+        ProcessResult gate = compileSuiteGate(config, classesDir, passingFile, failingFile);
         return new GenerationResult(json, true, passingFile, failingFile, gate.exitCode == 0, gate.output);
+    }
+
+    /** Generate local Randoop examples for NEW_HYBRID without applying the MR or writing a suite. */
+    public String generateSeedExamples(PromptConfig config, Path promptPath) throws Exception {
+        Path classesDir = compileSut(config);
+        Path outJson = workDir.resolve("randoop-seeds.json");
+        ProcessResult run = runGenerator(config, promptPath, outJson, classesDir, List.of("--seeds-only"));
+        if (!Files.exists(outJson)) {
+            throw new IllegalStateException("Randoop seed generation produced no output file.\n" + run.output);
+        }
+        return Files.readString(outJson, StandardCharsets.UTF_8);
+    }
+
+    private Path compileSut(PromptConfig config) throws Exception {
+        Path classesDir = workDir.resolve("classes");
+        Files.createDirectories(classesDir);
+        List<String> javac = new ArrayList<>();
+        javac.add("javac");
+        javac.add("-encoding");
+        javac.add("UTF-8");
+        String compileClasspath = sutClasspath(config, projectClasses);
+        if (!compileClasspath.isEmpty()) {
+            javac.add("-cp");
+            javac.add(compileClasspath);
+        }
+        javac.add("-d");
+        javac.add(classesDir.toString());
+        if (config.sutClassFile() != null) {
+            javac.add(config.sutClassFile().toString());
+        }
+        for (Path support : config.sutSupportFiles()) {
+            javac.add(support.toString());
+        }
+        if (config.developerMrFile() != null) {
+            javac.add(config.developerMrFile().toString());
+        }
+        ProcessResult compile = runProcess(javac);
+        if (compile.exitCode != 0) {
+            throw new IllegalStateException("Randoop SUT compilation failed:\n" + compile.output);
+        }
+        RuntimeResourceCopier.copyFor(config, classesDir);
+        return classesDir;
+    }
+
+    private ProcessResult runGenerator(
+            PromptConfig config, Path promptPath, Path outJson, Path classesDir, List<String> extraArgs)
+            throws Exception {
+        Files.deleteIfExists(outJson);
+        String classpath = String.join(File.pathSeparator,
+                classesDir.toString(), projectClasses.toString(), randoopJar.toString(),
+                runtimeDependencyClasspath(), sutClasspath(config));
+        List<String> java = new ArrayList<>(List.of(
+                "java", "-cp", classpath, "mtllm.randoop.RandoopDataGenerator",
+                promptPath.toString(), outJson.toString()));
+        java.addAll(extraArgs);
+        return runProcess(java);
     }
 
     /** Build a classpath of project runtime dependency jars needed by the generator subprocess. */
@@ -119,7 +147,8 @@ public final class RandoopInputRunner {
      * gate is skipped (reported as not-compiled with an explanatory message), since the suite files
      * have still been written and remain valid for {@code mvn test}.
      */
-    private ProcessResult compileSuiteGate(Path sutClassesDir, Path passingFile, Path failingFile)
+    private ProcessResult compileSuiteGate(
+            PromptConfig config, Path sutClassesDir, Path passingFile, Path failingFile)
             throws IOException, InterruptedException {
         String junitClasspath = locateJUnitClasspath();
         if (junitClasspath.isEmpty()) {
@@ -130,10 +159,22 @@ public final class RandoopInputRunner {
         Files.createDirectories(gateClasses);
         List<String> javac = new ArrayList<>(List.of(
                 "javac", "-encoding", "UTF-8",
-                "-cp", junitClasspath + File.pathSeparator + sutClassesDir,
+                "-cp", String.join(File.pathSeparator,
+                        junitClasspath, sutClassesDir.toString(), sutClasspath(config)),
                 "-d", gateClasses.toString(),
                 passingFile.toString(), failingFile.toString()));
         return runProcess(javac);
+    }
+
+    private static String sutClasspath(PromptConfig config, Path... additionalEntries) {
+        List<String> entries = new ArrayList<>();
+        for (Path entry : additionalEntries) {
+            entries.add(entry.toString());
+        }
+        for (Path entry : config.sutClasspath()) {
+            entries.add(entry.toString());
+        }
+        return String.join(File.pathSeparator, entries);
     }
 
     /** Build a classpath of the JUnit API jars (and transitive deps) from {@code ~/.m2/repository}. */

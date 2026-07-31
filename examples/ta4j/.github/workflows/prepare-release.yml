@@ -1,0 +1,1108 @@
+name: Prepare Release
+
+concurrency:
+  group: prepare-release-${{ github.repository }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      releaseVersion:
+        description: "OPTIONAL: Release version (e.g. 0.20.0). Leave blank to auto-detect."
+        required: false
+      nextVersion:
+        description: "OPTIONAL: Next snapshot version (e.g. 0.20.1-SNAPSHOT). Leave blank to auto-generate."
+        required: false
+      dryRun:
+        description: "Run prepare workflow in dry-run mode (no issue sync, push, or PR creation)."
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  actions: write
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  prepare:
+    name: Prepare Release
+    runs-on: ubuntu-latest
+
+    steps:
+      # -----------------------
+      # Setup and Validation
+      # -----------------------
+      - name: Normalize dry run input
+        id: dry_run
+        run: |
+          echo "::group::Normalize prepare-release dry-run input"
+          raw="${{ github.event.inputs.dryRun }}"
+          if [ -z "$raw" ]; then
+            raw=true
+          fi
+          normalized=$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')
+
+          if [ "$normalized" = "false" ] || [ "$normalized" = "0" ] || [ "$normalized" = "no" ]; then
+            dry_run=false
+          else
+            dry_run=true
+          fi
+
+          echo "audit:dry_run_input_raw='${raw}'"
+          echo "audit:dry_run_normalized=$dry_run"
+          echo "dryRun=$dry_run" >> $GITHUB_OUTPUT
+          echo "::endgroup::"
+
+      - name: Normalize direct push flag
+        id: direct_push
+        env:
+          DIRECT_PUSH: ${{ vars.RELEASE_DIRECT_PUSH }}
+        run: |
+          echo "::group::Normalize RELEASE_DIRECT_PUSH"
+          raw="${DIRECT_PUSH:-}"
+          normalized=$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')
+
+          if [ "$normalized" = "true" ] || [ "$normalized" = "1" ] || [ "$normalized" = "yes" ]; then
+            enabled=true
+          else
+            enabled=false
+          fi
+
+          echo "audit:release_direct_push=$enabled raw='${raw}'"
+          echo "enabled=$enabled" >> $GITHUB_OUTPUT
+          echo "::endgroup::"
+
+      - name: Preflight GH_TA4J_REPO_TOKEN permissions
+        id: token_preflight
+        env:
+          GH_TA4J_REPO_TOKEN: ${{ secrets.GH_TA4J_REPO_TOKEN }}
+          DRY_RUN: ${{ steps.dry_run.outputs.dryRun }}
+          DIRECT_PUSH: ${{ steps.direct_push.outputs.enabled }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import socket
+          import sys
+          import urllib.error
+          import urllib.request
+
+          token = os.environ.get("GH_TA4J_REPO_TOKEN", "")
+          dry_run = os.environ.get("DRY_RUN", "false").lower() == "true"
+          direct_push = os.environ.get("DIRECT_PUSH", "false").lower() == "true"
+
+          output_path = os.environ.get("GITHUB_OUTPUT")
+          def write_output(line: str) -> None:
+              if output_path:
+                  with open(output_path, "a", encoding="utf-8") as fh:
+                      fh.write(line + "\n")
+
+          def warn_or_error(message: str) -> bool:
+              if dry_run:
+                  print(f"::warning::{message}")
+                  return False
+              if direct_push:
+                  print(f"::error::{message}")
+                  return True
+              print(f"::warning::{message}")
+              return False
+
+          if not token:
+              print("audit:repo_token_present=false")
+              write_output("repo_token_present=false")
+              write_output("use_repo_token=false")
+              sys.exit(0)
+
+          owner = os.environ.get("GITHUB_REPOSITORY_OWNER")
+          repo = os.environ.get("GITHUB_REPOSITORY", "").split("/", 1)[-1]
+          if not owner or not repo:
+              print("::error::Unable to resolve repository context for permission preflight.")
+              sys.exit(1)
+
+          request_timeout_seconds = 30
+
+          def request_json(url: str, payload=None):
+              headers = {
+                  "Authorization": f"Bearer {token}",
+                  "User-Agent": "ta4j-release-preflight",
+                  "Accept": "application/vnd.github+json",
+              }
+              data = None
+              if payload is not None:
+                  headers["Content-Type"] = "application/json"
+                  data = json.dumps(payload).encode("utf-8")
+              req = urllib.request.Request(url, data=data, headers=headers)
+              try:
+                  with urllib.request.urlopen(req, timeout=request_timeout_seconds) as resp:
+                      body = json.load(resp)
+                      response_headers = {k.lower(): v for k, v in resp.headers.items()}
+              except TimeoutError as exc:
+                  raise TimeoutError(
+                      f"Request to {url} timed out after {request_timeout_seconds}s"
+                  ) from exc
+              except urllib.error.URLError as exc:
+                  if isinstance(exc.reason, socket.timeout):
+                      raise TimeoutError(
+                          f"Request to {url} timed out after {request_timeout_seconds}s"
+                      ) from exc
+                  raise
+              return body, response_headers
+
+          query = {
+              "query": "query($owner:String!,$repo:String!){repository(owner:$owner,name:$repo){viewerPermission}}",
+              "variables": {"owner": owner, "repo": repo},
+          }
+          try:
+              graphql_data, _ = request_json("https://api.github.com/graphql", query)
+              repo_data, repo_headers = request_json(f"https://api.github.com/repos/{owner}/{repo}")
+          except Exception as exc:
+              msg = f"GH_TA4J_REPO_TOKEN permission check failed: {exc}"
+              should_fail = warn_or_error(msg)
+              write_output("repo_token_present=true")
+              write_output("use_repo_token=false")
+              if should_fail:
+                  sys.exit(1)
+              sys.exit(0)
+
+          if "errors" in graphql_data:
+              msg = f"GH_TA4J_REPO_TOKEN permission check failed: {graphql_data['errors']}"
+              should_fail = warn_or_error(msg)
+              write_output("repo_token_present=true")
+              write_output("use_repo_token=false")
+              if should_fail:
+                  sys.exit(1)
+              sys.exit(0)
+
+          permission = graphql_data.get("data", {}).get("repository", {}).get("viewerPermission")
+          push_permission = bool(repo_data.get("permissions", {}).get("push"))
+          scopes_header = repo_headers.get("x-oauth-scopes", "")
+          scopes = [scope.strip() for scope in scopes_header.split(",") if scope.strip()]
+          has_repo_scope = "repo" in scopes
+          has_public_repo_scope = "public_repo" in scopes
+          scope_check = "unknown"
+          scope_allows_push = True
+          if scopes:
+              scope_allows_push = has_repo_scope or has_public_repo_scope
+              scope_check = "pass" if scope_allows_push else "fail"
+
+          permission_allows_push = permission in ("WRITE", "MAINTAIN", "ADMIN") or push_permission
+          allowed = permission_allows_push and scope_allows_push
+
+          write_output("repo_token_present=true")
+          write_output(f"repo_token_permission={permission}")
+          write_output(f"repo_token_push_permission={'true' if push_permission else 'false'}")
+          write_output(f"repo_token_scope_check={scope_check}")
+          write_output(f"use_repo_token={'true' if allowed else 'false'}")
+
+          if not allowed:
+              reasons = []
+              if not permission_allows_push:
+                  reasons.append(
+                      f"viewerPermission={permission}, permissions.push={'true' if push_permission else 'false'}"
+                  )
+              if not scope_allows_push:
+                  reasons.append(f"oauth_scopes='{scopes_header}'")
+              reason_text = "; ".join(reasons) if reasons else "unknown policy mismatch"
+              msg = f"GH_TA4J_REPO_TOKEN lacks push capability ({reason_text})."
+              should_fail = warn_or_error(msg)
+              if should_fail:
+                  sys.exit(1)
+              sys.exit(0)
+
+          print(f"audit:repo_token_permission={permission}")
+          print(f"audit:repo_token_push_permission={'true' if push_permission else 'false'}")
+          print(f"audit:repo_token_scope_check={scope_check}")
+          print("audit:repo_token_usable=true")
+          PY
+
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+          token: ${{ steps.token_preflight.outputs.use_repo_token == 'true' && secrets.GH_TA4J_REPO_TOKEN || github.token }}
+
+      - name: Validate documentation integrity
+        run: |
+          echo "::group::Validate documentation links and example references"
+          chmod +x scripts/docs-integrity-check.sh
+          scripts/docs-integrity-check.sh
+          echo "::endgroup::"
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 25
+          cache: maven
+
+      # -----------------------
+      # Version Detection
+      # -----------------------
+      - name: Read current version from POM
+        id: read_current
+        shell: bash
+        run: |
+          CURRENT=$(./mvnw -q -DforceStdout help:evaluate -Dexpression=project.version)
+          echo "Detected project.version: $CURRENT"
+
+          if [[ -z "${CURRENT}" ]]; then
+            echo "Error: Failed to read project.version from pom.xml"
+            exit 1
+          fi
+
+          echo "current=$CURRENT" >> $GITHUB_OUTPUT
+
+      - name: Capture user input versions
+        id: user_input
+        env:
+          INPUT_RELEASE: ${{ github.event.inputs.releaseVersion }}
+          INPUT_NEXT: ${{ github.event.inputs.nextVersion }}
+        run: |
+          echo "Inputs: release='${INPUT_RELEASE}', next='${INPUT_NEXT}'"
+          echo "release_input=${INPUT_RELEASE:-}" >> $GITHUB_OUTPUT
+          echo "next_input=${INPUT_NEXT:-}" >> $GITHUB_OUTPUT
+
+      - name: Determine release version
+        id: determine_release
+        shell: bash
+        env:
+          CURRENT: ${{ steps.read_current.outputs.current }}
+          INPUT_RELEASE: ${{ steps.user_input.outputs.release_input }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${INPUT_RELEASE}" ]]; then
+            if [[ "${CURRENT}" != *-SNAPSHOT ]]; then
+              echo "Error: Current version '${CURRENT}' is not a SNAPSHOT version."
+              echo "Cannot auto-detect release version from a non-SNAPSHOT version."
+              echo "Please provide an explicit releaseVersion input or ensure the POM contains a SNAPSHOT version."
+              exit 1
+            fi
+            RELEASE="${CURRENT%-SNAPSHOT}"
+            echo "Auto-detected release version: ${RELEASE} (from ${CURRENT})"
+          else
+            RELEASE="${INPUT_RELEASE}"
+          fi
+
+          if [[ "${RELEASE}" == *-SNAPSHOT* ]]; then
+            echo "Error: releaseVersion must be a stable version (no -SNAPSHOT suffix). Got: ${RELEASE}"
+            exit 1
+          fi
+
+          if [[ ! "${RELEASE}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Error: releaseVersion must be major.minor.patch (e.g. 0.20.0). Got: ${RELEASE}"
+            exit 1
+          fi
+
+          if [[ "${CURRENT}" == *-SNAPSHOT ]]; then
+            CURRENT_BASE="${CURRENT%-SNAPSHOT}"
+          else
+            CURRENT_BASE="${CURRENT}"
+          fi
+
+          if [[ -z "${CURRENT_BASE}" ]]; then
+            echo "Error: unable to determine current base version from pom.xml"
+            exit 1
+          fi
+
+          if [[ "$(printf '%s\n' "${CURRENT_BASE}" "${RELEASE}" | sort -V | head -n1)" != "${CURRENT_BASE}" ]]; then
+            echo "Error: releaseVersion (${RELEASE}) is lower than the current pom.xml version (${CURRENT_BASE})."
+            echo "Refusing to release a version lower than the POM."
+            exit 1
+          fi
+
+          echo "release=$RELEASE" >> $GITHUB_OUTPUT
+
+      - name: Determine next snapshot version
+        id: determine_next
+        shell: bash
+        env:
+          RELEASE: ${{ steps.determine_release.outputs.release }}
+          INPUT_NEXT: ${{ steps.user_input.outputs.next_input }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${INPUT_NEXT}" ]]; then
+            BASE="${RELEASE}"
+            if [[ "${BASE}" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              MAJOR="${BASH_REMATCH[1]}"
+              MINOR="${BASH_REMATCH[2]}"
+              PATCH="${BASH_REMATCH[3]}"
+              NEXT="${MAJOR}.${MINOR}.$((PATCH+1))-SNAPSHOT"
+            else
+              echo "Error: Unsupported release version format '${BASE}'. Expected major.minor.patch"
+              exit 1
+            fi
+          else
+            NEXT="${INPUT_NEXT}"
+          fi
+
+          if [[ "${NEXT}" != *-SNAPSHOT ]]; then
+            echo "Error: nextVersion must end with -SNAPSHOT. Got: ${NEXT}"
+            exit 1
+          fi
+
+          if [[ ! "${NEXT}" =~ ^[0-9]+\.[0-9]+\.[0-9]+-SNAPSHOT$ ]]; then
+            echo "Error: nextVersion must be major.minor.patch-SNAPSHOT (e.g. 0.20.1-SNAPSHOT). Got: ${NEXT}"
+            exit 1
+          fi
+
+          NEXT_BASE="${NEXT%-SNAPSHOT}"
+          # Verify that nextVersion is actually greater than releaseVersion
+          highest=$(printf '%s\n' "${RELEASE}" "${NEXT_BASE}" | sort -V | tail -n1)
+          if [[ "${highest}" != "${NEXT_BASE}" ]] || [[ "${NEXT_BASE}" == "${RELEASE}" ]]; then
+            echo "Error: nextVersion (${NEXT_BASE}) must be greater than releaseVersion (${RELEASE})"
+            exit 1
+          fi
+
+          echo "next=$NEXT" >> $GITHUB_OUTPUT
+
+      - name: Export version outputs
+        id: versions
+        shell: bash
+        env:
+          RELEASE: ${{ steps.determine_release.outputs.release }}
+          NEXT: ${{ steps.determine_next.outputs.next }}
+          CURRENT: ${{ steps.read_current.outputs.current }}
+        run: |
+          echo "Using release: $RELEASE"
+          echo "Using next snapshot: $NEXT"
+          echo "release=$RELEASE" >> $GITHUB_OUTPUT
+          echo "next=$NEXT" >> $GITHUB_OUTPUT
+          echo "current=$CURRENT" >> $GITHUB_OUTPUT
+
+      - name: Preflight git push capability
+        env:
+          DIRECT_PUSH: ${{ steps.direct_push.outputs.enabled }}
+          TARGET_BRANCH: ${{ github.event.repository.default_branch }}
+          RELEASE_BRANCH: release/${{ steps.versions.outputs.release }}
+          USE_REPO_TOKEN: ${{ steps.token_preflight.outputs.use_repo_token }}
+          DRY_RUN: ${{ steps.dry_run.outputs.dryRun }}
+        run: |
+          set -euo pipefail
+          echo "::group::Git push dry-run capability probe"
+          if [ "${DIRECT_PUSH}" = "true" ]; then
+            if [ -z "${TARGET_BRANCH:-}" ]; then
+              echo "Default branch was not set; refusing to probe push capability."
+              exit 1
+            fi
+            refspec="HEAD:refs/heads/${TARGET_BRANCH}"
+            mode="default-branch"
+          else
+            refspec="HEAD:refs/heads/${RELEASE_BRANCH}"
+            mode="release-branch"
+          fi
+
+          echo "audit:push_probe_mode=${mode} refspec=${refspec} use_repo_token=${USE_REPO_TOKEN:-false} dryRun=${DRY_RUN:-false}"
+
+          set +e
+          if [ "${DIRECT_PUSH}" = "true" ]; then
+            output=$(git push --dry-run origin "${refspec}" 2>&1)
+          else
+            output=$(git push --dry-run --force-with-lease origin "${refspec}" 2>&1)
+          fi
+          status=$?
+          set -e
+
+          printf '%s\n' "$output"
+
+          if [ "$status" -ne 0 ]; then
+            echo "::error::Push capability probe failed for ${mode}. Check token/repository permissions."
+            exit "$status"
+          fi
+          echo "::endgroup::"
+
+      # -----------------------
+      # Release Preparation
+      # -----------------------
+      - name: Dry-run mode notice
+        if: steps.dry_run.outputs.dryRun == 'true'
+        run: |
+          echo "DRY RUN ENABLED: skipping commits, push, and PR creation."
+
+      - name: Prepare Release Notes
+        run: |
+          echo "::group::Prepare release notes and version references"
+          chmod +x scripts/prepare-release.sh
+          scripts/prepare-release.sh "${{ steps.versions.outputs.release }}"
+          echo "::endgroup::"
+
+      - name: Configure git user
+        if: steps.dry_run.outputs.dryRun != 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      # -----------------------
+      # Apply Release Version
+      # -----------------------
+      - name: Set Maven version to release
+        if: steps.dry_run.outputs.dryRun != 'true'
+        env:
+          RELEASE_VERSION: ${{ steps.versions.outputs.release }}
+        run: |
+          ./mvnw -B versions:set -DnewVersion=$RELEASE_VERSION
+
+      - name: Commit Maven version change
+        if: steps.dry_run.outputs.dryRun != 'true'
+        run: |
+          ./mvnw -B versions:commit
+
+      - name: Validate Maven Central metadata
+        run: |
+          echo "::group::Validate Maven Central metadata"
+          chmod +x scripts/validate-central-metadata.sh
+          scripts/validate-central-metadata.sh
+          echo "::endgroup::"
+
+      - name: Commit release version and notes
+        if: steps.dry_run.outputs.dryRun != 'true'
+        run: |
+          git add release/${{ steps.versions.outputs.release }}.md
+          git add -u
+          git commit -am "Release ${{ steps.versions.outputs.release }}"
+
+      - name: Capture release commit
+        id: release_commit
+        if: steps.dry_run.outputs.dryRun != 'true'
+        run: |
+          sha=$(git rev-parse HEAD)
+          echo "release_commit=$sha" >> $GITHUB_OUTPUT
+
+      - name: Gate release-ready deprecations
+        id: deprecation_release_gate
+        env:
+          DRY_RUN: ${{ steps.dry_run.outputs.dryRun }}
+          RELEASE_VERSION: ${{ steps.versions.outputs.release }}
+          REPORT_JSON: ${{ runner.temp }}/release-ready-deprecations.json
+          REPORT_MD: ${{ runner.temp }}/release-ready-deprecations.md
+        run: |
+          echo "::group::Gate release-ready deprecations"
+          ./mvnw -B -q -pl ta4j-examples -am -DskipTests install
+
+          set +e
+          ./mvnw -B -q -pl ta4j-examples exec:java \
+            -Dexec.mainClass=ta4jexamples.doc.RemovalReadyDeprecationScanner \
+            "-Dexec.args=--repo-root ${GITHUB_WORKSPACE} --pom-file pom.xml --target-removal-version ${RELEASE_VERSION} --include-overdue --fail-on-due --output-json ${REPORT_JSON} --output-md ${REPORT_MD}"
+          scan_status=$?
+          set -e
+          echo "::endgroup::"
+
+          echo "scan_status=$scan_status" >> $GITHUB_OUTPUT
+          echo "report_json=$REPORT_JSON" >> $GITHUB_OUTPUT
+          echo "report_md=$REPORT_MD" >> $GITHUB_OUTPUT
+
+          {
+            echo ""
+            cat "$REPORT_MD"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "$DRY_RUN" == "true" ]]; then
+            exit 0
+          fi
+
+          exit "$scan_status"
+
+      - name: Upload release-ready deprecation gate report
+        if: always() && steps.deprecation_release_gate.outputs.report_json != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-ready-deprecations-${{ steps.versions.outputs.release }}
+          path: |
+            ${{ steps.deprecation_release_gate.outputs.report_json }}
+            ${{ steps.deprecation_release_gate.outputs.report_md }}
+
+      # -----------------------
+      # Apply Next Snapshot Version
+      # -----------------------
+      - name: Set Maven version to next snapshot
+        if: steps.dry_run.outputs.dryRun != 'true'
+        env:
+          NEXT_VERSION: ${{ steps.versions.outputs.next }}
+        run: |
+          ./mvnw -B versions:set -DnewVersion=$NEXT_VERSION
+
+      - name: Commit Maven version change for next
+        if: steps.dry_run.outputs.dryRun != 'true'
+        run: |
+          ./mvnw -B versions:commit
+
+      - name: Commit next snapshot version
+        if: steps.dry_run.outputs.dryRun != 'true'
+        run: |
+          git commit -am "Start ${{ steps.versions.outputs.next }}"
+
+      - name: Scan removal-ready deprecations
+        id: deprecation_scan
+        env:
+          NEXT_VERSION: ${{ steps.versions.outputs.next }}
+          REPORT_JSON: ${{ runner.temp }}/removal-ready-deprecations.json
+          REPORT_MD: ${{ runner.temp }}/removal-ready-deprecations.md
+        run: |
+          echo "::group::Scan removal-ready deprecations"
+          NEXT_REMOVAL_VERSION="${NEXT_VERSION%-SNAPSHOT}"
+          ./mvnw -B -q -pl ta4j-examples -am -DskipTests install
+          ./mvnw -B -q -pl ta4j-examples exec:java \
+            -Dexec.mainClass=ta4jexamples.doc.RemovalReadyDeprecationScanner \
+            "-Dexec.args=--repo-root ${GITHUB_WORKSPACE} --pom-file pom.xml --target-removal-version ${NEXT_REMOVAL_VERSION} --include-overdue --output-json ${REPORT_JSON} --output-md ${REPORT_MD}"
+          echo "::endgroup::"
+
+          echo "report_json=$REPORT_JSON" >> $GITHUB_OUTPUT
+          echo "report_md=$REPORT_MD" >> $GITHUB_OUTPUT
+
+          {
+            echo ""
+            cat "$REPORT_MD"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create or update removal-ready deprecation issues
+        id: deprecation_issues
+        if: steps.dry_run.outputs.dryRun != 'true'
+        uses: actions/github-script@v9
+        env:
+          REPORT_JSON: ${{ steps.deprecation_scan.outputs.report_json }}
+          REPORT_WITH_ISSUES_JSON: ${{ runner.temp }}/removal-ready-deprecations-with-issues.json
+          REPORT_WITH_ISSUES_MD: ${{ runner.temp }}/removal-ready-deprecations-with-issues.md
+        with:
+          github-token: ${{ steps.token_preflight.outputs.use_repo_token == 'true' && secrets.GH_TA4J_REPO_TOKEN || github.token }}
+          script: |
+            const fs = require("fs");
+
+            const reportPath = process.env.REPORT_JSON;
+            const outputJsonPath = process.env.REPORT_WITH_ISSUES_JSON;
+            const outputMarkdownPath = process.env.REPORT_WITH_ISSUES_MD;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const syncedIssuesByMarker = new Map();
+
+            if (!reportPath) {
+              throw new Error("Missing REPORT_JSON for deprecation issue sync.");
+            }
+
+            const report = JSON.parse(fs.readFileSync(reportPath, "utf8"));
+            const issuePlans = Array.isArray(report.issuePlans) ? report.issuePlans : [];
+            const removalVersion = report.removalVersion;
+            const activeMarkers = new Set(issuePlans.map((plan) => plan.issueMarker).filter(Boolean));
+
+            function escapeSearchPhrase(value) {
+              return `"${value.replace(/["\\\\]/g, "\\\\$&")}"`;
+            }
+
+            async function findExistingIssue(marker) {
+              if (syncedIssuesByMarker.has(marker)) {
+                return syncedIssuesByMarker.get(marker);
+              }
+
+              const issues = await github.paginate(github.rest.search.issuesAndPullRequests, {
+                q: `repo:${owner}/${repo} is:issue in:body ${escapeSearchPhrase(marker)}`,
+                per_page: 10
+              });
+              const existingIssue = issues.find((issue) => !issue.pull_request && (issue.body || "").includes(marker)) || null;
+              syncedIssuesByMarker.set(marker, existingIssue);
+              return existingIssue;
+            }
+
+            async function findManagedIssuesForVersion() {
+              if (!removalVersion) {
+                return [];
+              }
+
+              const markerSearch = `ta4j:deprecation-removal version=${removalVersion}`;
+              const issues = await github.paginate(github.rest.search.issuesAndPullRequests, {
+                q: `repo:${owner}/${repo} is:issue in:body ${escapeSearchPhrase(markerSearch)}`,
+                per_page: 100
+              });
+              return issues.filter((issue) => !issue.pull_request && (issue.body || "").includes(markerSearch));
+            }
+
+            let createdCount = 0;
+            let updatedCount = 0;
+            let reopenedCount = 0;
+            let closedStaleCount = 0;
+
+            for (const plan of issuePlans) {
+              const marker = plan.issueMarker;
+              if (!marker) {
+                throw new Error(`Missing issue marker for dedupe key ${plan.dedupeKey}`);
+              }
+
+              let existingIssue = await findExistingIssue(marker);
+
+              if (existingIssue) {
+                if (existingIssue.title !== plan.issueTitle || (existingIssue.body || "") !== plan.issueBody) {
+                  existingIssue = (await github.rest.issues.update({
+                    owner,
+                    repo,
+                    issue_number: existingIssue.number,
+                    title: plan.issueTitle,
+                    body: plan.issueBody
+                  })).data;
+                  updatedCount += 1;
+                }
+
+                if (existingIssue.state !== "open") {
+                  existingIssue = (await github.rest.issues.update({
+                    owner,
+                    repo,
+                    issue_number: existingIssue.number,
+                    state: "open"
+                  })).data;
+                  reopenedCount += 1;
+                }
+              } else {
+                existingIssue = (await github.rest.issues.create({
+                  owner,
+                  repo,
+                  title: plan.issueTitle,
+                  body: plan.issueBody
+                })).data;
+                createdCount += 1;
+              }
+
+              syncedIssuesByMarker.set(marker, existingIssue);
+
+              plan.githubIssue = {
+                number: existingIssue.number,
+                state: existingIssue.state,
+                url: existingIssue.html_url
+              };
+            }
+
+            for (const issue of await findManagedIssuesForVersion()) {
+              const body = issue.body || "";
+              const stillPlanned = [...activeMarkers].some((marker) => body.includes(marker));
+              if (!stillPlanned && issue.state === "open") {
+                await github.rest.issues.update({
+                  owner,
+                  repo,
+                  issue_number: issue.number,
+                  state: "closed",
+                  state_reason: "completed"
+                });
+                closedStaleCount += 1;
+              }
+            }
+
+            report.githubIssueSummary = {
+              createdCount,
+              updatedCount,
+              reopenedCount,
+              closedStaleCount,
+              planCount: issuePlans.length
+            };
+
+            const markdownLines = [
+              `# Removal-ready deprecation issue sync for ${report.snapshotVersion}`,
+              "",
+              `- Planned issues: ${issuePlans.length}`,
+              `- Created: ${createdCount}`,
+              `- Updated: ${updatedCount}`,
+              `- Reopened: ${reopenedCount}`,
+              `- Closed stale: ${closedStaleCount}`,
+              ""
+            ];
+
+            if (issuePlans.length === 0) {
+              markdownLines.push("No removal-ready deprecations matched the current snapshot version.");
+            } else {
+              for (const plan of issuePlans) {
+                const issueUrl = plan.githubIssue?.url || "(missing issue url)";
+                const issueNumber = plan.githubIssue?.number || "n/a";
+                markdownLines.push(`## ${plan.issueTitle}`);
+                markdownLines.push("");
+                markdownLines.push(`- Module: \`${plan.module}\``);
+                markdownLines.push(`- File: \`${plan.filePath}\``);
+                markdownLines.push(`- GitHub issue: #${issueNumber} (${issueUrl})`);
+                markdownLines.push("- Symbols:");
+                for (const symbol of plan.symbols || []) {
+                  markdownLines.push(`  - \`${symbol.name}\` (${symbol.kind}, line ${symbol.line})`);
+                }
+                markdownLines.push("");
+              }
+            }
+
+            fs.writeFileSync(outputJsonPath, JSON.stringify(report, null, 2));
+            fs.writeFileSync(outputMarkdownPath, markdownLines.join("\n"));
+
+            core.setOutput("report_json", outputJsonPath);
+            core.setOutput("report_md", outputMarkdownPath);
+            core.setOutput("plan_count", String(issuePlans.length));
+            core.setOutput("created_count", String(createdCount));
+            core.setOutput("updated_count", String(updatedCount));
+            core.setOutput("reopened_count", String(reopenedCount));
+            core.setOutput("closed_stale_count", String(closedStaleCount));
+
+      - name: Upload removal-ready deprecation report
+        if: always() && steps.deprecation_scan.outputs.report_json != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: removal-ready-deprecations-${{ steps.versions.outputs.next }}
+          path: |
+            ${{ steps.deprecation_scan.outputs.report_json }}
+            ${{ steps.deprecation_scan.outputs.report_md }}
+            ${{ steps.deprecation_issues.outputs.report_json }}
+            ${{ steps.deprecation_issues.outputs.report_md }}
+
+      - name: Fail dry-run on release-ready deprecations
+        if: steps.dry_run.outputs.dryRun == 'true' && steps.deprecation_release_gate.outputs.scan_status != '0'
+        env:
+          SCAN_STATUS: ${{ steps.deprecation_release_gate.outputs.scan_status }}
+        run: |
+          echo "Dry-run deprecation gate found release-blocking findings. See the release-ready deprecation report artifact."
+          exit "$SCAN_STATUS"
+
+      # -----------------------
+      # Push or PR
+      # -----------------------
+      - name: Push release commits directly to default branch
+        if: steps.dry_run.outputs.dryRun != 'true' && steps.direct_push.outputs.enabled == 'true'
+        env:
+          TARGET_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          branch="${TARGET_BRANCH:-}"
+          if [ -z "$branch" ]; then
+            echo "Default branch was not set; refusing to push."
+            exit 1
+          fi
+          git fetch origin "${branch}"
+          if ! git merge-base --is-ancestor "origin/${branch}" HEAD; then
+            echo "Default branch '${branch}' advanced after preparation; refusing to push."
+            exit 1
+          fi
+          echo "Pushing release commits directly to ${branch}."
+          git push origin "HEAD:${branch}"
+
+      - name: Dispatch publish-release workflow (direct push)
+        if: steps.dry_run.outputs.dryRun != 'true' && steps.direct_push.outputs.enabled == 'true'
+        uses: actions/github-script@v9
+        env:
+          RELEASE_VERSION: ${{ steps.versions.outputs.release }}
+          RELEASE_COMMIT: ${{ steps.release_commit.outputs.release_commit }}
+          DRY_RUN: ${{ steps.dry_run.outputs.dryRun }}
+        with:
+          github-token: ${{ steps.token_preflight.outputs.use_repo_token == 'true' && secrets.GH_TA4J_REPO_TOKEN || github.token }}
+          script: |
+            const releaseVersion = process.env.RELEASE_VERSION;
+            const releaseCommit = process.env.RELEASE_COMMIT;
+            const dryRun = process.env.DRY_RUN || "false";
+            if (!releaseVersion || !releaseCommit) {
+              throw new Error("Missing release version or release commit for publish dispatch.");
+            }
+            const ref = "${{ github.event.repository.default_branch }}";
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: "publish-release.yml",
+              ref,
+              inputs: {
+                releaseVersion,
+                releaseCommit,
+                dryRun
+              }
+            });
+
+      - name: Create release branch
+        if: steps.dry_run.outputs.dryRun != 'true' && steps.direct_push.outputs.enabled != 'true'
+        env:
+          RELEASE_BRANCH: release/${{ steps.versions.outputs.release }}
+        run: |
+          git checkout -b "${RELEASE_BRANCH}"
+
+      - name: Push release branch
+        if: steps.dry_run.outputs.dryRun != 'true' && steps.direct_push.outputs.enabled != 'true'
+        env:
+          RELEASE_BRANCH: release/${{ steps.versions.outputs.release }}
+        run: |
+          git push --force-with-lease origin "HEAD:refs/heads/${RELEASE_BRANCH}"
+
+      - name: Create or update release PR
+        id: release_pr
+        if: steps.dry_run.outputs.dryRun != 'true' && steps.direct_push.outputs.enabled != 'true'
+        uses: actions/github-script@v9
+        env:
+          RELEASE_VERSION: ${{ steps.versions.outputs.release }}
+          NEXT_VERSION: ${{ steps.versions.outputs.next }}
+          RELEASE_COMMIT: ${{ steps.release_commit.outputs.release_commit }}
+          RELEASE_BRANCH: release/${{ steps.versions.outputs.release }}
+          TARGET_BRANCH: ${{ github.event.repository.default_branch }}
+          RELEASE_OWNER: ${{ vars.RELEASE_OWNER || 'TheCookieLab' }}
+          REMOVAL_PLAN_COUNT: ${{ steps.deprecation_issues.outputs.plan_count }}
+          REMOVAL_CREATED_COUNT: ${{ steps.deprecation_issues.outputs.created_count }}
+          REMOVAL_UPDATED_COUNT: ${{ steps.deprecation_issues.outputs.updated_count }}
+          REMOVAL_REOPENED_COUNT: ${{ steps.deprecation_issues.outputs.reopened_count }}
+          REMOVAL_CLOSED_STALE_COUNT: ${{ steps.deprecation_issues.outputs.closed_stale_count }}
+        with:
+          github-token: ${{ steps.token_preflight.outputs.use_repo_token == 'true' && secrets.GH_TA4J_REPO_TOKEN || github.token }}
+          script: |
+            const releaseVersion = process.env.RELEASE_VERSION;
+            const nextVersion = process.env.NEXT_VERSION;
+            const releaseCommit = process.env.RELEASE_COMMIT;
+            const releaseBranch = process.env.RELEASE_BRANCH;
+            const baseBranch = process.env.TARGET_BRANCH;
+            const removalPlanCount = process.env.REMOVAL_PLAN_COUNT || "0";
+            const removalCreatedCount = process.env.REMOVAL_CREATED_COUNT || "0";
+            const removalUpdatedCount = process.env.REMOVAL_UPDATED_COUNT || "0";
+            const removalReopenedCount = process.env.REMOVAL_REOPENED_COUNT || "0";
+            const removalClosedStaleCount = process.env.REMOVAL_CLOSED_STALE_COUNT || "0";
+
+            if (!releaseVersion || !nextVersion || !releaseCommit || !releaseBranch || !baseBranch) {
+              throw new Error("Missing required release metadata for PR creation.");
+            }
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const head = `${owner}:${releaseBranch}`;
+
+            const body = [
+              `Automated release PR for ${releaseVersion}.`,
+              "",
+              "Contains:",
+              `- Set version to ${releaseVersion}`,
+              `- Generated release notes: release/${releaseVersion}.md`,
+              `- Bump to next snapshot: ${nextVersion}`,
+              `- Synced removal-ready deprecation issues: ${removalPlanCount} plan(s), ${removalCreatedCount} created, ${removalUpdatedCount} updated, ${removalReopenedCount} reopened, ${removalClosedStaleCount} stale closed`,
+              "",
+              "<!-- release-meta",
+              `releaseVersion: ${releaseVersion}`,
+              `nextVersion: ${nextVersion}`,
+              `releaseCommit: ${releaseCommit}`,
+              "-->"
+            ].join("\n");
+
+            const existing = await github.rest.pulls.list({
+              owner,
+              repo,
+              state: "open",
+              head
+            });
+
+            let prNumber;
+            let prAuthor;
+            if (existing.data.length > 0) {
+              const pr = existing.data[0];
+              prNumber = pr.number;
+              prAuthor = pr.user?.login || "";
+              await github.rest.pulls.update({
+                owner,
+                repo,
+                pull_number: pr.number,
+                title: `Release ${releaseVersion}`,
+                base: baseBranch,
+                body
+              });
+            } else {
+              const created = await github.rest.pulls.create({
+                owner,
+                repo,
+                title: `Release ${releaseVersion}`,
+                head: releaseBranch,
+                base: baseBranch,
+                body
+              });
+              prNumber = created.data.number;
+              prAuthor = created.data.user?.login || "";
+            }
+
+            try {
+              await github.rest.issues.addLabels({
+                owner,
+                repo,
+                issue_number: prNumber,
+                labels: ["release"]
+              });
+            } catch (error) {
+              console.warn(`Failed to add release label: ${error.message}`);
+            }
+
+            const releaseOwner = process.env.RELEASE_OWNER?.trim() || "TheCookieLab";
+
+            try {
+              await github.rest.issues.addAssignees({
+                owner,
+                repo,
+                issue_number: prNumber,
+                assignees: [releaseOwner]
+              });
+            } catch (error) {
+              throw new Error(`Failed to assign release owner ${releaseOwner}: ${error.message}`);
+            }
+
+            core.setOutput("pr_number", String(prNumber));
+            core.setOutput("pr_author", prAuthor);
+
+      - name: Plan release PR reviewers
+        id: release_review_plan
+        if: steps.dry_run.outputs.dryRun != 'true' && steps.direct_push.outputs.enabled != 'true'
+        env:
+          RELEASE_OWNER: ${{ vars.RELEASE_OWNER || 'TheCookieLab' }}
+          RELEASE_REVIEWERS: ${{ vars.RELEASE_REVIEWERS }}
+          RELEASE_REVIEW_TEAMS: ${{ vars.RELEASE_REVIEW_TEAMS }}
+          PR_AUTHOR: ${{ steps.release_pr.outputs.pr_author }}
+        run: |
+          bash scripts/release/release_helpers.sh release-pr-review-plan \
+            --release-owner "${RELEASE_OWNER}" \
+            --pr-author "${PR_AUTHOR}" \
+            --reviewers "${RELEASE_REVIEWERS:-}" \
+            --team-reviewers "${RELEASE_REVIEW_TEAMS:-}" \
+            --output release-review-plan.json \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Request release PR review
+        if: steps.dry_run.outputs.dryRun != 'true' && steps.direct_push.outputs.enabled != 'true' && steps.release_review_plan.outputs.has_review_targets == 'true'
+        env:
+          GH_TOKEN: ${{ steps.token_preflight.outputs.use_repo_token == 'true' && secrets.GH_TA4J_REPO_TOKEN || github.token }}
+          PR_NUMBER: ${{ steps.release_pr.outputs.pr_number }}
+          REVIEWERS_JSON: ${{ steps.release_review_plan.outputs.reviewers_json }}
+          TEAM_REVIEWERS_JSON: ${{ steps.release_review_plan.outputs.team_reviewers_json }}
+        run: |
+          python3 - "$PR_NUMBER" "$REVIEWERS_JSON" "$TEAM_REVIEWERS_JSON" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          pr_number = sys.argv[1].strip()
+          reviewers = json.loads(sys.argv[2] or "[]")
+          team_reviewers = json.loads(sys.argv[3] or "[]")
+          if not pr_number.isdigit():
+              raise SystemExit("Missing release PR number for review request.")
+          if not reviewers and not team_reviewers:
+              print("No eligible release PR reviewers were planned.")
+              Path("release-review-request-targets.txt").write_text("", encoding="utf-8")
+              raise SystemExit(0)
+
+          payload = {}
+          if reviewers:
+              payload["reviewers"] = reviewers
+          if team_reviewers:
+              payload["team_reviewers"] = team_reviewers
+
+          Path("release-review-request.json").write_text(
+              json.dumps(payload, separators=(",", ":")),
+              encoding="utf-8",
+          )
+          targets = [*reviewers, *[f"team:{team}" for team in team_reviewers]]
+          Path("release-review-request-targets.txt").write_text(
+              ", ".join(targets),
+              encoding="utf-8",
+          )
+          PY
+
+          if [ ! -s release-review-request-targets.txt ]; then
+            exit 0
+          fi
+
+          targets="$(cat release-review-request-targets.txt)"
+          if ! gh api \
+            --method POST \
+            "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/requested_reviewers" \
+            --input release-review-request.json >/dev/null; then
+            echo "::error::Failed to request release PR review from ${targets}" >&2
+            exit 1
+          fi
+
+      - name: Report release PR review warning
+        if: steps.dry_run.outputs.dryRun != 'true' && steps.direct_push.outputs.enabled != 'true' && steps.release_review_plan.outputs.has_review_targets != 'true'
+        env:
+          REVIEW_WARNING: ${{ steps.release_review_plan.outputs.warning }}
+        run: |
+          warning="${REVIEW_WARNING:-No eligible release PR reviewers were configured; release PR may require an admin or bypass merge.}"
+          echo "::warning::${warning}"
+          {
+            echo "### Release PR review"
+            echo ""
+            echo "- warning: ${warning}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # -----------------------
+      # Summary
+      # -----------------------
+      - name: Prepare release summary
+        if: always()
+        env:
+          DRY_RUN: ${{ steps.dry_run.outputs.dryRun }}
+          DIRECT_PUSH: ${{ steps.direct_push.outputs.enabled }}
+          RELEASE: ${{ steps.versions.outputs.release }}
+          NEXT: ${{ steps.versions.outputs.next }}
+          CURRENT: ${{ steps.versions.outputs.current }}
+          RELEASE_COMMIT: ${{ steps.release_commit.outputs.release_commit }}
+          REMOVAL_PLAN_COUNT: ${{ steps.deprecation_issues.outputs.plan_count }}
+          REMOVAL_CREATED_COUNT: ${{ steps.deprecation_issues.outputs.created_count }}
+          REMOVAL_UPDATED_COUNT: ${{ steps.deprecation_issues.outputs.updated_count }}
+          REMOVAL_REOPENED_COUNT: ${{ steps.deprecation_issues.outputs.reopened_count }}
+          REMOVAL_CLOSED_STALE_COUNT: ${{ steps.deprecation_issues.outputs.closed_stale_count }}
+          RELEASE_REVIEW_WARNING: ${{ steps.release_review_plan.outputs.warning }}
+        run: |
+          echo "summary: dryRun=${DRY_RUN:-}"
+          echo "summary: directPush=${DIRECT_PUSH:-}"
+          echo "summary: release=${RELEASE:-}"
+          echo "summary: current=${CURRENT:-}"
+          echo "summary: next=${NEXT:-}"
+          echo "summary: releaseCommit=${RELEASE_COMMIT:-}"
+          echo "summary: removalIssuePlans=${REMOVAL_PLAN_COUNT:-0}"
+          echo "summary: removalIssuesCreated=${REMOVAL_CREATED_COUNT:-0}"
+          echo "summary: removalIssuesUpdated=${REMOVAL_UPDATED_COUNT:-0}"
+          echo "summary: removalIssuesReopened=${REMOVAL_REOPENED_COUNT:-0}"
+          echo "summary: removalIssuesClosedStale=${REMOVAL_CLOSED_STALE_COUNT:-0}"
+          echo "summary: releaseReviewWarning=${RELEASE_REVIEW_WARNING:-}"
+          if [ "${DRY_RUN:-false}" = "true" ]; then
+            mutation_plan="would create/update release artifacts, sync deprecation issues, push the release branch, and create/update the release PR"
+            rerun_guidance="rerun prepare-release.yml with dryRun=false after inspecting these computed values and artifacts"
+          else
+            mutation_plan="completed non-dry-run prepare-release mutations for the selected mode"
+            rerun_guidance="not needed for this non-dry-run prepare run"
+          fi
+          cat > release-audit.json <<EOF
+          {
+            "dryRun": "${DRY_RUN:-}",
+            "directPush": "${DIRECT_PUSH:-}",
+            "release": "${RELEASE:-}",
+            "current": "${CURRENT:-}",
+            "next": "${NEXT:-}",
+            "releaseCommit": "${RELEASE_COMMIT:-}",
+            "mutationPlan": "${mutation_plan}",
+            "rerunGuidance": "${rerun_guidance}",
+            "removalIssuePlans": "${REMOVAL_PLAN_COUNT:-0}",
+            "removalIssuesCreated": "${REMOVAL_CREATED_COUNT:-0}",
+            "removalIssuesUpdated": "${REMOVAL_UPDATED_COUNT:-0}",
+            "removalIssuesReopened": "${REMOVAL_REOPENED_COUNT:-0}",
+            "removalIssuesClosedStale": "${REMOVAL_CLOSED_STALE_COUNT:-0}",
+            "releaseReviewWarning": "${RELEASE_REVIEW_WARNING:-}",
+            "runUrl": "https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          }
+          EOF
+          {
+            echo "## Prepare Release"
+            echo ""
+            echo "- dry run: ${DRY_RUN:-unknown}"
+            echo "- direct push: ${DIRECT_PUSH:-unknown}"
+            echo "- current: ${CURRENT:-unknown}"
+            echo "- release: ${RELEASE:-unknown}"
+            echo "- next snapshot: ${NEXT:-unknown}"
+            echo "- release commit: ${RELEASE_COMMIT:-none}"
+            echo "- removal-ready deprecation issue plans: ${REMOVAL_PLAN_COUNT:-0}"
+            echo "- removal-ready issues created: ${REMOVAL_CREATED_COUNT:-0}"
+            echo "- removal-ready issues updated: ${REMOVAL_UPDATED_COUNT:-0}"
+            echo "- removal-ready issues reopened: ${REMOVAL_REOPENED_COUNT:-0}"
+            echo "- removal-ready stale issues closed: ${REMOVAL_CLOSED_STALE_COUNT:-0}"
+            if [ -n "${RELEASE_REVIEW_WARNING:-}" ]; then
+              echo "- release PR review warning: ${RELEASE_REVIEW_WARNING}"
+            fi
+            echo "- mutation plan: ${mutation_plan}"
+            echo "- rerun guidance: ${rerun_guidance}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload prepare-release audit artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: prepare-release-audit-${{ github.run_id }}
+          path: |
+            release-audit.json
+            release-review-plan.json
+            release/${{ steps.versions.outputs.release }}.md
+          if-no-files-found: ignore
+          retention-days: 14

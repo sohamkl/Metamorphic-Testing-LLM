@@ -59,6 +59,12 @@ public final class PromptBuilder {
 
     private static void appendSutSection(StringBuilder prompt, PromptConfig config, SutContext sutContext) {
         prompt.append("You are generating developer-reviewable JUnit 5 metamorphic tests for a Java SUT.\n\n");
+
+        if (!config.sutDescription().isBlank()) {
+            prompt.append("System Under Test description:\n");
+            prompt.append(config.sutDescription()).append("\n\n");
+        }
+
         if (sutContext.classFile() != null) {
             prompt.append("System Under Test class file: ").append(sutContext.classFile()).append("\n");
             if (!config.targetFunction().isBlank()) {
@@ -85,12 +91,9 @@ public final class PromptBuilder {
                 prompt.append("Developer MR helper source:\n");
                 prompt.append("```java\n").append(config.developerMrSource()).append("\n```\n\n");
             }
-        } else {
+        } else if (config.sutDescription().isBlank()) {
             prompt.append("System Under Test description:\n");
-            prompt.append(config.sutDescription().isBlank()
-                    ? "No SUT class file was provided."
-                    : config.sutDescription());
-            prompt.append("\n\n");
+            prompt.append("No SUT class file was provided.\n\n");
         }
     }
 
@@ -101,6 +104,10 @@ public final class PromptBuilder {
         if (!config.inputDomain().isBlank()) {
             prompt.append("Input domain and constraints:\n");
             prompt.append(config.inputDomain()).append("\n\n");
+        }
+
+        if (config.inputGenerator().randoopSeedsLlm()) {
+            appendRandoopSeedExamples(prompt, config);
         }
 
         if (config.mode().usesDeveloperMrDataHelpers()) {
@@ -118,6 +125,20 @@ public final class PromptBuilder {
         } else {
             appendJUnitTask(prompt, config);
         }
+    }
+
+    private static void appendRandoopSeedExamples(StringBuilder prompt, PromptConfig config) {
+        prompt.append("Randoop-generated source-input seed examples:\n");
+        if (config.randoopSeedExamples().isBlank() || config.randoopSeedExamples().equals("[]")) {
+            prompt.append("Randoop did not discover a usable source input in its bounded run.\n");
+        } else {
+            prompt.append("```json\n").append(config.randoopSeedExamples()).append("\n```\n");
+        }
+        prompt.append("These are API-grounding examples, not the complete final test set.\n");
+        prompt.append("Use their runtime values and Java construction snippets to learn how valid source objects are built.\n");
+        prompt.append("Generate additional diverse source inputs up to Count by varying values according to InputDomain.\n");
+        prompt.append("Do not blindly copy invalid, exceptional, duplicate, or overly long Randoop sequences.\n");
+        prompt.append("InputDomain remains authoritative when a seed conflicts with a stated constraint.\n\n");
     }
 
     private static void appendDeveloperMrJUnitTask(StringBuilder prompt, PromptConfig config) {
@@ -162,6 +183,7 @@ public final class PromptBuilder {
         prompt.append("- Do not generate invalid inputs unless the input domain explicitly asks for invalid cases.\n");
         prompt.append("- Make object inputs by using visible constructors, builders, factories, or simple helper methods.\n");
         prompt.append("- Prefer readable deterministic fixtures over unseeded randomness.\n");
+        prompt.append("- Never use Instant.now(), the current date/time, random values, or other runtime-dependent values in test fixtures; use fixed literals and derive related timestamps from the same fixed base value.\n");
         prompt.append("- Output only Java code. No markdown fences and no explanation.\n");
     }
 
@@ -188,6 +210,7 @@ public final class PromptBuilder {
         prompt.append("- Important: assertMetamorphicRelation must assert that the stated MR output relation holds, for example assertEquals(expected, actual). Do not use assertNotEquals to make violating cases pass.\n");
         prompt.append("- Each emitted @Test method must assert the original MR normally; do not invert assertions to make failures pass.\n");
         prompt.append("- Prefer readable deterministic fixtures over unseeded randomness.\n");
+        prompt.append("- Never use Instant.now(), the current date/time, random values, or other runtime-dependent values in test fixtures; use fixed literals and derive related timestamps from the same fixed base value.\n");
         prompt.append("- Include normal cases, boundary cases, and edge cases that make the MR meaningful.\n");
         prompt.append("- Do not add inline comments that state computed totals, expected outputs, or follow-up outputs; they can be misleading when the SUT is buggy.\n");
         prompt.append("- Do not generate invalid inputs unless the input domain explicitly asks for invalid cases.\n");
@@ -211,6 +234,7 @@ public final class PromptBuilder {
         prompt.append("- A public static method named generateSources() that returns a List of source inputs.\n");
         prompt.append("- generateSources() must generate at most ").append(config.count()).append(" diverse source inputs.\n");
         appendSourceCountRules(prompt, config);
+        appendDeterministicSourceRules(prompt);
         prompt.append("- A main(String[] args) method that prints valid JSON to stdout only.\n");
         prompt.append("- The main method must, for each source input:\n");
         prompt.append("  1. call the target SUT method on the source input to compute sourceOutput\n");
@@ -256,6 +280,7 @@ public final class PromptBuilder {
         prompt.append("- A public static method named generateSources() that returns a List of source inputs.\n");
         prompt.append("- generateSources() must generate at most ").append(config.count()).append(" diverse source inputs.\n");
         appendSourceCountRules(prompt, config);
+        appendDeterministicSourceRules(prompt);
         prompt.append("- A generateFollowUp(source) method that transforms each source input according to MRInput.\n");
         prompt.append("- An assertMetamorphicRelation(sourceOutput, followUpOutput) method that checks MROutput.\n");
         prompt.append("- A main(String[] args) method that prints valid JSON to stdout only.\n");
@@ -303,6 +328,12 @@ public final class PromptBuilder {
         prompt.append("- It is acceptable to generate fewer than ")
                 .append(config.count())
                 .append(" entries when the input domain is narrow, but never more.\n");
+    }
+
+    private static void appendDeterministicSourceRules(StringBuilder prompt) {
+        prompt.append("- generateSources() must return equivalent values in the same order on every call and every JVM run.\n");
+        prompt.append("- Use explicit, readable fixtures or immutable value tables for source inputs.\n");
+        prompt.append("- Do not use Random, Math.random(), ThreadLocalRandom, SecureRandom, random UUIDs, current time, or other mutable/nondeterministic input generation.\n");
     }
 
     private static String targetMethodCallName(PromptConfig config) {

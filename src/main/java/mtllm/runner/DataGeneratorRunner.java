@@ -6,6 +6,9 @@ import mtllm.sut.SutContext;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.PrintStream;
+import java.lang.reflect.Method;
+import java.net.URLClassLoader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -37,14 +40,28 @@ public final class DataGeneratorRunner {
         lastSummary = ExecutedDataSummary.empty();
         Files.createDirectories(classesDir);
 
+        String sourceConsistencyError = validateDeterministicSourceGeneration(generatedFile);
+        if (sourceConsistencyError != null) {
+            return TestRunResult.failed("Generated source-input consistency validation failed:\n"
+                    + sourceConsistencyError);
+        }
+
         TestRunResult compileResult = compile(generatedFile, config, sutContext);
         if (!compileResult.passed()) {
             return compileResult;
         }
 
+        RuntimeResourceCopier.copyFor(config, classesDir);
+
         TestRunResult runResult = run(config.generatedClassName());
         if (!runResult.passed()) {
             return runResult;
+        }
+
+        String repeatedExecutionError = validateRepeatedExecution(config.generatedClassName());
+        if (repeatedExecutionError != null) {
+            return TestRunResult.failed("Generated source-input consistency validation failed:\n"
+                    + repeatedExecutionError);
         }
 
         String validationError = validateJsonOutput(runResult.output(), config);
@@ -54,6 +71,118 @@ public final class DataGeneratorRunner {
         }
 
         return writeSplitAndReport(runResult.output(), config, sutContext);
+    }
+
+    private String validateDeterministicSourceGeneration(Path generatedFile) throws IOException {
+        String source = Files.readString(generatedFile, StandardCharsets.UTF_8);
+        List<String> forbiddenConstructs = List.of(
+                "java.util.Random",
+                "new Random(",
+                "Math.random(",
+                "ThreadLocalRandom",
+                "SecureRandom",
+                "UUID.randomUUID(",
+                "System.currentTimeMillis(",
+                "System.nanoTime(",
+                "Instant.now(",
+                "LocalDate.now(",
+                "LocalDateTime.now(");
+
+        List<String> found = new ArrayList<>();
+        String compactSource = stripCommentsAndLiterals(source).replaceAll("\\s+", "");
+        for (String forbidden : forbiddenConstructs) {
+            if (compactSource.contains(forbidden.replaceAll("\\s+", ""))) {
+                found.add(forbidden);
+            }
+        }
+        if (found.isEmpty()) {
+            return null;
+        }
+
+        return "The data generator uses nondeterministic source construction: "
+                + String.join(", ", found)
+                + ". generateSources() is called by both JSON execution and generated JUnit tests, so its "
+                + "ordered values must be repeatable. Replace these constructs with explicit fixtures or an "
+                + "immutable value table.";
+    }
+
+    private String stripCommentsAndLiterals(String source) {
+        StringBuilder code = new StringBuilder(source.length());
+        int state = 0;
+
+        for (int i = 0; i < source.length(); i++) {
+            char current = source.charAt(i);
+            char next = i + 1 < source.length() ? source.charAt(i + 1) : '\0';
+
+            if (state == 0) {
+                if (current == '/' && next == '/') {
+                    state = 1;
+                    i++;
+                } else if (current == '/' && next == '*') {
+                    state = 2;
+                    i++;
+                } else if (current == '"') {
+                    state = 3;
+                } else if (current == '\'') {
+                    state = 4;
+                } else {
+                    code.append(current);
+                }
+            } else if (state == 1) {
+                if (current == '\n') {
+                    state = 0;
+                    code.append(current);
+                }
+            } else if (state == 2) {
+                if (current == '*' && next == '/') {
+                    state = 0;
+                    i++;
+                }
+            } else if (state == 3 || state == 4) {
+                char closingQuote = state == 3 ? '"' : '\'';
+                if (current == '\\') {
+                    i++;
+                } else if (current == closingQuote) {
+                    state = 0;
+                }
+            }
+        }
+        return code.toString();
+    }
+
+    private String validateRepeatedExecution(String className) {
+        try (URLClassLoader loader = new URLClassLoader(
+                new java.net.URL[]{classesDir.toUri().toURL()},
+                DataGeneratorRunner.class.getClassLoader())) {
+            Class<?> generatedClass = Class.forName(className, true, loader);
+            Method main = generatedClass.getMethod("main", String[].class);
+            String firstOutput = invokeMainAndCaptureOutput(main);
+            String secondOutput = invokeMainAndCaptureOutput(main);
+
+            if (firstOutput.trim().equals(secondOutput.trim())) {
+                return null;
+            }
+            return "The generated class produced different executed JSON when main() was invoked twice in "
+                    + "the same JVM. generateSources() and the SUT/MR execution must be deterministic so JSON "
+                    + "and JUnit use the same indexed cases. Use explicit ordered fixtures instead of "
+                    + "randomness, time, or mutable global state.";
+        } catch (Exception exception) {
+            Throwable cause = exception.getCause() == null ? exception : exception.getCause();
+            return "The generated class could not be executed repeatedly in the same JVM: "
+                    + cause.getClass().getSimpleName() + ": " + cause.getMessage();
+        }
+    }
+
+    private String invokeMainAndCaptureOutput(Method main) throws Exception {
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        PrintStream originalOut = System.out;
+        try (PrintStream capturedOut = new PrintStream(buffer, true, StandardCharsets.UTF_8)) {
+            System.setOut(capturedOut);
+            main.invoke(null, (Object) new String[0]);
+        } finally {
+            System.setOut(originalOut);
+        }
+        return buffer.toString(StandardCharsets.UTF_8);
     }
 
     /**

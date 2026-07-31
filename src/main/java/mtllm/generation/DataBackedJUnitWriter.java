@@ -7,6 +7,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Writes JUnit tests that reuse the generated Java data class as their source of inputs.
@@ -15,6 +17,9 @@ import java.nio.file.Path;
  * {@code generateSources()} method instead of asking the LLM to invent two separate test sets.</p>
  */
 public final class DataBackedJUnitWriter {
+    private static final Pattern PACKAGE_DECLARATION =
+            Pattern.compile("(?m)^\\s*package\\s+([\\w.]+)\\s*;");
+
     private DataBackedJUnitWriter() {
     }
 
@@ -35,7 +40,7 @@ public final class DataBackedJUnitWriter {
     private static String render(
             PromptConfig config,
             String dataClassName,
-            DataGeneratorRunner.ExecutedDataSummary dataSummary) {
+            DataGeneratorRunner.ExecutedDataSummary dataSummary) throws IOException {
         StringBuilder out = new StringBuilder();
         out.append("import org.junit.jupiter.api.Test;\n\n");
         out.append("public class ").append(config.generatedClassName()).append(" {\n");
@@ -52,7 +57,7 @@ public final class DataBackedJUnitWriter {
             StringBuilder out,
             PromptConfig config,
             String dataClassName,
-            int sourceIndex) {
+            int sourceIndex) throws IOException {
         out.append("\n    @Test\n");
         out.append("    public void testGeneratedCase")
                 .append(String.format("%03d", sourceIndex + 1))
@@ -91,7 +96,7 @@ public final class DataBackedJUnitWriter {
         return dataClassName + ".assertMetamorphicRelation";
     }
 
-    private static String targetMethodCallName(PromptConfig config) {
+    private static String targetMethodCallName(PromptConfig config) throws IOException {
         String targetFunction = config.targetFunction().trim();
         if (targetFunction.isBlank()) {
             return "/* missing target method */";
@@ -109,21 +114,22 @@ public final class DataBackedJUnitWriter {
             return methodReference;
         }
 
-        String className = classNameFromPath(config.sutClassFile());
+        String className = classNameOf(config.sutClassFile());
         if (className.isBlank()) {
             return methodReference;
         }
         return className + "." + methodReference;
     }
 
-    private static String classNameFromPath(Path path) {
+    private static String classNameOf(Path path) throws IOException {
         if (path == null) {
             return "";
         }
         String fileName = path.getFileName().toString();
-        if (fileName.endsWith(".java")) {
-            return fileName.substring(0, fileName.length() - ".java".length());
-        }
-        return fileName;
+        String simpleName = fileName.endsWith(".java")
+                ? fileName.substring(0, fileName.length() - ".java".length())
+                : fileName;
+        Matcher packageMatcher = PACKAGE_DECLARATION.matcher(Files.readString(path, StandardCharsets.UTF_8));
+        return packageMatcher.find() ? packageMatcher.group(1) + "." + simpleName : simpleName;
     }
 }

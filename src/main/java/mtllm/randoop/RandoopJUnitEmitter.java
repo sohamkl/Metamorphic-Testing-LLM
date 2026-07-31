@@ -37,9 +37,9 @@ public final class RandoopJUnitEmitter {
     }
 
     /**
-     * Render a complete JUnit 5 class. The class is in the default package (matching the SUT and
-     * developer-MR classes, which are also default-package), so no imports beyond {@code @Test} are
-     * needed -- Randoop already fully-qualifies JDK types in its construction code.
+     * Render a complete JUnit 5 class. Randoop construction statements and the supplied SUT/MR
+     * callees use fully qualified class names, so the generated class remains valid whether the
+     * tested classes use the default package or a named package.
      *
      * @param className      the class name (e.g. {@code GeneratedOrderMetamorphicPassingTest})
      * @param cases          one entry per distinct harvested shape
