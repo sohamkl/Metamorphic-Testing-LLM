@@ -1,0 +1,112 @@
+/*
+ * SPDX-License-Identifier: MIT
+ */
+package org.ta4j.core.indicators;
+
+import org.ta4j.core.Indicator;
+import org.ta4j.core.indicators.helpers.PercentRankIndicator;
+import org.ta4j.core.indicators.helpers.DifferenceIndicator;
+import org.ta4j.core.indicators.helpers.StreakIndicator;
+import org.ta4j.core.num.Num;
+
+import static org.ta4j.core.num.NaN.NaN;
+
+/**
+ * Connors RSI indicator.
+ *
+ * <p>
+ * Combines a short-term RSI, RSI of streak length, and the percentile rank of
+ * daily price changes.
+ *
+ * @see <a href=
+ *      "https://chartschool.stockcharts.com/table-of-contents/technical-indicators-and-overlays/technical-indicators/connorsrsi">
+ *      StockCharts: ConnorsRSI</a>
+ * @since 0.20
+ */
+public class ConnorsRSIIndicator extends CachedIndicator<Num> {
+
+    private final Indicator<Num> indicator;
+    private final int rsiPeriod;
+    private final int streakRsiPeriod;
+    private final int percentRankPeriod;
+    private final transient RSIIndicator priceRsi;
+    private final transient RSIIndicator streakRsi;
+    private final transient PercentRankIndicator percentRankIndicator;
+
+    /**
+     * Constructor using the original Connors RSI defaults ({@code rsiPeriod}=3,
+     * {@code streakRsiPeriod}=2, {@code percentRankPeriod}=100).
+     *
+     * @param indicator the {@link Indicator} providing the price series
+     * @since 0.20
+     */
+    public ConnorsRSIIndicator(Indicator<Num> indicator) {
+        this(validatedConfig(indicator, 3, 2, 100));
+    }
+
+    /**
+     * Constructor.
+     *
+     * @param indicator         the {@link Indicator} providing the price series
+     * @param rsiPeriod         the look-back period for the price RSI
+     * @param streakRsiPeriod   the look-back period for the streak RSI
+     * @param percentRankPeriod the look-back period for the percentile rank of
+     *                          price changes
+     * @since 0.20
+     */
+    public ConnorsRSIIndicator(Indicator<Num> indicator, int rsiPeriod, int streakRsiPeriod, int percentRankPeriod) {
+        this(validatedConfig(indicator, rsiPeriod, streakRsiPeriod, percentRankPeriod));
+    }
+
+    private ConnorsRSIIndicator(Config config) {
+        super(config.indicator());
+        this.indicator = config.indicator();
+        this.rsiPeriod = config.rsiPeriod();
+        this.streakRsiPeriod = config.streakRsiPeriod();
+        this.percentRankPeriod = config.percentRankPeriod();
+        this.priceRsi = config.priceRsi();
+        this.streakRsi = config.streakRsi();
+        this.percentRankIndicator = config.percentRankIndicator();
+    }
+
+    private static Config validatedConfig(Indicator<Num> indicator, int rsiPeriod, int streakRsiPeriod,
+            int percentRankPeriod) {
+        if (rsiPeriod < 1 || streakRsiPeriod < 1 || percentRankPeriod < 1) {
+            throw new IllegalArgumentException("Connors RSI periods must be positive integers");
+        }
+
+        DifferenceIndicator priceChangeIndicator = new DifferenceIndicator(indicator);
+        RSIIndicator priceRsi = new RSIIndicator(indicator, rsiPeriod);
+        RSIIndicator streakRsi = new RSIIndicator(new StreakIndicator(indicator), streakRsiPeriod);
+        PercentRankIndicator percentRankIndicator = new PercentRankIndicator(priceChangeIndicator, percentRankPeriod);
+        return new Config(indicator, rsiPeriod, streakRsiPeriod, percentRankPeriod, priceRsi, streakRsi,
+                percentRankIndicator);
+    }
+
+    @Override
+    protected Num calculate(int index) {
+        // Return NaN during unstable period
+        if (index < getCountOfUnstableBars()) {
+            return NaN;
+        }
+        Num priceRsiValue = priceRsi.getValue(index);
+        Num streakRsiValue = streakRsi.getValue(index);
+        Num percentRankValue = percentRankIndicator.getValue(index);
+        if (priceRsiValue.isNaN() || streakRsiValue.isNaN() || percentRankValue.isNaN()) {
+            return NaN;
+        }
+        Num total = priceRsiValue.plus(streakRsiValue).plus(percentRankValue);
+        return total.dividedBy(getBarSeries().numFactory().numOf(3));
+    }
+
+    @Override
+    public int getCountOfUnstableBars() {
+        // Return the maximum unstable period of all three components
+        return Math.max(Math.max(priceRsi.getCountOfUnstableBars(), streakRsi.getCountOfUnstableBars()),
+                percentRankIndicator.getCountOfUnstableBars());
+    }
+
+    private record Config(Indicator<Num> indicator, int rsiPeriod, int streakRsiPeriod, int percentRankPeriod,
+            RSIIndicator priceRsi, RSIIndicator streakRsi, PercentRankIndicator percentRankIndicator) {
+    }
+}
