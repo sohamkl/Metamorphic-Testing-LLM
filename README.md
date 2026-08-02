@@ -92,6 +92,34 @@ Prefer `MRInput` plus `MROutput` because it matches the metamorphic-testing form
 
 `DataType` is no longer required. The LLM is instructed to infer Java types from the target method signature and SUT source.
 
+`InputDomain` also accepts a structured mapping. Existing scalar descriptions remain supported.
+
+```yaml
+Count: 8
+InputDomain:
+  summary: Generate valid inputs around the target threshold.
+  globalConstraints:
+    - Values must be finite and positive.
+  diversity:
+    sizes: [small, medium, large]
+  scenarios:
+    - id: ABOVE_THRESHOLD
+      category: BOUNDARY
+      description: Cross the threshold from below.
+      preconditions:
+        - source value is greater than the threshold
+      expectedSourceBehavior:
+        - source execution activates the above-threshold branch
+      targetCases: 3
+      emptyOutputAllowed: false
+```
+
+Scenario categories are `NORMAL`, `BOUNDARY`, `EDGE`, and `INVALID`. Scenario IDs must be unique,
+and the sum of all `targetCases` values cannot exceed `Count`. For LLM-backed generation, each
+scenario is rendered as an explicit checklist item and its ID must appear in generated test method
+names. `RANDOOP` does not interpret scenario prose; meaningful relational constraints may still
+require scenario-aware factories or runtime filtering.
+
 Output and MR ownership are controlled by three fields:
 
 ```yaml

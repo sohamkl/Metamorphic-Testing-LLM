@@ -1,6 +1,6 @@
 # Ta4j Renko aggregation MR: positive scaling of prices and box size.
-# Paths are relative to the MT-testing repository root because OpenaiRunner reads
-# configuration using that root even though this prompt is stored in the Ta4j example.
+# Paths are relative to the MT-testing repository root, where OpenaiRunner reads
+# this configuration.
 SUTClassFile: examples/ta4j/src/main/java/mtllm/examples/ta4j/RenkoBarAggregatorSut.java
 SUTSupportFiles:
   - examples/ta4j/src/main/java/mtllm/examples/ta4j/RenkoCaseFactory.java
@@ -25,32 +25,120 @@ MROutput: >-
   monetary amount equals the corresponding source brick value multiplied by k = 2
 MR: >-
   Scaling every market price, monetary amount, and the Renko box size by the same
-  positive factor must preserve the Renko chart structure; only monetary output
-  values should be scaled by that factor.
+  positive factor must preserve the Renko chart structure; corresponding output-
+  brick prices and monetary amounts must be multiplied by that factor, while
+  brick count, direction, timestamps, time period, volume, and trade count remain
+  unchanged.
 
-Count: 10
-InputDomain: >-
-  Generate deterministic source cases containing a positive finite boxSize, a
-  positive reversalAmount (normally 2), and a non-null List<Bar>. Each list must
-  contain at least two chronological, contiguous, evenly spaced time bars, using
-  a consistent duration such as one minute. Every bar must have finite,
-  non-null, positive OHLC prices satisfying low <= open and close <= high;
-  non-negative volume, amount, and trade count; and the same Num implementation.
-  Keep prices and scaled values within a practical range, for example 1 to
-  1000000. Include cases that produce no bricks, exactly one brick, multiple
-  upward bricks, multiple downward bricks, residual movement smaller than one
-  box, an exact box-size boundary, and confirmed reversals. Do not use null bars,
-  uneven intervals, non-contiguous timestamps, NaN prices, infinite prices,
-  zero or negative box sizes, or invalid OHLC ordering. Treat Count as the
-  maximum number of source cases, not a required exact count. Construct source
-  inputs with the public RenkoBarAggregatorSut.RenkoCase record; do not define a
-  separate test-local case type. Use a fixed Instant literal for every test and
-  derive each bar's begin and end times from that same value. Never use
-  Instant.now() or separate clock reads.
+Count: 50
+InputDomain:
+  summary: >-
+    Generate deterministic, valid RenkoCase source inputs that coordinate close-price
+    movement with boxSize and reversalAmount so most cases produce meaningful bricks.
+  globalConstraints:
+    - Use a non-null list containing at least two chronological, contiguous, evenly spaced bars.
+    - Use finite positive OHLC prices satisfying low <= open and close <= high.
+    - Keep every source OHLC value between 1 and 500000 inclusive.
+    - Use non-negative volume, monetary amount, and trade count.
+    - Use a positive finite boxSize and a positive reversalAmount.
+    - Use the same Num implementation for every bar in a source case.
+    - Construct inputs with RenkoBarAggregatorSut.RenkoCase and the visible RenkoCaseFactory methods.
+    - Use fixed timestamps and never use current time or randomness.
+    - Do not generate duplicate source inputs.
+    - Name each test from its scenario ID and actual source-output behavior.
+  diversity:
+    barCounts: [2, 3, 4, 5, 6, 8, 10]
+    priceBands: ["1 to 10", "50 to 500", "10000 to 500000"]
+    boxSizes: [1, 5, 10, 25, 50, 100]
+    reversalAmounts: [2, 3, 4, 10]
+    directions: [upward, downward, reversal]
+  scenarios:
+    - id: NO_BRICK
+      category: NORMAL
+      description: Price movement remains below one complete box.
+      preconditions:
+        - Every displacement from the first close is smaller than boxSize.
+      expectedSourceBehavior:
+        - Source output contains zero bricks.
+      targetCases: 4
+      emptyOutputAllowed: true
+    - id: ONE_UP
+      category: BOUNDARY
+      description: Produce exactly one upward brick.
+      preconditions:
+        - Upward displacement from the first close equals exactly boxSize.
+      expectedSourceBehavior:
+        - Source output direction signature is U.
+      targetCases: 5
+      emptyOutputAllowed: false
+    - id: ONE_DOWN
+      category: BOUNDARY
+      description: Produce exactly one downward brick.
+      preconditions:
+        - Downward displacement from the first close equals exactly boxSize.
+      expectedSourceBehavior:
+        - Source output direction signature is D.
+      targetCases: 5
+      emptyOutputAllowed: false
+    - id: MULTIPLE_UP
+      category: NORMAL
+      description: Produce multiple consecutive upward bricks.
+      preconditions:
+        - Upward displacement from the first close is at least 2 * boxSize.
+      expectedSourceBehavior:
+        - Source output contains at least two upward bricks.
+      targetCases: 8
+      emptyOutputAllowed: false
+    - id: MULTIPLE_DOWN
+      category: NORMAL
+      description: Produce multiple consecutive downward bricks.
+      preconditions:
+        - Downward displacement from the first close is at least 2 * boxSize.
+      expectedSourceBehavior:
+        - Source output contains at least two downward bricks.
+      targetCases: 8
+      emptyOutputAllowed: false
+    - id: RESIDUAL_UP
+      category: EDGE
+      description: Produce upward bricks with a remaining movement smaller than one box.
+      preconditions:
+        - Upward displacement is N * boxSize plus a positive residual smaller than boxSize, where N >= 1.
+      expectedSourceBehavior:
+        - Source output contains N upward bricks and ignores the residual movement.
+      targetCases: 5
+      emptyOutputAllowed: false
+    - id: RESIDUAL_DOWN
+      category: EDGE
+      description: Produce downward bricks with a remaining movement smaller than one box.
+      preconditions:
+        - Downward displacement is N * boxSize plus a positive residual smaller than boxSize, where N >= 1.
+      expectedSourceBehavior:
+        - Source output contains N downward bricks and ignores the residual movement.
+      targetCases: 5
+      emptyOutputAllowed: false
+    - id: EXACT_BOUNDARY
+      category: BOUNDARY
+      description: Exercise exact multi-box movement boundaries in both directions.
+      preconditions:
+        - Displacement is an exact integer multiple of boxSize and the multiplier is at least 2.
+      expectedSourceBehavior:
+        - Brick count equals the exact box multiplier with no residual movement.
+      targetCases: 4
+      emptyOutputAllowed: false
+    - id: CONFIRMED_REVERSAL
+      category: EDGE
+      description: Establish one direction and then produce bricks in the opposite direction.
+      preconditions:
+        - The first movement establishes at least one brick.
+        - Later opposite movement reaches at least reversalAmount * boxSize from the current brick level.
+      expectedSourceBehavior:
+        - Source output direction signature contains both U and D.
+      targetCases: 6
+      emptyOutputAllowed: false
 
 GeneratedClassName: GeneratedRenkoBarAggregatorMetamorphicTest
 OutputRoot: examples/ta4j/generated/renko
-InputGenerator: NEW_HYBRID
+InputGenerator: HYBRID
 RandoopTargetClasses:
   - mtllm.examples.ta4j.RenkoCaseFactory
 JsonRequired: false

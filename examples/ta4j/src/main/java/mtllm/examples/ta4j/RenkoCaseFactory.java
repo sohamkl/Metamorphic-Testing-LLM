@@ -43,6 +43,42 @@ public final class RenkoCaseFactory {
         return fromCloses(boxSize, reversalAmount, firstClose, secondClose, thirdClose, fourthClose);
     }
 
+    public static RenkoCase fiveBars(
+            double firstClose, double secondClose, double thirdClose, double fourthClose, double fifthClose,
+            double boxSize, int reversalAmount) {
+        return fromCloses(
+                boxSize, reversalAmount,
+                firstClose, secondClose, thirdClose, fourthClose, fifthClose);
+    }
+
+    public static RenkoCase sixBars(
+            double firstClose, double secondClose, double thirdClose, double fourthClose, double fifthClose,
+            double sixthClose, double boxSize, int reversalAmount) {
+        return fromCloses(
+                boxSize, reversalAmount,
+                firstClose, secondClose, thirdClose, fourthClose, fifthClose, sixthClose);
+    }
+
+    public static RenkoCase eightBars(
+            double firstClose, double secondClose, double thirdClose, double fourthClose, double fifthClose,
+            double sixthClose, double seventhClose, double eighthClose,
+            double boxSize, int reversalAmount) {
+        return fromCloses(
+                boxSize, reversalAmount,
+                firstClose, secondClose, thirdClose, fourthClose, fifthClose, sixthClose, seventhClose,
+                eighthClose);
+    }
+
+    public static RenkoCase tenBars(
+            double firstClose, double secondClose, double thirdClose, double fourthClose, double fifthClose,
+            double sixthClose, double seventhClose, double eighthClose, double ninthClose, double tenthClose,
+            double boxSize, int reversalAmount) {
+        return fromCloses(
+                boxSize, reversalAmount,
+                firstClose, secondClose, thirdClose, fourthClose, fifthClose, sixthClose, seventhClose,
+                eighthClose, ninthClose, tenthClose);
+    }
+
     private static RenkoCase fromCloses(double boxSize, int reversalAmount, double... closes) {
         if (closes.length < 2) {
             throw new IllegalArgumentException("At least two close prices are required");

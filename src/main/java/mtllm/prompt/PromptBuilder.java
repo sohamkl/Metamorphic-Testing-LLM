@@ -102,8 +102,11 @@ public final class PromptBuilder {
         prompt.append(config.metamorphicRelationStatement()).append("\n\n");
 
         if (!config.inputDomain().isBlank()) {
-            prompt.append("Input domain and constraints:\n");
+            prompt.append(config.inputDomainRequirements().isStructured()
+                    ? "Structured input domain and scenario requirements:\n"
+                    : "Input domain and constraints:\n");
             prompt.append(config.inputDomain()).append("\n\n");
+            appendStructuredScenarioRules(prompt, config);
         }
 
         if (config.inputGenerator().randoopSeedsLlm()) {
@@ -125,6 +128,21 @@ public final class PromptBuilder {
         } else {
             appendJUnitTask(prompt, config);
         }
+    }
+
+    private static void appendStructuredScenarioRules(StringBuilder prompt, PromptConfig config) {
+        if (!config.inputDomainRequirements().isStructured()
+                || config.inputDomainRequirements().scenarios().isEmpty()) {
+            return;
+        }
+        prompt.append("Structured-scenario generation rules:\n");
+        prompt.append("- Treat every scenario ID as a source-input coverage requirement, not as optional prose.\n");
+        prompt.append("- Attempt the stated target case count for each scenario without exceeding Count overall.\n");
+        prompt.append("- Include the scenario ID in every generated test method name, followed by a concise variation name.\n");
+        prompt.append("- A scenario with 'Empty source output allowed: no' must be constructed to activate meaningful SUT output behavior.\n");
+        prompt.append("- Vary the listed diversity dimensions across cases instead of changing only test names.\n");
+        prompt.append("- Do not emit a detached inventory of scenario comments at class level.\n");
+        prompt.append("- Scenario descriptions guide source-input construction; the developer MR helper remains the output oracle.\n\n");
     }
 
     private static void appendRandoopSeedExamples(StringBuilder prompt, PromptConfig config) {

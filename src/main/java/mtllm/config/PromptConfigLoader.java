@@ -40,6 +40,9 @@ public final class PromptConfigLoader {
         String developerFollowUpMethod = stringValue(values, "DeveloperFollowUpMethod");
         String developerAssertMethod = stringValue(values, "DeveloperAssertMethod");
         validateDeveloperMrConfig(mode, developerMrFile, developerFollowUpMethod, developerAssertMethod);
+        int count = parsePositiveInt(stringValue(values, "Count"), 5, "Count");
+        InputDomainRequirements inputDomainRequirements = InputDomainRequirementsParser.parse(
+                values.get("InputDomain"), stringValue(values, "Constraints"), count);
 
         return new PromptConfig(
                 sutClassFile,
@@ -50,8 +53,8 @@ public final class PromptConfigLoader {
                 stringValue(values, "MRInput"),
                 stringValue(values, "MROutput"),
                 stringValue(values, "MR"),
-                parsePositiveInt(stringValue(values, "Count"), 5, "Count"),
-                firstNonBlank(stringValue(values, "InputDomain"), stringValue(values, "Constraints")),
+                count,
+                inputDomainRequirements,
                 firstNonBlank(stringValue(values, "GeneratedClassName"), "GeneratedMetamorphicTest"),
                 mode,
                 jsonRequired,

@@ -21,7 +21,7 @@ public final class PromptConfig {
     private final String mrOutput;
     private final String mr;
     private final int count;
-    private final String inputDomain;
+    private final InputDomainRequirements inputDomainRequirements;
     private final String generatedClassName;
     private final GenerationMode mode;
     private final boolean jsonRequired;
@@ -47,7 +47,7 @@ public final class PromptConfig {
             String mrOutput,
             String mr,
             int count,
-            String inputDomain,
+            InputDomainRequirements inputDomainRequirements,
             String generatedClassName,
             GenerationMode mode,
             boolean jsonRequired,
@@ -71,7 +71,9 @@ public final class PromptConfig {
         this.mrOutput = valueOrEmpty(mrOutput);
         this.mr = valueOrEmpty(mr);
         this.count = count;
-        this.inputDomain = valueOrEmpty(inputDomain);
+        this.inputDomainRequirements = inputDomainRequirements == null
+                ? InputDomainRequirements.empty()
+                : inputDomainRequirements;
         this.generatedClassName = valueOrEmpty(generatedClassName).isEmpty()
                 ? "GeneratedMetamorphicTest"
                 : generatedClassName.trim();
@@ -125,7 +127,11 @@ public final class PromptConfig {
     }
 
     public String inputDomain() {
-        return inputDomain;
+        return inputDomainRequirements.asText();
+    }
+
+    public InputDomainRequirements inputDomainRequirements() {
+        return inputDomainRequirements;
     }
 
     public String generatedClassName() {
@@ -195,7 +201,7 @@ public final class PromptConfig {
                 mrOutput,
                 mr,
                 count,
-                inputDomain,
+                inputDomainRequirements,
                 newGeneratedClassName,
                 newMode,
                 newJsonRequired,
@@ -223,7 +229,7 @@ public final class PromptConfig {
                 mrOutput,
                 mr,
                 count,
-                inputDomain,
+                inputDomainRequirements,
                 generatedClassName,
                 mode,
                 jsonRequired,
