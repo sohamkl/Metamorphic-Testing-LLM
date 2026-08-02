@@ -1,6 +1,7 @@
 package mtllm;
 
 import mtllm.config.GenerationMode;
+import mtllm.config.InputGenerator;
 import mtllm.config.MRProvider;
 import mtllm.config.PromptConfig;
 import mtllm.config.PromptConfigLoader;
@@ -74,7 +75,31 @@ public final class App {
                     outputRoot.resolve("reports"));
 
             TestRunResult result;
-            if (config.inputGenerator().randoopSeedsLlm()) {
+            if (config.inputGenerator() == InputGenerator.HYBRID
+                    && config.mrProvider() == MRProvider.LLM) {
+                RandoopInputRunner sourceRunner = new RandoopInputRunner(
+                        repoRoot,
+                        repoRoot.resolve("lib/randoop-all-4.3.4.jar"),
+                        repoRoot.resolve("target/classes"),
+                        config.outputRoot().resolve("hybrid-randoop"));
+                System.out.println("Generating final source inputs with LLM-seeded Randoop (HYBRID)...");
+                String sourceExamples = sourceRunner.generateLlmSeededSourceExamples(config, promptPath);
+                if (sourceExamples.isBlank() || sourceExamples.equals("[]")) {
+                    throw new IllegalStateException(
+                            "HYBRID generated no executable source inputs for the LLM MR stage.");
+                }
+                System.out.println("Randoop source inputs harvested; asking the LLM to generate the MR tests...");
+
+                PromptConfig harvestedConfig = config.withRandoopSeedExamples(sourceExamples);
+                LlmClient llmClient = new OpenAiClient(apiKey, model, baseUrl);
+                RepairLoop repairLoop = new RepairLoop(
+                        llmClient,
+                        testRunner,
+                        dataGeneratorRunner,
+                        outputRoot.resolve("junit-tests"),
+                        outputRoot.resolve("data-generator-code"));
+                result = repairLoop.generateRunAndRepair(harvestedConfig, sutContext);
+            } else if (config.inputGenerator().randoopSeedsLlm()) {
                 RandoopInputRunner seedRunner = new RandoopInputRunner(
                         repoRoot,
                         repoRoot.resolve("lib/randoop-all-4.3.4.jar"),

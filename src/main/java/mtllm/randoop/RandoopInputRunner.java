@@ -88,6 +88,19 @@ public final class RandoopInputRunner {
         return Files.readString(outJson, StandardCharsets.UTF_8);
     }
 
+    /** Generate the final LLM-seeded Randoop source fixtures for HYBRID + LLM MR. */
+    public String generateLlmSeededSourceExamples(PromptConfig config, Path promptPath) throws Exception {
+        Path classesDir = compileSut(config);
+        Path outJson = workDir.resolve("randoop-hybrid-sources.json");
+        ProcessResult run = runGenerator(
+                config, promptPath, outJson, classesDir, List.of("--seeded-sources-only"));
+        if (!Files.exists(outJson)) {
+            throw new IllegalStateException(
+                    "LLM-seeded Randoop source generation produced no output file.\n" + run.output);
+        }
+        return Files.readString(outJson, StandardCharsets.UTF_8);
+    }
+
     private Path compileSut(PromptConfig config) throws Exception {
         Path classesDir = workDir.resolve("classes");
         Files.createDirectories(classesDir);

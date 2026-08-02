@@ -72,6 +72,27 @@ class StructuredInputDomainTest {
     }
 
     @Test
+    void treatsHybridRandoopExamplesAsFinalSourceFixtures() throws Exception {
+        PromptConfig config = loadPrompt("""
+                SUTClassFile: ExampleSut.java
+                TargetFunction: public static int ExampleSut.run(int source)
+                InputGenerator: HYBRID
+                Count: 2
+                InputDomain: Generate positive values.
+                """).withRandoopSeedExamples(
+                        "[{\"value\":7,\"constructionCode\":\"int int0 = 7;\"}]");
+
+        SutContext context = new SutContext(
+                config.sutClassFile(), Files.readString(config.sutClassFile()), List.of());
+        String prompt = PromptBuilder.buildInitialPrompt(config, context);
+
+        assertTrue(prompt.contains("HYBRID final source inputs harvested by LLM-seeded Randoop"));
+        assertTrue(prompt.contains("final source fixtures for this run"));
+        assertTrue(prompt.contains("Do not invent, replace, or randomly vary the source inputs"));
+        assertFalse(prompt.contains("Generate additional diverse source inputs"));
+    }
+
+    @Test
     void rejectsDuplicateScenarioIds() throws Exception {
         IllegalArgumentException error = assertThrows(IllegalArgumentException.class, () -> loadPrompt("""
                 SUTClassFile: ExampleSut.java

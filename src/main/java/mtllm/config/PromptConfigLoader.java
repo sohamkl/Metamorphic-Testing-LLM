@@ -221,7 +221,15 @@ public final class PromptConfigLoader {
         if (raw == null || raw.trim().isEmpty()) {
             return null;
         }
-        Path path = Path.of(raw.trim());
+        String value = raw.trim();
+        Path path;
+        if (value.equals("~")) {
+            path = Path.of(System.getProperty("user.home"));
+        } else if (value.startsWith("~/")) {
+            path = Path.of(System.getProperty("user.home")).resolve(value.substring(2));
+        } else {
+            path = Path.of(value);
+        }
         return path.isAbsolute() ? path.normalize() : repoRoot.resolve(path).normalize();
     }
 

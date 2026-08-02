@@ -33,11 +33,7 @@ public final class OpenAiClient implements LlmClient {
 
     @Override
     public String complete(String prompt) throws Exception {
-        String payload = "{"
-                + "\"model\":" + JsonUtil.quote(model) + ","
-                + "\"messages\":[{\"role\":\"user\",\"content\":" + JsonUtil.quote(prompt) + "}],"
-                + "\"temperature\":0.2"
-                + "}";
+        String payload = buildPayload(model, prompt);
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(baseUrl + "/chat/completions"))
@@ -57,5 +53,13 @@ public final class OpenAiClient implements LlmClient {
             throw new IllegalStateException("Could not extract response content from OpenAI output.");
         }
         return CodeFence.strip(content).trim();
+    }
+
+    static String buildPayload(String model, String prompt) {
+        return "{"
+                + "\"model\":" + JsonUtil.quote(model) + ","
+                + "\"messages\":[{\"role\":\"user\",\"content\":" + JsonUtil.quote(prompt) + "}]"
+                + (model.startsWith("gpt-5") ? "" : ",\"temperature\":0.2")
+                + "}";
     }
 }

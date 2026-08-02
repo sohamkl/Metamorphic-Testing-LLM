@@ -109,8 +109,12 @@ public final class PromptBuilder {
             appendStructuredScenarioRules(prompt, config);
         }
 
-        if (config.inputGenerator().randoopSeedsLlm()) {
-            appendRandoopSeedExamples(prompt, config);
+        if (!config.randoopSeedExamples().isBlank()) {
+            if (config.inputGenerator().seedsWithLlm()) {
+                appendHybridSourceExamples(prompt, config);
+            } else if (config.inputGenerator().randoopSeedsLlm()) {
+                appendRandoopSeedExamples(prompt, config);
+            }
         }
 
         if (config.mode().usesDeveloperMrDataHelpers()) {
@@ -142,7 +146,20 @@ public final class PromptBuilder {
         prompt.append("- A scenario with 'Empty source output allowed: no' must be constructed to activate meaningful SUT output behavior.\n");
         prompt.append("- Vary the listed diversity dimensions across cases instead of changing only test names.\n");
         prompt.append("- Do not emit a detached inventory of scenario comments at class level.\n");
-        prompt.append("- Scenario descriptions guide source-input construction; the developer MR helper remains the output oracle.\n\n");
+        prompt.append(config.inputGenerator().seedsWithLlm()
+                ? "- For fixed HYBRID sources, use scenarios to validate and name the harvested cases; do not invent replacements.\n\n"
+                : "- Scenario descriptions guide source-input construction and expected source behavior.\n\n");
+    }
+
+    private static void appendHybridSourceExamples(StringBuilder prompt, PromptConfig config) {
+        prompt.append("HYBRID final source inputs harvested by LLM-seeded Randoop:\n");
+        prompt.append("```json\n").append(config.randoopSeedExamples()).append("\n```\n");
+        prompt.append("These are the final source fixtures for this run, not examples for further generation.\n");
+        prompt.append("Generate one candidate test for each distinct harvested source, up to Count.\n");
+        prompt.append("Recreate each source from its constructionCode, or an exactly equivalent deterministic helper.\n");
+        prompt.append("Do not invent, replace, or randomly vary the source inputs; the LLM owns only the MR code and test structure.\n");
+        prompt.append("Use actual source behavior and the structured scenarios to choose accurate test names.\n");
+        prompt.append("Skip a harvested source only when its constructionCode cannot produce a valid source object.\n\n");
     }
 
     private static void appendRandoopSeedExamples(StringBuilder prompt, PromptConfig config) {

@@ -89,6 +89,13 @@ public final class RandoopDataGenerator {
             seederClient = new OpenAiClient(apiKey, model, baseUrl);
         }
 
+        if (args.length >= 3 && args[2].equals("--seeded-sources-only")) {
+            String sourceExamples = new RandoopDataGenerator(15000)
+                    .generateSeedExamples(config, repoRoot, seederClient, true);
+            Files.writeString(outJson, sourceExamples, StandardCharsets.UTF_8);
+            return;
+        }
+
         Result result = new RandoopDataGenerator(15000).generateAll(config, repoRoot, seederClient, seeded);
         Files.writeString(outJson, result.json(), StandardCharsets.UTF_8);
 
@@ -124,6 +131,13 @@ public final class RandoopDataGenerator {
     /** Harvest raw Randoop examples for NEW_HYBRID before the LLM creates the final input set. */
     @SuppressWarnings("unchecked")
     public String generateSeedExamples(PromptConfig config) throws Exception {
+        return generateSeedExamples(config, null, null, false);
+    }
+
+    /** Harvest executable source examples, optionally using LLM values to seed Randoop. */
+    @SuppressWarnings("unchecked")
+    public String generateSeedExamples(
+            PromptConfig config, Path repoRoot, LlmClient seederClient, boolean seeded) throws Exception {
         Class<?> sutClass = Class.forName(classNameOf(config.sutClassFile()));
         Method sutMethod = singleArgMethod(sutClass, methodName(config.targetFunction()));
         Class<Object> inputType = (Class<Object>) sutMethod.getParameterTypes()[0];
@@ -133,8 +147,20 @@ public final class RandoopDataGenerator {
         RandoopHarvester<Object> harvester = new RandoopHarvester<>(
                 inputType,
                 randoopClassNames(config));
-        List<RandoopHarvester.Harvested<Object>> harvested =
-                harvester.harvestSequences(timeLimitMillis, null, 0L);
+        List<RandoopHarvester.Harvested<Object>> harvested;
+        if (seeded && seederClient != null) {
+            List<Object> seeds;
+            String inputDomain = config.inputDomain();
+            if (inputDomain != null && !inputDomain.isBlank()) {
+                seeds = LlmValueSeeder.generateSeedsFromDomain(seederClient, inputDomain);
+            } else {
+                seeds = LlmValueSeeder.generateSeedsFromCode(seederClient, readSutSources(repoRoot, config));
+            }
+            int perSeedBudget = Math.max(2000, timeLimitMillis / RANDOM_SEEDS.length);
+            harvested = harvester.harvestSequencesMultiSeed(perSeedBudget, seeds, RANDOM_SEEDS);
+        } else {
+            harvested = harvester.harvestSequences(timeLimitMillis, null, 0L);
+        }
         List<RandoopHarvester.Harvested<Object>> executable = new ArrayList<>();
         for (RandoopHarvester.Harvested<Object> candidate : harvested) {
             try {
