@@ -4,6 +4,7 @@ import mtllm.config.PromptConfig;
 import mtllm.config.PromptConfigLoader;
 import mtllm.llm.LlmClient;
 import mtllm.llm.OpenAiClient;
+import mtllm.sut.ConstructionGraphDiscoverer;
 import mtllm.sut.ReflectiveObjectFactory;
 import mtllm.sut.TargetMethodResolver;
 import mtllm.util.DotEnv;
@@ -17,6 +18,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -36,8 +38,8 @@ import java.util.regex.Pattern;
  * generically with {@link JsonSerializer}, so no per-SUT serialization code is needed.</p>
  *
  * <p>The developer MR is resolved <em>by method name</em> (the self-contained-spec contract), and
- * the SUT method by name + single reference-type parameter -- mirroring the standalone experiment
- * runner, but reading everything from {@link PromptConfig}.</p>
+ * the SUT method from its complete signature. Zero- and multi-argument methods are presented to
+ * Randoop through a framework-generated typed invocation wrapper.</p>
  *
  * <p><b>Classpath requirement:</b> the SUT classes and the developer-MR class must be loadable
  * (on the context/system classloader) when {@link #generate} runs, because Randoop reflects them
@@ -47,12 +49,14 @@ import java.util.regex.Pattern;
 public final class RandoopDataGenerator {
 
     private final int timeLimitMillis;
+    private final String invocationClassName;
     private static final long[] RANDOM_SEEDS = {0L, 1L, 2L, 3L, 4L};
     private static final Pattern PACKAGE_DECLARATION =
             Pattern.compile("(?m)^\\s*package\\s+([A-Za-z_$][\\w$]*(?:\\.[A-Za-z_$][\\w$]*)*)\\s*;");
 
-    public RandoopDataGenerator(int timeLimitMillis) {
+    public RandoopDataGenerator(int timeLimitMillis, String invocationClassName) {
         this.timeLimitMillis = timeLimitMillis;
+        this.invocationClassName = invocationClassName == null ? "" : invocationClassName;
     }
 
     /**
@@ -72,8 +76,10 @@ public final class RandoopDataGenerator {
         Path outJson = Path.of(args[1]).toAbsolutePath().normalize();
 
         PromptConfig config = PromptConfigLoader.load(promptPath, repoRoot);
-        if (args.length >= 3 && args[2].equals("--seeds-only")) {
-            String seedExamples = new RandoopDataGenerator(15000)
+        String invocationClassName = optionValue(args, "--invocation-class=");
+        RandoopDataGenerator generator = new RandoopDataGenerator(15000, invocationClassName);
+        if (hasFlag(args, "--seeds-only")) {
+            String seedExamples = generator
                     .generateSeedExamples(config);
             Files.writeString(outJson, seedExamples, StandardCharsets.UTF_8);
             return;
@@ -91,14 +97,14 @@ public final class RandoopDataGenerator {
             seederClient = new OpenAiClient(apiKey, model, baseUrl);
         }
 
-        if (args.length >= 3 && args[2].equals("--seeded-sources-only")) {
-            String sourceExamples = new RandoopDataGenerator(15000)
+        if (hasFlag(args, "--seeded-sources-only")) {
+            String sourceExamples = generator
                     .generateSeedExamples(config, repoRoot, seederClient, true);
             Files.writeString(outJson, sourceExamples, StandardCharsets.UTF_8);
             return;
         }
 
-        Result result = new RandoopDataGenerator(15000).generateAll(config, repoRoot, seederClient, seeded);
+        Result result = generator.generateAll(config, repoRoot, seederClient, seeded);
         Files.writeString(outJson, result.json(), StandardCharsets.UTF_8);
 
         // Object JUnit suite (approach C): emit passing/failing classes directly from the in-process
@@ -118,18 +124,6 @@ public final class RandoopDataGenerator {
         }
     }
 
-    /**
-     * Backward-compatible JSON-only entry: harvest, evaluate, and return the executed-MT JSON array.
-     *
-     * @param seeded       if true, ask the LLM (via {@code seederClient}) for domain seed values and
-     *                     run multi-seed harvesting; if false, raw Randoop.
-     * @param seederClient LLM client for the hybrid seeding step; ignored when {@code seeded} is false.
-     */
-    public String generate(PromptConfig config, Path repoRoot, LlmClient seederClient, boolean seeded)
-            throws Exception {
-        return generateAll(config, repoRoot, seederClient, seeded).json();
-    }
-
     /** Harvest raw Randoop examples for NEW_HYBRID before the LLM creates the final input set. */
     @SuppressWarnings("unchecked")
     public String generateSeedExamples(PromptConfig config) throws Exception {
@@ -140,16 +134,13 @@ public final class RandoopDataGenerator {
     @SuppressWarnings("unchecked")
     public String generateSeedExamples(
             PromptConfig config, Path repoRoot, LlmClient seederClient, boolean seeded) throws Exception {
-        Class<?> sutClass = Class.forName(classNameOf(config.sutClassFile()));
-        Method sutMethod = requireSingleArgument(
-                TargetMethodResolver.resolve(sutClass, config.targetFunction()));
-        Class<Object> inputType = (Class<Object>) sutMethod.getParameterTypes()[0];
-        Object sutReceiver = Modifier.isStatic(sutMethod.getModifiers())
-                ? null
-                : ReflectiveObjectFactory.create(sutClass);
+        SutInvocation invocation = resolveSutInvocation(config);
+        Method sutMethod = invocation.method;
+        Class<Object> inputType = (Class<Object>) invocation.inputType;
+        Object sutReceiver = invocation.receiver;
         RandoopHarvester<Object> harvester = new RandoopHarvester<>(
                 inputType,
-                randoopClassNames(config));
+                randoopClassNames(config, inputType));
         List<RandoopHarvester.Harvested<Object>> harvested;
         if (seeded && seederClient != null) {
             List<Object> seeds;
@@ -172,6 +163,9 @@ public final class RandoopDataGenerator {
             } catch (Throwable invalidSource) {
                 // Seed examples should demonstrate inputs accepted by the target method.
             }
+        }
+        if (executable.isEmpty() && (seeded || config.inputGenerator().name().equals("NEW_HYBRID"))) {
+            return emitInstancioSeedExamples(inputType, sutMethod, sutReceiver, config.count());
         }
         return emitSeedExamples(executable, config.count());
     }
@@ -204,7 +198,8 @@ public final class RandoopDataGenerator {
         String base = baseName(config.generatedClassName());
         String sutCallee = sutCallee(bundle);
         String specClassName = sourceClassName(bundle.specClass);
-        String followUpCallee = specClassName + "." + bundle.followUpMethod.getName();
+        String followUpCallee = sourceClassName(bundle.followUpMethod.getDeclaringClass())
+                + "." + bundle.followUpMethod.getName();
         String assertCallee = specClassName + "." + bundle.assertMethod.getName();
 
         List<RandoopJUnitEmitter.Case> passingCases = new ArrayList<>();
@@ -230,18 +225,18 @@ public final class RandoopDataGenerator {
 
     /** Reflect the SUT method (+ receiver) and the developer MR follow-up/assert methods by name. */
     private MethodBundle resolveMethods(PromptConfig config) throws Exception {
-        Class<?> sutClass = Class.forName(classNameOf(config.sutClassFile()));
+        SutInvocation invocation = resolveSutInvocation(config);
+        Class<?> sutClass = invocation.sutClass;
         Class<?> specClass = Class.forName(classNameOf(config.developerMrFile()));
 
-        Method sutMethod = requireSingleArgument(
-                TargetMethodResolver.resolve(sutClass, config.targetFunction()));
-        Class<?> inputType = sutMethod.getParameterTypes()[0];
+        Method sutMethod = invocation.method;
+        Class<?> inputType = invocation.inputType;
         Class<?> outputType = sutMethod.getReturnType();
-        Object sutReceiver = Modifier.isStatic(sutMethod.getModifiers())
-                ? null
-                : ReflectiveObjectFactory.create(sutClass);
+        Object sutReceiver = invocation.receiver;
 
-        Method followUpMethod = specClass.getMethod(simpleName(config.developerFollowUpMethod()), inputType);
+        Method followUpMethod = invocation.wrapped
+                ? sutClass.getMethod("generateFollowUp", inputType)
+                : specClass.getMethod(simpleName(config.developerFollowUpMethod()), inputType);
         Method assertMethod = findAssertMethod(specClass, simpleName(config.developerAssertMethod()), outputType);
         return new MethodBundle(sutClass, specClass, sutMethod, sutReceiver, followUpMethod, assertMethod, inputType);
     }
@@ -252,7 +247,8 @@ public final class RandoopDataGenerator {
             PromptConfig config, Path repoRoot, LlmClient seederClient, boolean seeded, MethodBundle bundle)
             throws Exception {
         RandoopHarvester<Object> harvester =
-                new RandoopHarvester<>((Class<Object>) bundle.inputType, randoopClassNames(config));
+                new RandoopHarvester<>((Class<Object>) bundle.inputType,
+                        randoopClassNames(config, bundle.inputType));
 
         if (seeded && seederClient != null) {
             // Prefer the developer's InputDomain description (concise, authoritative, scales to any
@@ -270,8 +266,12 @@ public final class RandoopDataGenerator {
         return harvester.harvestSequences(timeLimitMillis, null, 0L);
     }
 
-    private Set<String> randoopClassNames(PromptConfig config) throws Exception {
+    private Set<String> randoopClassNames(PromptConfig config, Class<?> inputType) throws Exception {
         Set<String> classNames = new LinkedHashSet<>();
+        ConstructionGraphDiscoverer.Result discovery = ConstructionGraphDiscoverer.discover(config, inputType);
+        discovery.classNames().stream()
+                .filter(RandoopDataGenerator::isLoadableClass)
+                .forEach(classNames::add);
         if (!config.randoopTargetClasses().isEmpty()) {
             classNames.addAll(config.randoopTargetClasses());
         } else {
@@ -280,7 +280,61 @@ public final class RandoopDataGenerator {
                 classNames.add(classNameOf(support));
             }
         }
+        System.err.println("[discovery] Randoop construction graph: " + classNames.size() + " classes");
+        discovery.evidence().stream().limit(20)
+                .forEach(item -> System.err.println("[discovery]   " + item));
         return classNames;
+    }
+
+    private static boolean isLoadableClass(String className) {
+        try {
+            Class.forName(className, false, Thread.currentThread().getContextClassLoader());
+            return true;
+        } catch (ClassNotFoundException | LinkageError unavailable) {
+            return false;
+        }
+    }
+
+    /**
+     * Last-resort seed generation for hybrid modes. Raw RANDOOP remains pure Randoop; when a
+     * hybrid harvest is empty, Instancio gets a small deterministic chance to construct the root
+     * graph. Every candidate is executed through the SUT before it is exposed to the LLM.
+     */
+    private String emitInstancioSeedExamples(
+            Class<?> inputType, Method sutMethod, Object sutReceiver, int limit) {
+        StringBuilder json = new StringBuilder("[");
+        Set<String> signatures = new LinkedHashSet<>();
+        int emitted = 0;
+        int attempts = Math.max(12, limit * 4);
+        for (long seed = 0; seed < attempts && emitted < limit; seed++) {
+            Object value;
+            try {
+                value = org.instancio.Instancio.of(inputType).withSeed(seed).create();
+                invoke(sutMethod, sutReceiver, value);
+            } catch (Throwable invalid) {
+                continue;
+            }
+            String serialized = JsonSerializer.toJson(value);
+            if (!signatures.add(serialized)) {
+                continue;
+            }
+            if (emitted++ > 0) {
+                json.append(',');
+            }
+            String sourceType = sourceClassName(inputType);
+            String constructionCode = sourceType + " sourceInput = org.instancio.Instancio.of("
+                    + sourceType + ".class).withSeed(" + seed + "L).create();\n"
+                    + "// source input variable: sourceInput";
+            json.append("{\"value\":").append(serialized)
+                    .append(",\"constructionCode\":")
+                    .append(JsonSerializer.toJson(constructionCode))
+                    .append('}');
+        }
+        if (emitted > 0) {
+            System.err.println("[discovery] Randoop produced no executable hybrid seeds; Instancio supplied "
+                    + emitted + " deterministic fallback seed(s).");
+        }
+        return json.append(']').toString();
     }
 
     private String emitSeedExamples(List<RandoopHarvester.Harvested<Object>> harvested, int limit) {
@@ -447,6 +501,28 @@ public final class RandoopDataGenerator {
         }
     }
 
+    private SutInvocation resolveSutInvocation(PromptConfig config) throws Exception {
+        if (!invocationClassName.isBlank()) {
+            Class<?> wrapperClass = Class.forName(invocationClassName);
+            Method wrapperMethod = Arrays.stream(wrapperClass.getMethods())
+                    .filter(method -> method.getName().equals("invoke"))
+                    .filter(method -> Modifier.isStatic(method.getModifiers()))
+                    .filter(method -> method.getParameterCount() == 1)
+                    .findFirst()
+                    .orElseThrow(() -> new NoSuchMethodException(
+                            "Generated invocation class has no public static invoke(Input): " + invocationClassName));
+            return new SutInvocation(
+                    wrapperClass, wrapperMethod, null, wrapperMethod.getParameterTypes()[0], true);
+        }
+
+        Class<?> sutClass = Class.forName(classNameOf(config.sutClassFile()));
+        Method sutMethod = requireSingleArgument(TargetMethodResolver.resolve(sutClass, config.targetFunction()));
+        Object receiver = Modifier.isStatic(sutMethod.getModifiers())
+                ? null
+                : ReflectiveObjectFactory.create(sutClass);
+        return new SutInvocation(sutClass, sutMethod, receiver, sutMethod.getParameterTypes()[0], false);
+    }
+
     private static Method requireSingleArgument(Method method) {
         if (method.getParameterCount() != 1) {
             throw new IllegalArgumentException("Randoop input harvesting currently requires exactly one target "
@@ -454,6 +530,18 @@ public final class RandoopDataGenerator {
                     + ". LLM generation can use this signature; Randoop requires a generated invocation wrapper.");
         }
         return method;
+    }
+
+    private static boolean hasFlag(String[] args, String flag) {
+        return Arrays.asList(args).contains(flag);
+    }
+
+    private static String optionValue(String[] args, String prefix) {
+        return Arrays.stream(args)
+                .filter(arg -> arg.startsWith(prefix))
+                .map(arg -> arg.substring(prefix.length()))
+                .findFirst()
+                .orElse("");
     }
 
     private static Method findAssertMethod(Class<?> specClass, String name, Class<?> outputType)
@@ -489,18 +577,6 @@ public final class RandoopDataGenerator {
         return packageMatcher.find() ? packageMatcher.group(1) + "." + simpleName : simpleName;
     }
 
-    /** "public static double calculateTotal(Order o)" / "Cls.foo" / "computeRank" -> "calculateTotal"/"foo"/"computeRank". */
-    private static String methodName(String targetFunction) {
-        String s = targetFunction.trim();
-        int paren = s.indexOf('(');
-        if (paren >= 0) s = s.substring(0, paren).trim();
-        int space = s.lastIndexOf(' ');
-        if (space >= 0) s = s.substring(space + 1);
-        int dot = s.lastIndexOf('.');
-        if (dot >= 0) s = s.substring(dot + 1);
-        return s.trim();
-    }
-
     /** "OrderMetamorphicSpec.generateFollowUp" / "X.INSTANCE.foo" -> simple method name. */
     private static String simpleName(String qualified) {
         String s = qualified.trim();
@@ -533,6 +609,22 @@ public final class RandoopDataGenerator {
             this.followUpMethod = followUpMethod;
             this.assertMethod = assertMethod;
             this.inputType = inputType;
+        }
+    }
+
+    private static final class SutInvocation {
+        private final Class<?> sutClass;
+        private final Method method;
+        private final Object receiver;
+        private final Class<?> inputType;
+        private final boolean wrapped;
+
+        private SutInvocation(Class<?> sutClass, Method method, Object receiver, Class<?> inputType, boolean wrapped) {
+            this.sutClass = sutClass;
+            this.method = method;
+            this.receiver = receiver;
+            this.inputType = inputType;
+            this.wrapped = wrapped;
         }
     }
 

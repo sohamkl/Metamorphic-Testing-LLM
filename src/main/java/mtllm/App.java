@@ -93,6 +93,7 @@ public final class App {
                 System.out.println("Randoop source inputs harvested; asking the LLM to generate the MR tests...");
 
                 PromptConfig harvestedConfig = config.withRandoopSeedExamples(sourceExamples);
+                SutContext harvestedContext = SutContextLoader.load(harvestedConfig, repoRoot);
                 LlmClient llmClient = new OpenAiClient(apiKey, model, baseUrl);
                 RepairLoop repairLoop = new RepairLoop(
                         llmClient,
@@ -100,7 +101,7 @@ public final class App {
                         dataGeneratorRunner,
                         outputRoot.resolve("junit-tests"),
                         outputRoot.resolve("data-generator-code"));
-                result = repairLoop.generateRunAndRepair(harvestedConfig, sutContext);
+                result = repairLoop.generateRunAndRepair(harvestedConfig, harvestedContext);
             } else if (config.inputGenerator().randoopSeedsLlm()) {
                 RandoopInputRunner seedRunner = new RandoopInputRunner(
                         repoRoot,
@@ -112,6 +113,7 @@ public final class App {
                 System.out.println("Randoop seed examples harvested; asking the LLM to generate final source inputs...");
 
                 PromptConfig groundedConfig = config.withRandoopSeedExamples(seedExamples);
+                SutContext groundedContext = SutContextLoader.load(groundedConfig, repoRoot);
                 LlmClient llmClient = new OpenAiClient(apiKey, model, baseUrl);
                 RepairLoop repairLoop = new RepairLoop(
                         llmClient,
@@ -119,7 +121,7 @@ public final class App {
                         dataGeneratorRunner,
                         outputRoot.resolve("junit-tests"),
                         outputRoot.resolve("data-generator-code"));
-                result = repairLoop.generateRunAndRepair(groundedConfig, sutContext);
+                result = repairLoop.generateRunAndRepair(groundedConfig, groundedContext);
             } else if (config.inputGenerator().usesRandoop()) {
                 result = runRandoop(config, sutContext, repoRoot, promptPath, dataGeneratorRunner);
             } else {

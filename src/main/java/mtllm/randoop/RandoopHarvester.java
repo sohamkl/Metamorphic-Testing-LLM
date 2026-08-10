@@ -24,7 +24,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.Function;
 import java.util.regex.Pattern;
 
 /**
@@ -40,14 +39,13 @@ import java.util.regex.Pattern;
  *   <li>{@code targetClass} -- the type you want to harvest (e.g. {@code Order.class});</li>
  *   <li>{@code classNames} -- the classes Randoop may call constructors/methods on to build it
  *       (e.g. {@code Order}, {@code LineItem}, {@code OrderUtil});</li>
- *   <li>(optional) a {@code signature} function for de-dup. If omitted, {@link StructuralSignature}
- *       auto-derives one by reflection -- so for clean POJOs you write nothing.</li>
+ *   <li>{@link StructuralSignature} auto-derives a de-duplication key by reflection.</li>
  * </ol>
  *
  * <p>This replaces the old SUT-specific {@code RandoopOrderHarvester}: the harvest mechanism was
  * always generic; only the {@code Order} cast and the hand-written signature were specific, and
- * both are now parameters ({@code targetClass.isInstance} / {@code targetClass.cast} and the
- * optional signature function).</p>
+ * both are now handled generically with {@code targetClass.isInstance} and
+ * {@code targetClass.cast}.</p>
  *
  * @param <T> the object type to harvest
  */
@@ -71,56 +69,15 @@ public final class RandoopHarvester<T> {
 
     private final Class<T> targetClass;
     private final Set<String> classNames;
-    private final Function<? super T, String> signature;
-
     /** Harvest {@code targetClass} instances; de-dup with the reflection auto-signature. */
     public RandoopHarvester(Class<T> targetClass, Set<String> classNames) {
-        this(targetClass, classNames, StructuralSignature::of);
-    }
-
-    /** Harvest {@code targetClass} instances; de-dup with a caller-supplied signature. */
-    public RandoopHarvester(Class<T> targetClass, Set<String> classNames,
-                            Function<? super T, String> signature) {
         this.targetClass = targetClass;
         this.classNames = new LinkedHashSet<>(classNames);
-        this.signature = signature;
-    }
-
-    /** The structural signature this harvester uses (shared with the evaluator for failure shapes). */
-    public String signatureOf(T value) {
-        return signature.apply(value);
-    }
-
-    /** Harvest with no extra seeds (raw Randoop). */
-    public List<T> harvest(int timeLimitMillis) throws Exception {
-        return harvest(timeLimitMillis, null, 0L);
-    }
-
-    public List<T> harvest(int timeLimitMillis, List<Object> extraSeeds) throws Exception {
-        return harvest(timeLimitMillis, extraSeeds, 0L);
     }
 
     /**
-     * Harvest structurally-distinct {@code targetClass} objects within the given time budget.
-     *
-     * @param extraSeeds meaningful literal values (Strings, ints, doubles) to add to Randoop's
-     *                   value pool -- in the hybrid this is what the LLM supplies. Randoop then
-     *                   builds objects from these instead of only its tiny default pool.
-     */
-    public List<T> harvest(int timeLimitMillis, List<Object> extraSeeds, long randomSeed)
-            throws Exception {
-        return toValues(harvestSequences(timeLimitMillis, extraSeeds, randomSeed));
-    }
-
-    /** Run Randoop under several random seeds and union the structurally-distinct results. */
-    public List<T> harvestMultiSeed(int timeLimitMillis, List<Object> extraSeeds, long[] randomSeeds)
-            throws Exception {
-        return toValues(harvestSequencesMultiSeed(timeLimitMillis, extraSeeds, randomSeeds));
-    }
-
-    /**
-     * Like {@link #harvest(int, List, long)} but returns each distinct object paired with the
-     * Randoop {@link ExecutableSequence} that built it, for the JUnit-suite (approach C) path.
+     * Returns each distinct object paired with the Randoop {@link ExecutableSequence} that built it,
+     * for seed traceability and generated JUnit construction code.
      */
     public List<Harvested<T>> harvestSequences(int timeLimitMillis, List<Object> extraSeeds, long randomSeed)
             throws Exception {
@@ -137,14 +94,6 @@ public final class RandoopHarvester<T> {
             }
         }
         return new ArrayList<>(union.values());
-    }
-
-    private List<T> toValues(List<Harvested<T>> harvested) {
-        List<T> values = new ArrayList<>(harvested.size());
-        for (Harvested<T> h : harvested) {
-            values.add(h.value());
-        }
-        return values;
     }
 
     /**
@@ -201,7 +150,7 @@ public final class RandoopHarvester<T> {
                 Object o = normal.getRuntimeValue();
                 if (targetClass.isInstance(o) && seenIdentity.put(o, true) == null) {
                     T value = targetClass.cast(o);
-                    String sig = signature.apply(value);
+                    String sig = StructuralSignature.of(value);
                     if (!distinct.containsKey(sig)) {
                         Variable variable = es.sequence.getVariable(statementIndex);
                         distinct.put(sig, new Harvested<>(value, es, variable));

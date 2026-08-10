@@ -50,6 +50,23 @@ public final class SutContextLoader {
                     readFileWithLimit(normalized, MAX_SOURCE_CHARS / 2, "SUTSupportFiles")));
         }
 
+        Path generatedSupportDir = config.outputRoot().resolve("generated-support");
+        if (Files.isDirectory(generatedSupportDir)) {
+            try (var generated = Files.list(generatedSupportDir)) {
+                for (Path path : generated.filter(file -> file.toString().endsWith(".java")).sorted().toList()) {
+                    Path normalized = path.normalize();
+                    if (seen.add(normalized)) {
+                        supportSources.add(new SutContext.SourceFile(
+                                normalized,
+                                readFileWithLimit(normalized, MAX_SOURCE_CHARS / 2, "generated support file")));
+                    }
+                }
+            } catch (IOException e) {
+                throw new IllegalArgumentException("Cannot read generated support files from "
+                        + generatedSupportDir, e);
+            }
+        }
+
         return new SutContext(classFile, classSource, supportSources, SutApiInspector.inspect(config));
     }
 

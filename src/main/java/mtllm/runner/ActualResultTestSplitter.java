@@ -40,7 +40,7 @@ public final class ActualResultTestSplitter {
                 .resolve("surefire-reports")
                 .resolve("TEST-" + config.generatedClassName() + ".xml");
         TestOutcomes outcomes = readOutcomes(reportFile);
-        JavaTestClass javaClass = parseJavaTestClass(generatedTestFile, config.generatedClassName());
+        JavaTestClass javaClass = parseJavaTestClass(generatedTestFile);
 
         String baseClassName = baseClassName(config.generatedClassName());
         String passingClassName = baseClassName + "PassingTest";
@@ -114,7 +114,7 @@ public final class ActualResultTestSplitter {
         return false;
     }
 
-    private static JavaTestClass parseJavaTestClass(Path generatedTestFile, String className) throws IOException {
+    private static JavaTestClass parseJavaTestClass(Path generatedTestFile) throws IOException {
         List<String> lines = Files.readAllLines(generatedTestFile, StandardCharsets.UTF_8);
         List<String> skeleton = new ArrayList<>();
         Map<String, TestMethod> testMethods = new LinkedHashMap<>();
@@ -132,7 +132,7 @@ public final class ActualResultTestSplitter {
             }
         }
 
-        return new JavaTestClass(className, skeleton, new ArrayList<>(testMethods.values()));
+        return new JavaTestClass(skeleton, new ArrayList<>(testMethods.values()));
     }
 
     private static boolean isTestAnnotation(String line) {
@@ -238,12 +238,10 @@ public final class ActualResultTestSplitter {
     }
 
     private static final class JavaTestClass {
-        private final String className;
         private final List<String> skeleton;
         private final List<TestMethod> testMethods;
 
-        private JavaTestClass(String className, List<String> skeleton, List<TestMethod> testMethods) {
-            this.className = className;
+        private JavaTestClass(List<String> skeleton, List<TestMethod> testMethods) {
             this.skeleton = skeleton;
             this.testMethods = testMethods;
         }

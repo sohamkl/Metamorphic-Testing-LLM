@@ -134,6 +134,10 @@ public final class GeneratedTestRunner {
             copyJavaFileIfPresent(file, supportSourceDir);
             copyJavaFileIfPresent(file, stagedSupportSourceDir);
         }
+        for (Path file : generatedSupportSourceFiles(config)) {
+            copyJavaFileIfPresent(file, supportSourceDir);
+            copyJavaFileIfPresent(file, stagedSupportSourceDir);
+        }
     }
 
     private void copyJavaFileIfPresent(Path sourceFile, Path targetDir) throws IOException {
@@ -196,6 +200,7 @@ public final class GeneratedTestRunner {
         for (Path file : generatedDataSourceFiles(config)) {
             command.add(file.toString());
         }
+        command.addAll(generatedSupportSourceFiles(config).stream().map(Path::toString).toList());
         command.add(generatedTestFile.toString());
 
         ProcessResult result = runProcess(command, repoRoot);
@@ -213,6 +218,18 @@ public final class GeneratedTestRunner {
         try (var stream = Files.list(generatedDataDir)) {
             return stream
                     .filter(path -> path.getFileName().toString().endsWith(".java"))
+                    .toList();
+        }
+    }
+
+    private List<Path> generatedSupportSourceFiles(PromptConfig config) throws IOException {
+        Path generatedSupportDir = config.outputRoot().resolve("generated-support");
+        if (!Files.isDirectory(generatedSupportDir)) {
+            return List.of();
+        }
+        try (var stream = Files.list(generatedSupportDir)) {
+            return stream.filter(path -> path.getFileName().toString().endsWith(".java"))
+                    .sorted()
                     .toList();
         }
     }

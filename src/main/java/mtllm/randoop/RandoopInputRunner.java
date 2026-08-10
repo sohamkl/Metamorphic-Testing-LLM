@@ -6,6 +6,8 @@ import mtllm.runner.RuntimeResourceCopier;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
+import java.net.URL;
+import java.net.URLClassLoader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -49,12 +51,12 @@ public final class RandoopInputRunner {
 
     /** Compile the SUT, run the generator subprocess, and return the JSON + emitted suite info. */
     public GenerationResult generate(PromptConfig config, Path promptPath) throws Exception {
-        Path classesDir = compileSut(config);
+        Compilation compilation = compileSut(config);
 
         // Run the generator in a subprocess; it writes the JSON to outJson and (when a test suite
         // is required) the object JUnit suite into <outputRoot>/junit-tests.
         Path outJson = workDir.resolve("randoop-data.json");
-        ProcessResult run = runGenerator(config, promptPath, outJson, classesDir, List.of());
+        ProcessResult run = runGenerator(config, promptPath, outJson, compilation, List.of());
         if (!Files.exists(outJson)) {
             throw new IllegalStateException("Randoop generation produced no output file.\n" + run.output);
         }
@@ -73,15 +75,15 @@ public final class RandoopInputRunner {
                     + junitDir + ".\n" + run.output);
         }
 
-        ProcessResult gate = compileSuiteGate(config, classesDir, passingFile, failingFile);
+        ProcessResult gate = compileSuiteGate(config, compilation.classesDir, passingFile, failingFile);
         return new GenerationResult(json, true, passingFile, failingFile, gate.exitCode == 0, gate.output);
     }
 
     /** Generate local Randoop examples for NEW_HYBRID without applying the MR or writing a suite. */
     public String generateSeedExamples(PromptConfig config, Path promptPath) throws Exception {
-        Path classesDir = compileSut(config);
+        Compilation compilation = compileSut(config);
         Path outJson = workDir.resolve("randoop-seeds.json");
-        ProcessResult run = runGenerator(config, promptPath, outJson, classesDir, List.of("--seeds-only"));
+        ProcessResult run = runGenerator(config, promptPath, outJson, compilation, List.of("--seeds-only"));
         if (!Files.exists(outJson)) {
             throw new IllegalStateException("Randoop seed generation produced no output file.\n" + run.output);
         }
@@ -90,10 +92,10 @@ public final class RandoopInputRunner {
 
     /** Generate the final LLM-seeded Randoop source fixtures for HYBRID + LLM MR. */
     public String generateLlmSeededSourceExamples(PromptConfig config, Path promptPath) throws Exception {
-        Path classesDir = compileSut(config);
+        Compilation compilation = compileSut(config);
         Path outJson = workDir.resolve("randoop-hybrid-sources.json");
         ProcessResult run = runGenerator(
-                config, promptPath, outJson, classesDir, List.of("--seeded-sources-only"));
+                config, promptPath, outJson, compilation, List.of("--seeded-sources-only"));
         if (!Files.exists(outJson)) {
             throw new IllegalStateException(
                     "LLM-seeded Randoop source generation produced no output file.\n" + run.output);
@@ -101,7 +103,7 @@ public final class RandoopInputRunner {
         return Files.readString(outJson, StandardCharsets.UTF_8);
     }
 
-    private Path compileSut(PromptConfig config) throws Exception {
+    private Compilation compileSut(PromptConfig config) throws Exception {
         Path classesDir = workDir.resolve("classes");
         Files.createDirectories(classesDir);
         List<String> javac = new ArrayList<>();
@@ -129,19 +131,54 @@ public final class RandoopInputRunner {
             throw new IllegalStateException("Randoop SUT compilation failed:\n" + compile.output);
         }
         RuntimeResourceCopier.copyFor(config, classesDir);
-        return classesDir;
+        InvocationWrapperGenerator.Generated wrapper = generateAndCompileWrapper(config, classesDir, compileClasspath);
+        return new Compilation(classesDir, wrapper);
+    }
+
+    private InvocationWrapperGenerator.Generated generateAndCompileWrapper(
+            PromptConfig config, Path classesDir, String compileClasspath) throws Exception {
+        List<URL> urls = new ArrayList<>();
+        urls.add(classesDir.toUri().toURL());
+        urls.add(projectClasses.toUri().toURL());
+        for (Path path : config.sutClasspath()) {
+            urls.add(path.toUri().toURL());
+        }
+        InvocationWrapperGenerator.Generated wrapper;
+        try (URLClassLoader loader = new URLClassLoader(urls.toArray(URL[]::new), getClass().getClassLoader())) {
+            wrapper = InvocationWrapperGenerator.generate(config, loader);
+        }
+        if (wrapper == null) {
+            return null;
+        }
+
+        List<String> javac = new ArrayList<>(List.of(
+                "javac", "-encoding", "UTF-8",
+                "-cp", String.join(File.pathSeparator, classesDir.toString(), compileClasspath),
+                "-d", classesDir.toString(), wrapper.sourceFile().toString()));
+        ProcessResult compile = runProcess(javac);
+        if (compile.exitCode != 0) {
+            throw new IllegalStateException("Generated invocation-wrapper compilation failed:\n" + compile.output);
+        }
+        Path junitSupport = config.outputRoot().resolve("junit-support");
+        Files.createDirectories(junitSupport);
+        Files.copy(wrapper.sourceFile(), junitSupport.resolve(wrapper.sourceFile().getFileName()),
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        return wrapper;
     }
 
     private ProcessResult runGenerator(
-            PromptConfig config, Path promptPath, Path outJson, Path classesDir, List<String> extraArgs)
+            PromptConfig config, Path promptPath, Path outJson, Compilation compilation, List<String> extraArgs)
             throws Exception {
         Files.deleteIfExists(outJson);
         String classpath = String.join(File.pathSeparator,
-                classesDir.toString(), projectClasses.toString(), randoopJar.toString(),
+                compilation.classesDir.toString(), projectClasses.toString(), randoopJar.toString(),
                 runtimeDependencyClasspath(), sutClasspath(config));
         List<String> java = new ArrayList<>(List.of(
                 "java", "-cp", classpath, "mtllm.randoop.RandoopDataGenerator",
                 promptPath.toString(), outJson.toString()));
+        if (compilation.wrapper != null) {
+            java.add("--invocation-class=" + compilation.wrapper.className());
+        }
         java.addAll(extraArgs);
         return runProcess(java);
     }
@@ -151,6 +188,11 @@ public final class RandoopInputRunner {
         Path m2 = Path.of(System.getProperty("user.home"), ".m2", "repository");
         List<String> jars = new ArrayList<>();
         addLatestJar(jars, m2.resolve("org/yaml/snakeyaml"), "snakeyaml");
+        addLatestJar(jars, m2.resolve("io/github/classgraph/classgraph"), "classgraph");
+        addLatestJar(jars, m2.resolve("org/instancio/instancio-core"), "instancio-core");
+        addLatestJar(jars, m2.resolve("org/jspecify/jspecify"), "jspecify");
+        addLatestJar(jars, m2.resolve("org/slf4j/slf4j-api"), "slf4j-api");
+        addLatestJar(jars, m2.resolve("com/github/javaparser/javaparser-core"), "javaparser-core");
         return String.join(File.pathSeparator, jars);
     }
 
@@ -173,7 +215,7 @@ public final class RandoopInputRunner {
         List<String> javac = new ArrayList<>(List.of(
                 "javac", "-encoding", "UTF-8",
                 "-cp", String.join(File.pathSeparator,
-                        junitClasspath, sutClassesDir.toString(), sutClasspath(config)),
+                        junitClasspath, runtimeDependencyClasspath(), sutClassesDir.toString(), sutClasspath(config)),
                 "-d", gateClasses.toString(),
                 passingFile.toString(), failingFile.toString()));
         return runProcess(javac);
@@ -278,6 +320,16 @@ public final class RandoopInputRunner {
         private ProcessResult(int exitCode, String output) {
             this.exitCode = exitCode;
             this.output = output == null ? "" : output;
+        }
+    }
+
+    private static final class Compilation {
+        private final Path classesDir;
+        private final InvocationWrapperGenerator.Generated wrapper;
+
+        private Compilation(Path classesDir, InvocationWrapperGenerator.Generated wrapper) {
+            this.classesDir = classesDir;
+            this.wrapper = wrapper;
         }
     }
 }

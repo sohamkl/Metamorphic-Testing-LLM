@@ -63,8 +63,8 @@ public final class SutApiInspector {
             appendConstructionPaths(out, sutClass, "  ");
         }
         if (method.getParameterCount() != 1) {
-            out.append("Randoop note: direct harvesting currently requires a one-argument target; ")
-                    .append("LLM generation may still use this complete signature.\n");
+            out.append("Randoop note: the framework will generate a typed one-input invocation wrapper for this ")
+                    .append(method.getParameterCount()).append("-argument target.\n");
         }
         return out.toString().trim();
     }

@@ -3,9 +3,8 @@ package mtllm.runner;
 import mtllm.config.PromptConfig;
 import mtllm.config.GenerationMode;
 import mtllm.generation.DataBackedJUnitWriter;
-import mtllm.generation.GeneratedCodeWriter;
+import mtllm.generation.GeneratedJavaWriter;
 import mtllm.generation.GeneratedJUnitCallQualifier;
-import mtllm.generation.GeneratedTestWriter;
 import mtllm.llm.LlmClient;
 import mtllm.prompt.PromptBuilder;
 import mtllm.report.HtmlReportWriter;
@@ -149,10 +148,10 @@ public final class RepairLoop {
         Path generatedFile;
         if (config.mode().generatesJUnit()) {
             code = GeneratedJUnitCallQualifier.qualifyDeveloperMrCalls(code, config);
-            generatedFile = GeneratedTestWriter.write(generatedTestsDir, config.generatedClassName(), code);
+            generatedFile = GeneratedJavaWriter.write(generatedTestsDir, config.generatedClassName(), code);
             System.out.println("Wrote generated JUnit test to " + generatedFile);
         } else {
-            generatedFile = GeneratedCodeWriter.write(generatedCodeDir, config.generatedClassName(), code);
+            generatedFile = GeneratedJavaWriter.write(generatedCodeDir, config.generatedClassName(), code);
             System.out.println("Wrote generated data-generator code to " + generatedFile);
         }
         return generatedFile;

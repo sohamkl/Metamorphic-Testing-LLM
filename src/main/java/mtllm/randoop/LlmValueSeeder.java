@@ -17,8 +17,7 @@ import java.util.regex.Pattern;
  *
  * <p>This is the pipeline-integrated version: it sends the prompt through the shared
  * {@link LlmClient} (so model / auth / base URL match the rest of the backend) rather than making
- * its own OpenAI call. The standalone {@code randoop-arm/LlmValueSeeder} is kept separately as the
- * measurement-experiment artifact.</p>
+ * its own OpenAI call.</p>
  */
 public final class LlmValueSeeder {
 
@@ -32,7 +31,7 @@ public final class LlmValueSeeder {
      * authoritative, and bounded regardless of how large the SUT is. The LLM's job is to expand
      * that prose into the concrete typed values (strings/ints/doubles) Randoop needs for its value
      * pool. Returns a mix of String/Integer/Double objects ready for
-     * {@link RandoopHarvester#harvest(int, List)}.</p>
+     * {@link RandoopHarvester#harvestSequences(int, List, long)}.</p>
      */
     public static List<Object> generateSeedsFromDomain(LlmClient llm, String inputDomain) throws Exception {
         String content = llm.complete(buildDomainPrompt(inputDomain));

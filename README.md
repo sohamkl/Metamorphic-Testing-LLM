@@ -103,8 +103,30 @@ Count: 20
 
 `InputDomain`, `SUTSupportFiles`, and `SUTClasspath` are optional in this form. The framework inspects
 the resolved method's generic parameter and return types and sends discovered public constructors and
-static factory methods to the LLM. Randoop execution currently requires a one-argument target method;
-other signatures produce a clear message that a generated invocation wrapper is required.
+static factory methods to the LLM. It also builds a bounded construction graph: ClassGraph discovers
+concrete implementations of interface and abstract parameters, reflection follows public constructors,
+factory methods, arrays, and generic arguments, and JavaParser finds source-level factories/builders.
+The graph is capped at depth 5 and 96 classes so dependency-heavy projects remain tractable. For zero-
+or multi-argument methods, the framework automatically generates a typed one-input invocation wrapper
+for Randoop and stores its source under `generated-support` and `junit-support`.
+
+Automatic discovery follows this workflow:
+
+1. Resolve the project, SUT source, exact target method, compiled outputs, and Maven dependencies.
+2. Inspect the target signature and generate an invocation wrapper when its arity is not one.
+3. Discover the bounded construction graph from reflection, ClassGraph implementations, and
+   JavaParser factory/builder evidence.
+4. Give the resulting construction classes to Randoop and retain only distinct inputs accepted by
+   the target method.
+5. In `HYBRID` or `NEW_HYBRID` only, if Randoop finds no executable seed, try deterministic Instancio
+   seeds and validate each one by executing the SUT. Pure `RANDOOP` deliberately has no fallback.
+6. Apply or generate the MR, execute source and follow-up cases, split actual passing/failing tests,
+   compile-gate generated JUnit, and write JSON/HTML artifacts requested by the prompt.
+
+For `MRProvider: DEV` with a multi-argument target, the developer follow-up method accepts the original
+typed arguments and returns an `Object[]` containing the transformed arguments in the same order. The
+framework-generated wrapper validates and converts that array back into the typed source case. This
+contract is not needed for LLM-provided MRs.
 
 Prefer `MRInput` plus `MROutput` because it matches the metamorphic-testing form “input relation implies output relation.” `MR` remains as a fallback for relations that are easier to express in one field.
 
@@ -190,7 +212,8 @@ Key points:
 - **All modes honor the same output flags.** With `JsonRequired: true` you get JSON data, pass/fail splits, and an HTML report. `RANDOOP`/`HYBRID` emit their object JUnit suites pre-split because they know verdicts in-process; `LLM`/`NEW_HYBRID` use the existing generated-test execution and actual-result splitter.
 - **Seeding source (HYBRID):** the LLM is asked for seed values from the `InputDomain` description when present, otherwise from the SUT source. `InputDomain` values are coarser (domain-level), while code-derived values can straddle exact boundaries.
 - **Seeding source (NEW_HYBRID):** Randoop runs first without an API call, retains source objects accepted by the target method, and emits each runtime value plus its minimal Java construction trace. The LLM receives those examples together with `InputDomain`; the examples ground it in the real API, while `InputDomain` remains authoritative for semantic constraints and diversity.
-- **Optional `RandoopTargetClasses`:** use a YAML list of fully qualified class names to limit Randoop to construction-relevant APIs. If omitted, the SUT and all `SUTSupportFiles` are explored as before.
+- **Optional `RandoopTargetClasses`:** use a YAML list of fully qualified class names as additional construction evidence. Automatic construction-graph discovery still runs, so this field is a hint rather than a requirement.
+- **Empty-harvest fallback:** `HYBRID` and `NEW_HYBRID` use deterministic Instancio seeds only after Randoop produces no executable input. Each fallback object is run through the SUT before the LLM sees it. Raw `RANDOOP` remains unchanged for fair generator comparisons.
 - The Randoop time budget is fixed at 15s; Randoop runs in a subprocess so the SUT classes are genuinely on its classpath.
 
 `NEW_HYBRID` is useful for constrained object domains. Pure `LLM` generation understands prose constraints but can hallucinate constructors or factories. Existing `HYBRID` provides domain values before exploration, but Randoop must still combine them into semantically valid objects and may produce few usable cases. `NEW_HYBRID` reverses the order: Randoop demonstrates real construction paths first, then the LLM applies the domain rules and expands those grounded examples into diverse final inputs. It does not guarantee better results for every SUT, so it remains a separate evaluation mode rather than replacing either existing strategy.
