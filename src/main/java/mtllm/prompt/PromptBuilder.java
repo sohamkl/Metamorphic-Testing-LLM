@@ -73,6 +73,11 @@ public final class PromptBuilder {
             prompt.append("SUT source:\n");
             prompt.append("```java\n").append(sutContext.classSource()).append("\n```\n\n");
 
+            if (!sutContext.apiDescription().isBlank()) {
+                prompt.append("Framework-discovered API and construction metadata:\n");
+                prompt.append("```text\n").append(sutContext.apiDescription()).append("\n```\n\n");
+            }
+
             for (SutContext.SourceFile supportFile : sutContext.supportFiles()) {
                 prompt.append("First-level dependency/support file: ").append(supportFile.path()).append("\n");
                 prompt.append("```java\n").append(supportFile.source()).append("\n```\n\n");

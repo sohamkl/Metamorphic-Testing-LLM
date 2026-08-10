@@ -4,6 +4,8 @@ import mtllm.config.PromptConfig;
 import mtllm.config.PromptConfigLoader;
 import mtllm.llm.LlmClient;
 import mtllm.llm.OpenAiClient;
+import mtllm.sut.ReflectiveObjectFactory;
+import mtllm.sut.TargetMethodResolver;
 import mtllm.util.DotEnv;
 
 import randoop.sequence.Variable;
@@ -139,11 +141,12 @@ public final class RandoopDataGenerator {
     public String generateSeedExamples(
             PromptConfig config, Path repoRoot, LlmClient seederClient, boolean seeded) throws Exception {
         Class<?> sutClass = Class.forName(classNameOf(config.sutClassFile()));
-        Method sutMethod = singleArgMethod(sutClass, methodName(config.targetFunction()));
+        Method sutMethod = requireSingleArgument(
+                TargetMethodResolver.resolve(sutClass, config.targetFunction()));
         Class<Object> inputType = (Class<Object>) sutMethod.getParameterTypes()[0];
         Object sutReceiver = Modifier.isStatic(sutMethod.getModifiers())
                 ? null
-                : sutClass.getDeclaredConstructor().newInstance();
+                : ReflectiveObjectFactory.create(sutClass);
         RandoopHarvester<Object> harvester = new RandoopHarvester<>(
                 inputType,
                 randoopClassNames(config));
@@ -230,12 +233,13 @@ public final class RandoopDataGenerator {
         Class<?> sutClass = Class.forName(classNameOf(config.sutClassFile()));
         Class<?> specClass = Class.forName(classNameOf(config.developerMrFile()));
 
-        Method sutMethod = singleArgMethod(sutClass, methodName(config.targetFunction()));
+        Method sutMethod = requireSingleArgument(
+                TargetMethodResolver.resolve(sutClass, config.targetFunction()));
         Class<?> inputType = sutMethod.getParameterTypes()[0];
         Class<?> outputType = sutMethod.getReturnType();
         Object sutReceiver = Modifier.isStatic(sutMethod.getModifiers())
                 ? null
-                : sutClass.getDeclaredConstructor().newInstance();
+                : ReflectiveObjectFactory.create(sutClass);
 
         Method followUpMethod = specClass.getMethod(simpleName(config.developerFollowUpMethod()), inputType);
         Method assertMethod = findAssertMethod(specClass, simpleName(config.developerAssertMethod()), outputType);
@@ -443,14 +447,13 @@ public final class RandoopDataGenerator {
         }
     }
 
-    private static Method singleArgMethod(Class<?> c, String name) throws NoSuchMethodException {
-        for (Method m : c.getMethods()) {
-            if (m.getName().equals(name) && m.getParameterCount() == 1) {
-                return m;
-            }
+    private static Method requireSingleArgument(Method method) {
+        if (method.getParameterCount() != 1) {
+            throw new IllegalArgumentException("Randoop input harvesting currently requires exactly one target "
+                    + "argument, but " + method.toGenericString() + " has " + method.getParameterCount()
+                    + ". LLM generation can use this signature; Randoop requires a generated invocation wrapper.");
         }
-        throw new NoSuchMethodException(
-                "No single-argument public method '" + name + "' on " + c.getName());
+        return method;
     }
 
     private static Method findAssertMethod(Class<?> specClass, String name, Class<?> outputType)

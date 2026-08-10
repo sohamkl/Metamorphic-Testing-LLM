@@ -14,6 +14,7 @@ import mtllm.runner.RepairLoop;
 import mtllm.runner.TestRunResult;
 import mtllm.sut.SutContext;
 import mtllm.sut.SutContextLoader;
+import mtllm.sut.ProjectDiscovery;
 import mtllm.util.DotEnv;
 
 import java.nio.file.Path;
@@ -60,6 +61,7 @@ public final class App {
                     env.get("MAVEN_CMD"),
                     "mvn");
 
+            config = ProjectDiscovery.enrichClasspath(config, mavenCommand);
             SutContext sutContext = SutContextLoader.load(config, repoRoot);
             Path outputRoot = config.outputRoot();
             GeneratedTestRunner testRunner = new GeneratedTestRunner(

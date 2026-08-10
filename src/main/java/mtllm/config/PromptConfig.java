@@ -12,6 +12,8 @@ import java.util.List;
  * which SUT to test, which method to focus on, what MR to use, and how many examples to ask for.</p>
  */
 public final class PromptConfig {
+    private final Path projectRoot;
+    private final boolean automaticDiscovery;
     private final Path sutClassFile;
     private final String targetFunction;
     private final List<Path> sutSupportFiles;
@@ -39,6 +41,8 @@ public final class PromptConfig {
     private final String randoopSeedExamples;
 
     public PromptConfig(
+            Path projectRoot,
+            boolean automaticDiscovery,
             Path sutClassFile,
             String targetFunction,
             List<Path> sutSupportFiles,
@@ -64,6 +68,8 @@ public final class PromptConfig {
             List<String> mavenProfiles,
             List<String> randoopTargetClasses,
             String randoopSeedExamples) {
+        this.projectRoot = projectRoot;
+        this.automaticDiscovery = automaticDiscovery;
         this.sutClassFile = sutClassFile;
         this.targetFunction = valueOrEmpty(targetFunction);
         this.sutSupportFiles = Collections.unmodifiableList(new ArrayList<>(sutSupportFiles));
@@ -97,6 +103,14 @@ public final class PromptConfig {
 
     public Path sutClassFile() {
         return sutClassFile;
+    }
+
+    public Path projectRoot() {
+        return projectRoot;
+    }
+
+    public boolean automaticDiscovery() {
+        return automaticDiscovery;
     }
 
     public String targetFunction() {
@@ -199,6 +213,8 @@ public final class PromptConfig {
 
     public PromptConfig withOutputMode(GenerationMode newMode, boolean newJsonRequired, boolean newTestSuiteRequired, String newGeneratedClassName) {
         return new PromptConfig(
+                projectRoot,
+                automaticDiscovery,
                 sutClassFile,
                 targetFunction,
                 sutSupportFiles,
@@ -228,6 +244,8 @@ public final class PromptConfig {
 
     public PromptConfig withRandoopSeedExamples(String newRandoopSeedExamples) {
         return new PromptConfig(
+                projectRoot,
+                automaticDiscovery,
                 sutClassFile,
                 targetFunction,
                 sutSupportFiles,
@@ -253,6 +271,37 @@ public final class PromptConfig {
                 mavenProfiles,
                 randoopTargetClasses,
                 newRandoopSeedExamples);
+    }
+
+    public PromptConfig withSutClasspath(List<Path> newSutClasspath) {
+        return new PromptConfig(
+                projectRoot,
+                automaticDiscovery,
+                sutClassFile,
+                targetFunction,
+                sutSupportFiles,
+                newSutClasspath,
+                sutDescription,
+                mrInput,
+                mrOutput,
+                mr,
+                count,
+                inputDomainRequirements,
+                generatedClassName,
+                mode,
+                jsonRequired,
+                testSuiteRequired,
+                mrProvider,
+                developerMrFile,
+                developerMrSource,
+                developerFollowUpMethod,
+                developerAssertMethod,
+                outputRoot,
+                maxRepairAttempts,
+                inputGenerator,
+                mavenProfiles,
+                randoopTargetClasses,
+                randoopSeedExamples);
     }
 
     private static String valueOrEmpty(String value) {

@@ -50,7 +50,7 @@ public final class SutContextLoader {
                     readFileWithLimit(normalized, MAX_SOURCE_CHARS / 2, "SUTSupportFiles")));
         }
 
-        return new SutContext(classFile, classSource, supportSources);
+        return new SutContext(classFile, classSource, supportSources, SutApiInspector.inspect(config));
     }
 
     private static List<Path> detectFirstLevelDependencies(Path classFile, Path repoRoot) {

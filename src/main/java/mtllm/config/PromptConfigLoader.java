@@ -26,7 +26,11 @@ public final class PromptConfigLoader {
 
         Map<String, Object> values = parseYaml(promptPath);
 
-        Path sutClassFile = resolveRequiredSutClassFile(stringValue(values, "SUTClassFile"), repoRoot);
+        Path projectRoot = resolveProjectRoot(stringValue(values, "ProjectRoot"), repoRoot);
+        boolean automaticDiscovery = parseBoolean(
+                stringValue(values, "AutomaticDiscovery"), true, "AutomaticDiscovery");
+        Path sutClassFile = resolveRequiredSutClassFile(
+                stringValue(values, "SUTClassFile"), stringValue(values, "SUTClass"), projectRoot, repoRoot);
         List<Path> supportFiles = parseSupportFiles(values.get("SUTSupportFiles"), repoRoot);
         List<Path> sutClasspath = parseClasspath(values.get("SUTClasspath"), repoRoot);
         Path developerMrFile = resolveOptionalPath(stringValue(values, "DeveloperMrFile"), repoRoot);
@@ -45,6 +49,8 @@ public final class PromptConfigLoader {
                 values.get("InputDomain"), stringValue(values, "Constraints"), count);
 
         return new PromptConfig(
+                projectRoot,
+                automaticDiscovery,
                 sutClassFile,
                 stringValue(values, "TargetFunction"),
                 supportFiles,
@@ -234,15 +240,69 @@ public final class PromptConfigLoader {
         return path.isAbsolute() ? path.normalize() : repoRoot.resolve(path).normalize();
     }
 
-    private static Path resolveRequiredSutClassFile(String raw, Path repoRoot) {
+    private static Path resolveRequiredSutClassFile(
+            String raw, String sutClass, Path projectRoot, Path repoRoot) throws IOException {
         Path path = resolveOptionalPath(raw, repoRoot);
+        if (path == null && sutClass != null && !sutClass.isBlank()) {
+            path = findSutClassFile(projectRoot, sutClass.trim());
+        }
         if (path == null) {
-            throw new IllegalArgumentException("SUTClassFile is required.");
+            throw new IllegalArgumentException("Provide SUTClassFile or SUTClass with ProjectRoot.");
         }
         if (!Files.isRegularFile(path)) {
             throw new IllegalArgumentException("Missing SUTClassFile: " + path);
         }
         return path;
+    }
+
+    private static Path resolveProjectRoot(String raw, Path repoRoot) {
+        Path configured = resolveOptionalPath(raw, repoRoot);
+        if (configured == null) {
+            return repoRoot;
+        }
+        if (!Files.isDirectory(configured)) {
+            throw new IllegalArgumentException("Missing ProjectRoot: " + configured);
+        }
+        return configured;
+    }
+
+    private static Path findSutClassFile(Path projectRoot, String className) throws IOException {
+        String relativeName = className.replace('.', '/') + ".java";
+        List<Path> conventionalRoots = List.of(
+                projectRoot.resolve("src/main/java"),
+                projectRoot.resolve("src/test/java"));
+        for (Path sourceRoot : conventionalRoots) {
+            Path candidate = sourceRoot.resolve(relativeName);
+            if (Files.isRegularFile(candidate)) {
+                return candidate.normalize();
+            }
+        }
+
+        String fileName = className.substring(className.lastIndexOf('.') + 1) + ".java";
+        try (var paths = Files.walk(projectRoot)) {
+            return paths.filter(Files::isRegularFile)
+                    .filter(path -> path.getFileName().toString().equals(fileName))
+                    .filter(path -> !path.toString().contains("/target/"))
+                    .filter(path -> !path.toString().contains("/generated/"))
+                    .filter(path -> className.equals(qualifiedNameOrEmpty(path)))
+                    .findFirst()
+                    .map(Path::normalize)
+                    .orElseThrow(() -> new IllegalArgumentException(
+                            "Could not find source for SUTClass " + className + " under " + projectRoot));
+        }
+    }
+
+    private static String qualifiedNameOrEmpty(Path path) {
+        try {
+            String source = Files.readString(path, StandardCharsets.UTF_8);
+            java.util.regex.Matcher matcher = java.util.regex.Pattern
+                    .compile("(?m)^\\s*package\\s+([\\w.]+)\\s*;")
+                    .matcher(source);
+            String simpleName = path.getFileName().toString().replaceFirst("\\.java$", "");
+            return matcher.find() ? matcher.group(1) + "." + simpleName : simpleName;
+        } catch (IOException ignored) {
+            return "";
+        }
     }
 
     private static String readOptionalSource(Path path) throws IOException {

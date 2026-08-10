@@ -67,6 +67,9 @@ JUNIT_PLATFORM_CONSOLE_STANDALONE_JAR=/absolute/path/to/junit-platform-console-s
 ## Prompt Config
 
 `prompt.yaml` uses top-level YAML fields. `SUTSupportFiles` can be an empty list or a YAML list of paths.
+The SUT may be identified with `SUTClassFile`, or with `ProjectRoot` plus a fully qualified `SUTClass`.
+When `SUTClasspath` is omitted, the framework locates the nearest Maven project and resolves its
+compiled outputs and dependency classpath. Set `AutomaticDiscovery: false` to require explicit paths.
 The backend parses this file with SnakeYAML into `PromptConfig`; the LLM receives the generated prompt built from those Java config values, not the raw YAML file.
 
 ```yaml
@@ -87,6 +90,21 @@ TestSuiteRequired: true
 MRProvider: LLM
 MaxRepairAttempts: 1
 ```
+
+A minimal project-oriented form is:
+
+```yaml
+ProjectRoot: examples/jsoup
+SUTClass: org.jsoup.safety.Cleaner
+TargetFunction: public org.jsoup.nodes.Document clean(org.jsoup.nodes.Document dirtyDocument)
+MR: Cleaning an already-cleaned document must not change the cleaned result.
+Count: 20
+```
+
+`InputDomain`, `SUTSupportFiles`, and `SUTClasspath` are optional in this form. The framework inspects
+the resolved method's generic parameter and return types and sends discovered public constructors and
+static factory methods to the LLM. Randoop execution currently requires a one-argument target method;
+other signatures produce a clear message that a generated invocation wrapper is required.
 
 Prefer `MRInput` plus `MROutput` because it matches the metamorphic-testing form “input relation implies output relation.” `MR` remains as a fallback for relations that are easier to express in one field.
 
