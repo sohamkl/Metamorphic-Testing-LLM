@@ -81,6 +81,9 @@ public final class GeneratedTestRunner {
         List<String> command = new ArrayList<>();
         command.add(mavenCommand);
         command.add("test");
+        if (!config.mavenProfiles().isEmpty()) {
+            command.add("-P" + String.join(",", config.mavenProfiles()));
+        }
         command.add("-Dtest=" + config.generatedClassName());
 
         try {

@@ -34,6 +34,7 @@ public final class PromptConfig {
     private final Path outputRoot;
     private final int maxRepairAttempts;
     private final InputGenerator inputGenerator;
+    private final List<String> mavenProfiles;
     private final List<String> randoopTargetClasses;
     private final String randoopSeedExamples;
 
@@ -60,6 +61,7 @@ public final class PromptConfig {
             Path outputRoot,
             int maxRepairAttempts,
             InputGenerator inputGenerator,
+            List<String> mavenProfiles,
             List<String> randoopTargetClasses,
             String randoopSeedExamples) {
         this.sutClassFile = sutClassFile;
@@ -88,6 +90,7 @@ public final class PromptConfig {
         this.outputRoot = outputRoot;
         this.maxRepairAttempts = maxRepairAttempts;
         this.inputGenerator = inputGenerator == null ? InputGenerator.LLM : inputGenerator;
+        this.mavenProfiles = Collections.unmodifiableList(new ArrayList<>(mavenProfiles));
         this.randoopTargetClasses = Collections.unmodifiableList(new ArrayList<>(randoopTargetClasses));
         this.randoopSeedExamples = valueOrEmpty(randoopSeedExamples);
     }
@@ -182,6 +185,10 @@ public final class PromptConfig {
         return inputGenerator;
     }
 
+    public List<String> mavenProfiles() {
+        return mavenProfiles;
+    }
+
     public List<String> randoopTargetClasses() {
         return randoopTargetClasses;
     }
@@ -214,6 +221,7 @@ public final class PromptConfig {
                 outputRoot,
                 maxRepairAttempts,
                 inputGenerator,
+                mavenProfiles,
                 randoopTargetClasses,
                 randoopSeedExamples);
     }
@@ -242,6 +250,7 @@ public final class PromptConfig {
                 outputRoot,
                 maxRepairAttempts,
                 inputGenerator,
+                mavenProfiles,
                 randoopTargetClasses,
                 newRandoopSeedExamples);
     }
