@@ -1,7 +1,12 @@
+import org.locationtech.spatial4j.context.SpatialContext;
+import org.locationtech.spatial4j.shape.Circle;
+import org.locationtech.spatial4j.shape.Rectangle;
 import org.locationtech.spatial4j.shape.SpatialRelation;
 
 /**
- * Developer-owned metamorphic relation for {@code CircleImpl.relate(Rectangle)} (Spatial4j).
+ * Reference metamorphic relation for {@code CircleImpl.relate(Rectangle)} (Spatial4j).
+ * The current prompt describes this relation to the LLM because the framework's DEV helper
+ * contract cannot yet transform an instance-method receiver together with its argument.
  *
  * <p><b>Relation (translation invariance):</b> sliding a circle and a rectangle by the same
  * offset across a Euclidean plane moves them together, so how they sit relative to each other
@@ -24,21 +29,43 @@ public final class CircleRelateMetamorphicSpec {
     private CircleRelateMetamorphicSpec() {
     }
 
-    public static CircleRectangleInput generateFollowUp(CircleRectangleInput source) {
-        return new CircleRectangleInput(
-                source.centreX() + SHIFT_X,
-                source.centreY() + SHIFT_Y,
-                source.radius(),
-                source.minX() + SHIFT_X,
-                source.maxX() + SHIFT_X,
-                source.minY() + SHIFT_Y,
-                source.maxY() + SHIFT_Y);
+    public static TranslatedShapes generateFollowUp(
+            Circle sourceCircle, Rectangle sourceRectangle, SpatialContext context) {
+        Circle followUpCircle = context.getShapeFactory().circle(
+                sourceCircle.getCenter().getX() + SHIFT_X,
+                sourceCircle.getCenter().getY() + SHIFT_Y,
+                sourceCircle.getRadius());
+        Rectangle followUpRectangle = context.getShapeFactory().rect(
+                sourceRectangle.getMinX() + SHIFT_X,
+                sourceRectangle.getMaxX() + SHIFT_X,
+                sourceRectangle.getMinY() + SHIFT_Y,
+                sourceRectangle.getMaxY() + SHIFT_Y);
+        return new TranslatedShapes(followUpCircle, followUpRectangle);
     }
 
     public static void assertRelation(SpatialRelation sourceOutput, SpatialRelation followUpOutput) {
         if (sourceOutput != followUpOutput) {
             throw new AssertionError("Sliding both shapes by (" + SHIFT_X + ", " + SHIFT_Y
                     + ") changed the relation from " + sourceOutput + " to " + followUpOutput + ".");
+        }
+    }
+
+    /** Pair returned by the reference transformation; this is not a SUT adapter. */
+    public static final class TranslatedShapes {
+        private final Circle circle;
+        private final Rectangle rectangle;
+
+        private TranslatedShapes(Circle circle, Rectangle rectangle) {
+            this.circle = circle;
+            this.rectangle = rectangle;
+        }
+
+        public Circle circle() {
+            return circle;
+        }
+
+        public Rectangle rectangle() {
+            return rectangle;
         }
     }
 }
