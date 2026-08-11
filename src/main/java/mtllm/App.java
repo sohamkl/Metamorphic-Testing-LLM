@@ -39,18 +39,24 @@ public final class App {
 
             Map<String, String> env = DotEnv.load(repoRoot.resolve(".env"));
             PromptConfig config = PromptConfigLoader.load(promptPath, repoRoot);
-            String apiKey = DotEnv.firstNonBlank(System.getenv("OPENAI_API_KEY"), env.get("OPENAI_API_KEY"));
-            boolean needsApiKey = !config.inputGenerator().usesRandoop()
-                    || config.inputGenerator().seedsWithLlm();
-            if (needsApiKey && apiKey.isBlank()) {
-                throw new IllegalStateException("Missing OPENAI_API_KEY. Put it in .env or the environment.");
-            }
-
             String model = DotEnv.firstNonBlank(System.getenv("OPENAI_MODEL"), env.get("OPENAI_MODEL"), "gpt-4o-mini");
             String baseUrl = DotEnv.firstNonBlank(
                     System.getenv("OPENAI_BASE_URL"),
                     env.get("OPENAI_BASE_URL"),
                     "https://api.openai.com/v1");
+            boolean openAiEndpoint = baseUrl.startsWith("https://api.openai.com/");
+            String apiKey = openAiEndpoint
+                    ? DotEnv.firstNonBlank(
+                            System.getenv("OPENAI_API_KEY_OPENAI"),
+                            System.getenv("OPENAI_API_KEY"),
+                            env.get("OPENAI_API_KEY_OPENAI"),
+                            env.get("OPENAI_API_KEY"))
+                    : DotEnv.firstNonBlank(System.getenv("OPENAI_API_KEY"), env.get("OPENAI_API_KEY"));
+            boolean needsApiKey = !config.inputGenerator().usesRandoop()
+                    || config.inputGenerator().seedsWithLlm();
+            if (needsApiKey && apiKey.isBlank()) {
+                throw new IllegalStateException("Missing API key for configured LLM endpoint. Put it in .env or the environment.");
+            }
             String junitJar = DotEnv.firstNonBlank(
                     System.getenv("JUNIT_PLATFORM_CONSOLE_STANDALONE_JAR"),
                     env.get("JUNIT_PLATFORM_CONSOLE_STANDALONE_JAR"),

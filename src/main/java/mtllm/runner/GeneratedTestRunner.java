@@ -1,6 +1,7 @@
 package mtllm.runner;
 
 import mtllm.config.PromptConfig;
+import mtllm.sut.CompiledClassPath;
 import mtllm.sut.SutContext;
 
 import java.io.ByteArrayOutputStream;
@@ -120,11 +121,11 @@ public final class GeneratedTestRunner {
         clearJavaFiles(stagedTestSourceDir);
         clearJavaFiles(stagedSupportSourceDir);
         copyJavaFileIfPresent(generatedTestFile, stagedTestSourceDir);
-        copyJavaFileIfPresent(config.sutClassFile(), supportSourceDir);
-        copyJavaFileIfPresent(config.sutClassFile(), stagedSupportSourceDir);
+        copyUncompiledJavaFileIfPresent(config.sutClassFile(), supportSourceDir, config);
+        copyUncompiledJavaFileIfPresent(config.sutClassFile(), stagedSupportSourceDir, config);
         for (SutContext.SourceFile supportFile : sutContext.supportFiles()) {
-            copyJavaFileIfPresent(supportFile.path(), supportSourceDir);
-            copyJavaFileIfPresent(supportFile.path(), stagedSupportSourceDir);
+            copyUncompiledJavaFileIfPresent(supportFile.path(), supportSourceDir, config);
+            copyUncompiledJavaFileIfPresent(supportFile.path(), stagedSupportSourceDir, config);
         }
         if (config.mode().usesDeveloperMrHelpers()) {
             copyJavaFileIfPresent(config.developerMrFile(), supportSourceDir);
@@ -145,6 +146,13 @@ public final class GeneratedTestRunner {
             return;
         }
         Files.copy(sourceFile, targetDir.resolve(sourceFile.getFileName()), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+    }
+
+    private void copyUncompiledJavaFileIfPresent(Path sourceFile, Path targetDir, PromptConfig config)
+            throws IOException {
+        if (!CompiledClassPath.contains(config.sutClasspath(), sourceFile)) {
+            copyJavaFileIfPresent(sourceFile, targetDir);
+        }
     }
 
     private void clearJavaFiles(Path targetDir) throws IOException {
@@ -185,14 +193,17 @@ public final class GeneratedTestRunner {
         List<String> command = new ArrayList<>();
         command.add("javac");
         command.add("-cp");
-        command.add(classpath());
+        command.add(classpath(config));
         command.add("-d");
         command.add(classesDir.toString());
-        if (config.sutClassFile() != null) {
+        if (config.sutClassFile() != null
+                && !CompiledClassPath.contains(config.sutClasspath(), config.sutClassFile())) {
             command.add(config.sutClassFile().toString());
         }
         for (SutContext.SourceFile supportFile : sutContext.supportFiles()) {
-            command.add(supportFile.path().toString());
+            if (!CompiledClassPath.contains(config.sutClasspath(), supportFile.path())) {
+                command.add(supportFile.path().toString());
+            }
         }
         if (config.mode().usesDeveloperMrHelpers() && config.developerMrFile() != null) {
             command.add(config.developerMrFile().toString());
@@ -271,8 +282,13 @@ public final class GeneratedTestRunner {
                 || lower.matches("(?s).*tests failed: [1-9][0-9]*.*");
     }
 
-    private String classpath() {
-        return junitConsoleJar + pathSeparator() + repoRoot + pathSeparator() + classesDir;
+    private String classpath(PromptConfig config) {
+        List<String> entries = new ArrayList<>();
+        entries.add(junitConsoleJar);
+        entries.add(repoRoot.toString());
+        entries.add(classesDir.toString());
+        entries.addAll(config.sutClasspath().stream().map(Path::toString).toList());
+        return String.join(pathSeparator(), entries);
     }
 
     private static String pathSeparator() {

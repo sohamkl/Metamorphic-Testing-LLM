@@ -2,6 +2,7 @@ package mtllm.randoop;
 
 import mtllm.config.PromptConfig;
 import mtllm.runner.RuntimeResourceCopier;
+import mtllm.sut.CompiledClassPath;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -106,29 +107,34 @@ public final class RandoopInputRunner {
     private Compilation compileSut(PromptConfig config) throws Exception {
         Path classesDir = workDir.resolve("classes");
         Files.createDirectories(classesDir);
-        List<String> javac = new ArrayList<>();
-        javac.add("javac");
-        javac.add("-encoding");
-        javac.add("UTF-8");
-        String compileClasspath = sutClasspath(config, projectClasses);
-        if (!compileClasspath.isEmpty()) {
-            javac.add("-cp");
-            javac.add(compileClasspath);
-        }
-        javac.add("-d");
-        javac.add(classesDir.toString());
-        if (config.sutClassFile() != null) {
-            javac.add(config.sutClassFile().toString());
+        List<String> sources = new ArrayList<>();
+        if (config.sutClassFile() != null
+                && !CompiledClassPath.contains(config.sutClasspath(), config.sutClassFile())) {
+            sources.add(config.sutClassFile().toString());
         }
         for (Path support : config.sutSupportFiles()) {
-            javac.add(support.toString());
+            if (!CompiledClassPath.contains(config.sutClasspath(), support)) {
+                sources.add(support.toString());
+            }
         }
         if (config.developerMrFile() != null) {
-            javac.add(config.developerMrFile().toString());
+            sources.add(config.developerMrFile().toString());
         }
-        ProcessResult compile = runProcess(javac);
-        if (compile.exitCode != 0) {
-            throw new IllegalStateException("Randoop SUT compilation failed:\n" + compile.output);
+
+        String compileClasspath = sutClasspath(config, projectClasses);
+        if (!sources.isEmpty()) {
+            List<String> javac = new ArrayList<>(List.of("javac", "-encoding", "UTF-8"));
+            if (!compileClasspath.isEmpty()) {
+                javac.add("-cp");
+                javac.add(compileClasspath);
+            }
+            javac.add("-d");
+            javac.add(classesDir.toString());
+            javac.addAll(sources);
+            ProcessResult compile = runProcess(javac);
+            if (compile.exitCode != 0) {
+                throw new IllegalStateException("Randoop SUT compilation failed:\n" + compile.output);
+            }
         }
         RuntimeResourceCopier.copyFor(config, classesDir);
         InvocationWrapperGenerator.Generated wrapper = generateAndCompileWrapper(config, classesDir, compileClasspath);

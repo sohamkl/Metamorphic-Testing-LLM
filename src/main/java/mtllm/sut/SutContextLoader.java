@@ -34,7 +34,7 @@ public final class SutContextLoader {
         String classSource = readFileWithLimit(classFile, MAX_SOURCE_CHARS, "SUTClassFile");
 
         List<Path> supportPaths = new ArrayList<>(config.sutSupportFiles());
-        if (supportPaths.isEmpty()) {
+        if (supportPaths.isEmpty() && !CompiledClassPath.contains(config.sutClasspath(), classFile)) {
             supportPaths.addAll(detectFirstLevelDependencies(classFile, repoRoot));
         }
 
