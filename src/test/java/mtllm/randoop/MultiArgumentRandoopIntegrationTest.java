@@ -106,4 +106,26 @@ class MultiArgumentRandoopIntegrationTest {
         assertTrue(seeds.contains("MtllmGeneratedCircleImplRelateInvocation"));
         assertTrue(seeds.contains("\"receiver\"") && seeds.contains("\"arg0\""));
     }
+
+    @Test
+    @Timeout(value = 60, unit = TimeUnit.SECONDS)
+    @EnabledIfEnvironmentVariable(named = "MTLLM_RUN_RANDOOP_INTEGRATION", matches = "true")
+    void synthesizesNonNullNodeFilterSeedsForJsoup() throws Exception {
+        Path repoRoot = Path.of("").toAbsolutePath().normalize();
+        Path prompt = repoRoot.resolve("examples/jsoup/mt-testing/prompt1.yaml");
+        PromptConfig config = ProjectDiscovery.enrichClasspath(
+                PromptConfigLoader.load(prompt, repoRoot), "mvn");
+        RandoopInputRunner runner = new RandoopInputRunner(
+                repoRoot,
+                repoRoot.resolve("lib/randoop-all-4.3.4.jar"),
+                repoRoot.resolve("target/classes"),
+                tempDir.resolve("jsoup-callback-randoop-work"));
+
+        String seeds = runner.generateSeedExamples(config, prompt);
+
+        assertFalse(seeds.equals("[]"));
+        assertFalse(seeds.contains("\"arg0\":null"));
+        assertFalse(seeds.contains("\"arg1\":null"));
+        assertTrue(seeds.contains("MtllmGeneratedNodeFilterCallback"), seeds);
+    }
 }

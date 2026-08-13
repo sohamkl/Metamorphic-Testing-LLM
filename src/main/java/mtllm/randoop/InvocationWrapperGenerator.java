@@ -10,6 +10,7 @@ import java.lang.reflect.Modifier;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 /** Generates the typed one-input boundary required by Randoop for instance or non-unary SUT methods. */
 public final class InvocationWrapperGenerator {
@@ -106,6 +107,20 @@ public final class InvocationWrapperGenerator {
                 .append("        } catch (Throwable failure) {\n")
                 .append("            throw new IllegalStateException(\"SUT invocation failed\", failure);\n")
                 .append("        }\n    }\n");
+
+        List<String> usabilityChecks = new java.util.ArrayList<>();
+        boolean synthesizedCallbackParameter = java.util.Arrays.stream(parameters)
+                .anyMatch(CallbackSynthesizer::supports);
+        for (int i = 0; i < parameters.length; i++) {
+            if (synthesizedCallbackParameter && !parameters[i].isPrimitive()) {
+                usabilityChecks.add("source.arg" + i + "() != null");
+            }
+        }
+        if (!usabilityChecks.isEmpty()) {
+            out.append("\n    public static boolean isUsable(Input source) {\n")
+                    .append("        return ").append(String.join(" && ", usabilityChecks)).append(";\n")
+                    .append("    }\n");
+        }
 
         if (developerFollowUp != null) {
             out.append("\n    public static Input generateFollowUp(Input source) {\n")

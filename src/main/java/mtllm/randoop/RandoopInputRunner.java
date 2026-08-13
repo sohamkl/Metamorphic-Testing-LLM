@@ -138,7 +138,8 @@ public final class RandoopInputRunner {
         }
         RuntimeResourceCopier.copyFor(config, classesDir);
         InvocationWrapperGenerator.Generated wrapper = generateAndCompileWrapper(config, classesDir, compileClasspath);
-        return new Compilation(classesDir, wrapper);
+        CallbackSynthesizer.Generated callbacks = generateAndCompileCallbacks(config, classesDir, compileClasspath);
+        return new Compilation(classesDir, wrapper, callbacks);
     }
 
     private InvocationWrapperGenerator.Generated generateAndCompileWrapper(
@@ -170,6 +171,56 @@ public final class RandoopInputRunner {
         Files.copy(wrapper.sourceFile(), junitSupport.resolve(wrapper.sourceFile().getFileName()),
                 java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         return wrapper;
+    }
+
+    private CallbackSynthesizer.Generated generateAndCompileCallbacks(
+            PromptConfig config, Path classesDir, String compileClasspath) throws Exception {
+        List<URL> urls = new ArrayList<>();
+        urls.add(classesDir.toUri().toURL());
+        urls.add(projectClasses.toUri().toURL());
+        for (Path path : config.sutClasspath()) {
+            urls.add(path.toUri().toURL());
+        }
+        CallbackSynthesizer.Generated generated;
+        try (URLClassLoader loader = new URLClassLoader(urls.toArray(URL[]::new), getClass().getClassLoader())) {
+            generated = CallbackSynthesizer.generate(config, loader);
+        }
+        if (generated.isEmpty()) {
+            deleteGeneratedCallbackSupport(config.outputRoot().resolve("junit-support"));
+            return generated;
+        }
+
+        List<String> javac = new ArrayList<>(List.of(
+                "javac", "-encoding", "UTF-8",
+                "-cp", String.join(File.pathSeparator, classesDir.toString(), compileClasspath),
+                "-d", classesDir.toString()));
+        generated.sourceFiles().forEach(source -> javac.add(source.toString()));
+        ProcessResult compile = runProcess(javac);
+        if (compile.exitCode != 0) {
+            throw new IllegalStateException("Generated callback-policy compilation failed:\n" + compile.output);
+        }
+        Path junitSupport = config.outputRoot().resolve("junit-support");
+        Files.createDirectories(junitSupport);
+        deleteGeneratedCallbackSupport(junitSupport);
+        for (Path source : generated.sourceFiles()) {
+            Files.copy(source, junitSupport.resolve(source.getFileName()),
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        }
+        System.out.println("Generated " + generated.classNames().size()
+                + " callback policies for " + generated.interfaceNames());
+        return generated;
+    }
+
+    private static void deleteGeneratedCallbackSupport(Path supportDir) throws IOException {
+        if (!Files.isDirectory(supportDir)) {
+            return;
+        }
+        try (Stream<Path> files = Files.list(supportDir)) {
+            for (Path path : files.filter(file -> file.getFileName().toString()
+                    .matches("MtllmGenerated.*Callback.*Policy\\d+\\.java")).toList()) {
+                Files.deleteIfExists(path);
+            }
+        }
     }
 
     private ProcessResult runGenerator(
@@ -332,10 +383,13 @@ public final class RandoopInputRunner {
     private static final class Compilation {
         private final Path classesDir;
         private final InvocationWrapperGenerator.Generated wrapper;
+        private final CallbackSynthesizer.Generated callbacks;
 
-        private Compilation(Path classesDir, InvocationWrapperGenerator.Generated wrapper) {
+        private Compilation(Path classesDir, InvocationWrapperGenerator.Generated wrapper,
+                            CallbackSynthesizer.Generated callbacks) {
             this.classesDir = classesDir;
             this.wrapper = wrapper;
+            this.callbacks = callbacks;
         }
     }
 }

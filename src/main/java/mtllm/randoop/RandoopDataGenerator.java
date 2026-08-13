@@ -158,6 +158,9 @@ public final class RandoopDataGenerator {
         List<RandoopHarvester.Harvested<Object>> executable = new ArrayList<>();
         for (RandoopHarvester.Harvested<Object> candidate : harvested) {
             try {
+                if (!invocation.isUsable(candidate.value())) {
+                    continue;
+                }
                 invoke(sutMethod, sutReceiver, candidate.value());
                 executable.add(candidate);
             } catch (Throwable invalidSource) {
@@ -165,7 +168,7 @@ public final class RandoopDataGenerator {
             }
         }
         if (executable.isEmpty() && (seeded || config.inputGenerator().name().equals("NEW_HYBRID"))) {
-            return emitInstancioSeedExamples(inputType, sutMethod, sutReceiver, config.count());
+            return emitInstancioSeedExamples(inputType, sutMethod, sutReceiver, invocation, config.count());
         }
         return emitSeedExamples(executable, config.count());
     }
@@ -301,7 +304,7 @@ public final class RandoopDataGenerator {
      * graph. Every candidate is executed through the SUT before it is exposed to the LLM.
      */
     private String emitInstancioSeedExamples(
-            Class<?> inputType, Method sutMethod, Object sutReceiver, int limit) {
+            Class<?> inputType, Method sutMethod, Object sutReceiver, SutInvocation invocation, int limit) {
         StringBuilder json = new StringBuilder("[");
         Set<String> signatures = new LinkedHashSet<>();
         int emitted = 0;
@@ -310,6 +313,9 @@ public final class RandoopDataGenerator {
             Object value;
             try {
                 value = org.instancio.Instancio.of(inputType).withSeed(seed).create();
+                if (!invocation.isUsable(value)) {
+                    continue;
+                }
                 invoke(sutMethod, sutReceiver, value);
             } catch (Throwable invalid) {
                 continue;
@@ -511,8 +517,15 @@ public final class RandoopDataGenerator {
                     .findFirst()
                     .orElseThrow(() -> new NoSuchMethodException(
                             "Generated invocation class has no public static invoke(Input): " + invocationClassName));
+            Method usabilityMethod = Arrays.stream(wrapperClass.getMethods())
+                    .filter(method -> method.getName().equals("isUsable"))
+                    .filter(method -> Modifier.isStatic(method.getModifiers()))
+                    .filter(method -> method.getParameterCount() == 1)
+                    .findFirst()
+                    .orElse(null);
             return new SutInvocation(
-                    wrapperClass, wrapperMethod, null, wrapperMethod.getParameterTypes()[0], true);
+                    wrapperClass, wrapperMethod, null, wrapperMethod.getParameterTypes()[0], true,
+                    usabilityMethod);
         }
 
         Class<?> sutClass = Class.forName(classNameOf(config.sutClassFile()));
@@ -520,7 +533,7 @@ public final class RandoopDataGenerator {
         Object receiver = Modifier.isStatic(sutMethod.getModifiers())
                 ? null
                 : ReflectiveObjectFactory.create(sutClass);
-        return new SutInvocation(sutClass, sutMethod, receiver, sutMethod.getParameterTypes()[0], false);
+        return new SutInvocation(sutClass, sutMethod, receiver, sutMethod.getParameterTypes()[0], false, null);
     }
 
     private static Method requireSingleArgument(Method method) {
@@ -618,13 +631,23 @@ public final class RandoopDataGenerator {
         private final Object receiver;
         private final Class<?> inputType;
         private final boolean wrapped;
+        private final Method usabilityMethod;
 
-        private SutInvocation(Class<?> sutClass, Method method, Object receiver, Class<?> inputType, boolean wrapped) {
+        private SutInvocation(Class<?> sutClass, Method method, Object receiver, Class<?> inputType,
+                              boolean wrapped, Method usabilityMethod) {
             this.sutClass = sutClass;
             this.method = method;
             this.receiver = receiver;
             this.inputType = inputType;
             this.wrapped = wrapped;
+            this.usabilityMethod = usabilityMethod;
+        }
+
+        private boolean isUsable(Object source) {
+            if (usabilityMethod == null) {
+                return true;
+            }
+            return Boolean.TRUE.equals(invoke(usabilityMethod, null, source));
         }
     }
 

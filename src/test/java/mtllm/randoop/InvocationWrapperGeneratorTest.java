@@ -116,4 +116,24 @@ class InvocationWrapperGeneratorTest {
             assertEquals(9, invoke.invoke(null, followUpInput));
         }
     }
+
+    @Test
+    void rejectsNullReferenceArgumentsAsUnusableSeeds() throws Exception {
+        Path repoRoot = Path.of("").toAbsolutePath().normalize();
+        Path prompt = tempDir.resolve("callback-prompt.yaml");
+        Files.writeString(prompt, """
+                SUTClassFile: src/test/java/mtllm/randoop/fixture/CallbackSut.java
+                TargetFunction: public static Decision apply(DecisionCallback callback, String value)
+                MR: Repeating the callback preserves its result.
+                MRProvider: LLM
+                OutputRoot: %s
+                """.formatted(tempDir));
+        PromptConfig config = PromptConfigLoader.load(prompt, repoRoot);
+
+        InvocationWrapperGenerator.Generated generated =
+                InvocationWrapperGenerator.generate(config, getClass().getClassLoader());
+        assertNotNull(generated);
+        String source = Files.readString(generated.sourceFile());
+        assertTrue(source.contains("source.arg0() != null && source.arg1() != null"));
+    }
 }
