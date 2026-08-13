@@ -2,6 +2,7 @@ package mtllm.randoop;
 
 import mtllm.config.PromptConfig;
 import mtllm.config.PromptConfigLoader;
+import mtllm.sut.ProjectDiscovery;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
@@ -83,5 +84,26 @@ class MultiArgumentRandoopIntegrationTest {
         assertTrue(result.suiteEmitted());
         assertTrue(result.suiteCompiled(), result.suiteCompileOutput());
         assertTrue(Files.readString(result.passingFile()).contains(".generateFollowUp("));
+    }
+
+    @Test
+    @Timeout(value = 45, unit = TimeUnit.SECONDS)
+    @EnabledIfEnvironmentVariable(named = "MTLLM_RUN_RANDOOP_INTEGRATION", matches = "true")
+    void harvestsReceiverAndArgumentForSpatial4jInstanceMethod() throws Exception {
+        Path repoRoot = Path.of("").toAbsolutePath().normalize();
+        Path prompt = repoRoot.resolve("examples/spatial4j/prompt.yaml");
+        PromptConfig config = ProjectDiscovery.enrichClasspath(
+                PromptConfigLoader.load(prompt, repoRoot), "mvn");
+        RandoopInputRunner runner = new RandoopInputRunner(
+                repoRoot,
+                repoRoot.resolve("lib/randoop-all-4.3.4.jar"),
+                repoRoot.resolve("target/classes"),
+                tempDir.resolve("spatial4j-randoop-work"));
+
+        String seeds = runner.generateSeedExamples(config, prompt);
+
+        assertFalse(seeds.equals("[]"));
+        assertTrue(seeds.contains("MtllmGeneratedCircleImplRelateInvocation"));
+        assertTrue(seeds.contains("\"receiver\"") && seeds.contains("\"arg0\""));
     }
 }

@@ -65,4 +65,55 @@ class InvocationWrapperGeneratorTest {
             assertEquals(9, invoke.invoke(null, followUpInput));
         }
     }
+
+    @Test
+    void storesInstanceReceiverInInputAndTransformsItWithArguments() throws Exception {
+        Path repoRoot = Path.of("").toAbsolutePath().normalize();
+        Path prompt = tempDir.resolve("instance-prompt.yaml");
+        Files.writeString(prompt, """
+                SUTClassFile: src/test/java/mtllm/randoop/fixture/InstanceMethodSut.java
+                TargetFunction: public int combine(int value)
+                MR: Transform both the receiver and argument.
+                MRProvider: DEV
+                DeveloperMrFile: src/test/java/mtllm/randoop/fixture/InstanceMethodSpec.java
+                DeveloperFollowUpMethod: increaseBoth
+                DeveloperAssertMethod: assertRelation
+                OutputRoot: %s
+                """.formatted(tempDir.toString()));
+        PromptConfig config = PromptConfigLoader.load(prompt, repoRoot);
+
+        InvocationWrapperGenerator.Generated generated =
+                InvocationWrapperGenerator.generate(config, getClass().getClassLoader());
+
+        assertNotNull(generated);
+        String source = Files.readString(generated.sourceFile());
+        assertTrue(source.contains("private final mtllm.randoop.fixture.InstanceMethodSut receiver"));
+        assertTrue(source.contains("source.receiver().combine(source.arg0())"));
+        assertTrue(source.contains("InstanceMethodSpec.increaseBoth(source.receiver(), source.arg0())"));
+        assertTrue(!source.contains("ReflectiveObjectFactory"));
+
+        Path classes = tempDir.resolve("instance-classes");
+        Files.createDirectories(classes);
+        int compileResult = ToolProvider.getSystemJavaCompiler().run(
+                null, null, null,
+                "-classpath", System.getProperty("java.class.path"),
+                "-d", classes.toString(), generated.sourceFile().toString());
+        assertEquals(0, compileResult);
+
+        try (URLClassLoader loader = new URLClassLoader(
+                new java.net.URL[]{classes.toUri().toURL()}, getClass().getClassLoader())) {
+            Class<?> wrapper = Class.forName(generated.className(), true, loader);
+            Class<?> input = Class.forName(generated.inputClassName(), true, loader);
+            Class<?> receiverType = Class.forName(
+                    "mtllm.randoop.fixture.InstanceMethodSut", true, getClass().getClassLoader());
+            Object receiver = receiverType.getConstructor(int.class).newInstance(3);
+            Object sourceInput = input.getConstructor(receiverType, int.class).newInstance(receiver, 4);
+            Method invoke = wrapper.getMethod("invoke", input);
+            Method followUp = wrapper.getMethod("generateFollowUp", input);
+
+            assertEquals(7, invoke.invoke(null, sourceInput));
+            Object followUpInput = followUp.invoke(null, sourceInput);
+            assertEquals(9, invoke.invoke(null, followUpInput));
+        }
+    }
 }

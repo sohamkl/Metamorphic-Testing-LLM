@@ -101,20 +101,26 @@ public final class ConstructionGraphDiscoverer {
                             new Node(implementation, node.depth + 1, "implementation of " + type.getName())));
         }
 
-        for (Constructor<?> constructor : type.getConstructors()) {
-            addTypes(constructor.getGenericParameterTypes(), node.depth + 1,
-                    "constructor of " + type.getName(), pending);
-        }
-        for (Method method : type.getMethods()) {
-            if (!Modifier.isPublic(method.getModifiers()) || !Modifier.isStatic(method.getModifiers())) {
-                continue;
+        try {
+            for (Constructor<?> constructor : type.getConstructors()) {
+                addTypes(constructor.getGenericParameterTypes(), node.depth + 1,
+                        "constructor of " + type.getName(), pending);
             }
-            if (!type.isAssignableFrom(method.getReturnType()) || method.getReturnType() == void.class) {
-                continue;
+            for (Method method : type.getMethods()) {
+                if (!Modifier.isPublic(method.getModifiers()) || !Modifier.isStatic(method.getModifiers())) {
+                    continue;
+                }
+                if (!type.isAssignableFrom(method.getReturnType()) || method.getReturnType() == void.class) {
+                    continue;
+                }
+                classes.add(method.getDeclaringClass().getName());
+                addTypes(method.getGenericParameterTypes(), node.depth + 1,
+                        "factory " + method.getDeclaringClass().getName() + "." + method.getName(), pending);
             }
-            classes.add(method.getDeclaringClass().getName());
-            addTypes(method.getGenericParameterTypes(), node.depth + 1,
-                    "factory " + method.getDeclaringClass().getName() + "." + method.getName(), pending);
+        } catch (LinkageError unavailableOptionalDependency) {
+            classes.remove(type.getName());
+            evidence.add(type.getName() + " skipped: optional API dependency unavailable ("
+                    + unavailableOptionalDependency.getClass().getSimpleName() + ")");
         }
     }
 

@@ -107,13 +107,16 @@ static factory methods to the LLM. It also builds a bounded construction graph: 
 concrete implementations of interface and abstract parameters, reflection follows public constructors,
 factory methods, arrays, and generic arguments, and JavaParser finds source-level factories/builders.
 The graph is capped at depth 5 and 96 classes so dependency-heavy projects remain tractable. For zero-
-or multi-argument methods, the framework automatically generates a typed one-input invocation wrapper
-for Randoop and stores its source under `generated-support` and `junit-support`.
+For instance, zero-argument, or multi-argument methods, the framework automatically generates a typed
+one-input invocation wrapper for Randoop and stores its source under `generated-support` and
+`junit-support`. Instance wrappers include the receiver before the method arguments, allowing Randoop
+to construct and vary the complete invocation scenario.
 
 Automatic discovery follows this workflow:
 
 1. Resolve the project, SUT source, exact target method, compiled outputs, and Maven dependencies.
-2. Inspect the target signature and generate an invocation wrapper when its arity is not one.
+2. Inspect the target signature and generate an invocation wrapper for instance methods or when the
+   method's arity is not one.
 3. Discover the bounded construction graph from reflection, ClassGraph implementations, and
    JavaParser factory/builder evidence.
 4. Give the resulting construction classes to Randoop and retain only distinct inputs accepted by
@@ -123,10 +126,11 @@ Automatic discovery follows this workflow:
 6. Apply or generate the MR, execute source and follow-up cases, split actual passing/failing tests,
    compile-gate generated JUnit, and write JSON/HTML artifacts requested by the prompt.
 
-For `MRProvider: DEV` with a multi-argument target, the developer follow-up method accepts the original
-typed arguments and returns an `Object[]` containing the transformed arguments in the same order. The
-framework-generated wrapper validates and converts that array back into the typed source case. This
-contract is not needed for LLM-provided MRs.
+For `MRProvider: DEV` with a wrapped target, the developer follow-up method accepts the original typed
+invocation components and returns an `Object[]` in the same order. For an instance method, the receiver
+is the first component followed by the method arguments; for a static multi-argument method, only the
+arguments are present. The framework-generated wrapper validates and converts that array back into the
+typed source case. This contract is not needed for LLM-provided MRs.
 
 Prefer `MRInput` plus `MROutput` because it matches the metamorphic-testing form “input relation implies output relation.” `MR` remains as a fallback for relations that are easier to express in one field.
 

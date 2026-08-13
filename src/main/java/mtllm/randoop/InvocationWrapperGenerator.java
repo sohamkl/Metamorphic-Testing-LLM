@@ -11,7 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-/** Generates the typed one-input boundary required by Randoop for zero/multi-argument SUT methods. */
+/** Generates the typed one-input boundary required by Randoop for instance or non-unary SUT methods. */
 public final class InvocationWrapperGenerator {
     private InvocationWrapperGenerator() {
     }
@@ -19,7 +19,8 @@ public final class InvocationWrapperGenerator {
     public static Generated generate(PromptConfig config, ClassLoader loader) throws Exception {
         Class<?> sutClass = Class.forName(JavaSourceNames.qualifiedName(config.sutClassFile()), false, loader);
         Method target = TargetMethodResolver.resolve(sutClass, config.targetFunction());
-        if (target.getParameterCount() == 1) {
+        boolean instanceMethod = !Modifier.isStatic(target.getModifiers());
+        if (!instanceMethod && target.getParameterCount() == 1) {
             return null;
         }
         if (target.getReturnType() == void.class) {
@@ -30,12 +31,13 @@ public final class InvocationWrapperGenerator {
         Method developerFollowUp = null;
         if (config.mrProvider() == MRProvider.DEV) {
             Class<?> specClass = Class.forName(JavaSourceNames.qualifiedName(config.developerMrFile()), false, loader);
+            Class<?>[] followUpParameters = invocationComponentTypes(sutClass, target);
             developerFollowUp = specClass.getMethod(
-                    simpleName(config.developerFollowUpMethod()), target.getParameterTypes());
+                    simpleName(config.developerFollowUpMethod()), followUpParameters);
             if (developerFollowUp.getReturnType() != Object[].class) {
-                throw new IllegalArgumentException("For a multi-argument SUT, developer follow-up method "
-                        + developerFollowUp.toGenericString() + " must return Object[] containing one transformed "
-                        + "value per target argument.");
+                throw new IllegalArgumentException("For a wrapped SUT invocation, developer follow-up method "
+                        + developerFollowUp.toGenericString() + " must return Object[] containing the transformed "
+                        + "receiver (for an instance method) followed by the transformed target arguments.");
             }
         }
 
@@ -59,21 +61,33 @@ public final class InvocationWrapperGenerator {
 
     static String render(String className, Class<?> sutClass, Method target, Method developerFollowUp) {
         Class<?>[] parameters = target.getParameterTypes();
+        boolean instanceMethod = !Modifier.isStatic(target.getModifiers());
+        Class<?>[] components = invocationComponentTypes(sutClass, target);
         StringBuilder out = new StringBuilder();
         out.append("/** Framework-generated typed invocation boundary for Randoop. */\n");
         out.append("public final class ").append(className).append(" {\n");
         out.append("    private ").append(className).append("() {}\n\n");
         out.append("    public static final class Input {\n");
+        if (instanceMethod) {
+            out.append("        private final ").append(typeName(sutClass)).append(" receiver;\n");
+        }
         for (int i = 0; i < parameters.length; i++) {
             out.append("        private final ").append(typeName(parameters[i])).append(" arg").append(i).append(";\n");
         }
         out.append("\n        public Input(");
-        appendParameters(out, parameters);
+        appendInputParameters(out, sutClass, parameters, instanceMethod);
         out.append(") {\n");
+        if (instanceMethod) {
+            out.append("            this.receiver = receiver;\n");
+        }
         for (int i = 0; i < parameters.length; i++) {
             out.append("            this.arg").append(i).append(" = arg").append(i).append(";\n");
         }
         out.append("        }\n");
+        if (instanceMethod) {
+            out.append("\n        public ").append(typeName(sutClass))
+                    .append(" receiver() { return receiver; }\n");
+        }
         for (int i = 0; i < parameters.length; i++) {
             out.append("\n        public ").append(typeName(parameters[i])).append(" arg").append(i)
                     .append("() { return arg").append(i).append("; }\n");
@@ -82,13 +96,8 @@ public final class InvocationWrapperGenerator {
 
         out.append("    public static ").append(typeName(target.getReturnType())).append(" invoke(Input source) {\n");
         out.append("        try {\n            ");
-        if (!Modifier.isStatic(target.getModifiers())) {
-            out.append(typeName(sutClass)).append(" receiver = (").append(typeName(sutClass))
-                    .append(") mtllm.sut.ReflectiveObjectFactory.create(")
-                    .append(typeName(sutClass)).append(".class);\n            ");
-        }
         out.append("return ")
-                .append(Modifier.isStatic(target.getModifiers()) ? typeName(sutClass) : "receiver")
+                .append(instanceMethod ? "source.receiver()" : typeName(sutClass))
                 .append('.').append(target.getName()).append('(');
         appendAccessors(out, parameters.length, "source");
         out.append(");\n");
@@ -102,16 +111,16 @@ public final class InvocationWrapperGenerator {
             out.append("\n    public static Input generateFollowUp(Input source) {\n")
                     .append("        Object[] values = ").append(typeName(developerFollowUp.getDeclaringClass()))
                     .append('.').append(developerFollowUp.getName()).append('(');
-            appendAccessors(out, parameters.length, "source");
+            appendComponentAccessors(out, parameters.length, "source", instanceMethod);
             out.append(");\n")
-                    .append("        if (values == null || values.length != ").append(parameters.length).append(") {\n")
+                    .append("        if (values == null || values.length != ").append(components.length).append(") {\n")
                     .append("            throw new IllegalArgumentException(\"Developer follow-up must return exactly ")
-                    .append(parameters.length).append(" values\");\n")
+                    .append(components.length).append(" values\");\n")
                     .append("        }\n")
                     .append("        return new Input(");
-            for (int i = 0; i < parameters.length; i++) {
+            for (int i = 0; i < components.length; i++) {
                 if (i > 0) out.append(", ");
-                out.append(fromObject(parameters[i], "values[" + i + "]"));
+                out.append(fromObject(components[i], "values[" + i + "]"));
             }
             out.append(");\n    }\n");
         }
@@ -119,11 +128,26 @@ public final class InvocationWrapperGenerator {
         return out.toString();
     }
 
-    private static void appendParameters(StringBuilder out, Class<?>[] types) {
+    private static void appendInputParameters(
+            StringBuilder out, Class<?> sutClass, Class<?>[] types, boolean instanceMethod) {
+        if (instanceMethod) {
+            out.append(typeName(sutClass)).append(" receiver");
+        }
         for (int i = 0; i < types.length; i++) {
-            if (i > 0) out.append(", ");
+            if (instanceMethod || i > 0) out.append(", ");
             out.append(typeName(types[i])).append(" arg").append(i);
         }
+    }
+
+    private static void appendComponentAccessors(
+            StringBuilder out, int argumentCount, String variable, boolean instanceMethod) {
+        if (instanceMethod) {
+            out.append(variable).append(".receiver()");
+        }
+        if (argumentCount > 0 && instanceMethod) {
+            out.append(", ");
+        }
+        appendAccessors(out, argumentCount, variable);
     }
 
     private static void appendAccessors(StringBuilder out, int count, String variable) {
@@ -144,6 +168,17 @@ public final class InvocationWrapperGenerator {
         if (type == boolean.class) return "((Boolean) " + value + ").booleanValue()";
         if (type == char.class) return "((Character) " + value + ").charValue()";
         throw new IllegalArgumentException("Unsupported primitive: " + type);
+    }
+
+    private static Class<?>[] invocationComponentTypes(Class<?> sutClass, Method target) {
+        Class<?>[] parameters = target.getParameterTypes();
+        if (Modifier.isStatic(target.getModifiers())) {
+            return parameters;
+        }
+        Class<?>[] components = new Class<?>[parameters.length + 1];
+        components[0] = sutClass;
+        System.arraycopy(parameters, 0, components, 1, parameters.length);
+        return components;
     }
 
     private static String typeName(Class<?> type) {

@@ -62,9 +62,14 @@ public final class SutApiInspector {
             out.append("Receiver construction paths:\n");
             appendConstructionPaths(out, sutClass, "  ");
         }
-        if (method.getParameterCount() != 1) {
-            out.append("Randoop note: the framework will generate a typed one-input invocation wrapper for this ")
-                    .append(method.getParameterCount()).append("-argument target.\n");
+        if (!Modifier.isStatic(method.getModifiers()) || method.getParameterCount() != 1) {
+            out.append("Randoop note: the framework will generate a typed one-input invocation wrapper for this ");
+            if (!Modifier.isStatic(method.getModifiers())) {
+                out.append("instance target so the receiver and its ")
+                        .append(method.getParameterCount()).append(" argument(s) are generated together.\n");
+            } else {
+                out.append(method.getParameterCount()).append("-argument target.\n");
+            }
         }
         return out.toString().trim();
     }
