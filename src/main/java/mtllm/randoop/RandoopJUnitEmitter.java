@@ -64,8 +64,8 @@ public final class RandoopJUnitEmitter {
                 }
             }
             String v = c.targetVar();
-            out.append("        var sourceOutput = ").append(sutCallee).append('(').append(v).append(");\n");
             out.append("        var followUp = ").append(followUpCallee).append('(').append(v).append(");\n");
+            out.append("        var sourceOutput = ").append(sutCallee).append('(').append(v).append(");\n");
             out.append("        var followUpOutput = ").append(sutCallee).append("(followUp);\n");
             out.append("        ").append(assertCallee).append("(sourceOutput, followUpOutput);\n");
             out.append("    }\n");

@@ -27,12 +27,15 @@ The backend supports configurable JSON/JUnit outputs and developer- or LLM-provi
 Create a `.env` file in the project root:
 
 ```text
-OPENAI_API_KEY=sk-...
+OPENAI_API_KEY_OPENAI=sk-...
 OPENAI_MODEL=gpt-4o-mini
 OPENAI_BASE_URL=https://api.openai.com/v1
 MAVEN_CMD=mvn
 JUNIT_PLATFORM_CONSOLE_STANDALONE_JAR=/absolute/path/to/junit-platform-console-standalone.jar
 ```
+
+`OPENAI_API_KEY_OPENAI` is the only API-key variable read by the framework. The legacy
+`OPENAI_API_KEY` name is ignored in both `.env` and the shell environment.
 
 `JUNIT_PLATFORM_CONSOLE_STANDALONE_JAR` is optional. If it is missing, the tool uses Maven (`mvn test`) to compile and run generated JUnit tests. `MAVEN_CMD` is optional too; set it only if Maven is not on your normal PATH.
 

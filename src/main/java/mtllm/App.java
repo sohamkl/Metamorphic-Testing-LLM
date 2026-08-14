@@ -44,18 +44,14 @@ public final class App {
                     System.getenv("OPENAI_BASE_URL"),
                     env.get("OPENAI_BASE_URL"),
                     "https://api.openai.com/v1");
-            boolean openAiEndpoint = baseUrl.startsWith("https://api.openai.com/");
-            String apiKey = openAiEndpoint
-                    ? DotEnv.firstNonBlank(
-                            System.getenv("OPENAI_API_KEY_OPENAI"),
-                            System.getenv("OPENAI_API_KEY"),
-                            env.get("OPENAI_API_KEY_OPENAI"),
-                            env.get("OPENAI_API_KEY"))
-                    : DotEnv.firstNonBlank(System.getenv("OPENAI_API_KEY"), env.get("OPENAI_API_KEY"));
+            String apiKey = DotEnv.firstNonBlank(
+                    System.getenv("OPENAI_API_KEY_OPENAI"),
+                    env.get("OPENAI_API_KEY_OPENAI"));
             boolean needsApiKey = !config.inputGenerator().usesRandoop()
                     || config.inputGenerator().seedsWithLlm();
             if (needsApiKey && apiKey.isBlank()) {
-                throw new IllegalStateException("Missing API key for configured LLM endpoint. Put it in .env or the environment.");
+                throw new IllegalStateException(
+                        "Missing OPENAI_API_KEY_OPENAI. Put it in .env or the environment.");
             }
             String junitJar = DotEnv.firstNonBlank(
                     System.getenv("JUNIT_PLATFORM_CONSOLE_STANDALONE_JAR"),

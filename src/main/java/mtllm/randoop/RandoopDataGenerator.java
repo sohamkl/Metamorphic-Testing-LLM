@@ -90,7 +90,9 @@ public final class RandoopDataGenerator {
         LlmClient seederClient = null;
         if (seeded) {
             Map<String, String> env = DotEnv.load(repoRoot.resolve(".env"));
-            String apiKey = DotEnv.firstNonBlank(System.getenv("OPENAI_API_KEY"), env.get("OPENAI_API_KEY"));
+            String apiKey = DotEnv.firstNonBlank(
+                    System.getenv("OPENAI_API_KEY_OPENAI"),
+                    env.get("OPENAI_API_KEY_OPENAI"));
             String model = DotEnv.firstNonBlank(System.getenv("OPENAI_MODEL"), env.get("OPENAI_MODEL"), "gpt-4o-mini");
             String baseUrl = DotEnv.firstNonBlank(
                     System.getenv("OPENAI_BASE_URL"), env.get("OPENAI_BASE_URL"), "https://api.openai.com/v1");
@@ -400,8 +402,8 @@ public final class RandoopDataGenerator {
         Object followUp;
         Object followUpOutput;
         try {
-            sourceOutput = invoke(b.sutMethod, b.sutReceiver, source);
             followUp = invoke(b.followUpMethod, null, source);
+            sourceOutput = invoke(b.sutMethod, b.sutReceiver, source);
             followUpOutput = invoke(b.sutMethod, b.sutReceiver, followUp);
         } catch (Throwable transformOrSutError) {
             return null;
