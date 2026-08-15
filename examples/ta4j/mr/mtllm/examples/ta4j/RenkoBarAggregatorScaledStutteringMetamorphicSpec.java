@@ -1,5 +1,6 @@
 package mtllm.examples.ta4j;
 
+import java.lang.reflect.Field;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -8,9 +9,8 @@ import java.util.Objects;
 
 import org.ta4j.core.Bar;
 import org.ta4j.core.BaseBar;
+import org.ta4j.core.aggregator.RenkoBarAggregator;
 import org.ta4j.core.num.Num;
-
-import mtllm.examples.ta4j.RenkoBarAggregatorSut.RenkoCase;
 
 /**
  * Combines positive price scaling with repeated no-price-change observations.
@@ -21,15 +21,16 @@ public final class RenkoBarAggregatorScaledStutteringMetamorphicSpec {
     private RenkoBarAggregatorScaledStutteringMetamorphicSpec() {
     }
 
-    public static RenkoCase generateFollowUp(RenkoCase source) {
-        Objects.requireNonNull(source, "source");
-        if (source.bars().isEmpty()) {
+    public static Object[] generateFollowUp(RenkoBarAggregator aggregator, List<Bar> bars) {
+        Objects.requireNonNull(aggregator, "aggregator");
+        Objects.requireNonNull(bars, "bars");
+        if (bars.isEmpty()) {
             throw new IllegalArgumentException("Source must contain at least one bar");
         }
 
-        List<Bar> expanded = new ArrayList<>(source.bars().size() * 2);
-        Instant nextBeginTime = source.bars().getFirst().getBeginTime();
-        for (Bar sourceBar : source.bars()) {
+        List<Bar> expanded = new ArrayList<>(bars.size() * 2);
+        Instant nextBeginTime = bars.getFirst().getBeginTime();
+        for (Bar sourceBar : bars) {
             Bar bar = Objects.requireNonNull(sourceBar, "source bars must not contain null");
             Duration period = Objects.requireNonNull(bar.getTimePeriod(), "bar time period");
 
@@ -41,7 +42,11 @@ public final class RenkoBarAggregatorScaledStutteringMetamorphicSpec {
             nextBeginTime = nextBeginTime.plus(period);
         }
 
-        return new RenkoCase(expanded, source.boxSize() * SCALE_FACTOR, source.reversalAmount());
+        RenkoConfig config = readConfig(aggregator);
+        RenkoBarAggregator scaledAggregator = new RenkoBarAggregator(
+                config.boxSize().doubleValue() * SCALE_FACTOR,
+                config.reversalAmount());
+        return new Object[]{scaledAggregator, expanded};
     }
 
     public static void assertRelation(List<Bar> sourceOutput, List<Bar> followUpOutput) {
@@ -107,6 +112,18 @@ public final class RenkoBarAggregatorScaledStutteringMetamorphicSpec {
         return value == null ? null : value.multipliedBy(value.getNumFactory().numOf(SCALE_FACTOR));
     }
 
+    private static RenkoConfig readConfig(RenkoBarAggregator aggregator) {
+        try {
+            Field boxSize = RenkoBarAggregator.class.getDeclaredField("boxSize");
+            Field reversalAmount = RenkoBarAggregator.class.getDeclaredField("reversalAmount");
+            boxSize.setAccessible(true);
+            reversalAmount.setAccessible(true);
+            return new RenkoConfig((Number) boxSize.get(aggregator), reversalAmount.getInt(aggregator));
+        } catch (ReflectiveOperationException failure) {
+            throw new IllegalStateException("Unable to read immutable Renko configuration", failure);
+        }
+    }
+
     private static int direction(Bar bar) {
         if (bar.getClosePrice().isGreaterThan(bar.getOpenPrice())) {
             return 1;
@@ -136,5 +153,8 @@ public final class RenkoBarAggregatorScaledStutteringMetamorphicSpec {
             throw new AssertionError("Expected equal " + field + " at brick " + index + ", but source was "
                     + source + " and follow-up was " + followUp);
         }
+    }
+
+    private record RenkoConfig(Number boxSize, int reversalAmount) {
     }
 }

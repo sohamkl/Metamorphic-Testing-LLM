@@ -77,7 +77,14 @@ public final class RandoopInputRunner {
         }
 
         ProcessResult gate = compileSuiteGate(config, compilation.classesDir, passingFile, failingFile);
-        return new GenerationResult(json, true, passingFile, failingFile, gate.exitCode == 0, gate.output);
+        requireSuccessfulSuiteCompile(gate.exitCode, gate.output);
+        return new GenerationResult(json, true, passingFile, failingFile, true, gate.output);
+    }
+
+    static void requireSuccessfulSuiteCompile(int exitCode, String output) {
+        if (exitCode != 0) {
+            throw new IllegalStateException("Randoop JUnit suite compile-gate failed:\n" + output);
+        }
     }
 
     /** Generate local Randoop examples for NEW_HYBRID without applying the MR or writing a suite. */
@@ -255,9 +262,8 @@ public final class RandoopInputRunner {
 
     /**
      * Compile the emitted passing/failing classes against the already-compiled SUT classes plus the
-     * JUnit API jars from the local Maven repo. Non-fatal: if the JUnit jars cannot be located the
-     * gate is skipped (reported as not-compiled with an explanatory message), since the suite files
-     * have still been written and remain valid for {@code mvn test}.
+     * JUnit API jars from the local Maven repo. A missing JUnit classpath or compilation error is
+     * fatal because {@code TestSuiteRequired: true} promises a compilable generated suite.
      */
     private ProcessResult compileSuiteGate(
             PromptConfig config, Path sutClassesDir, Path passingFile, Path failingFile)

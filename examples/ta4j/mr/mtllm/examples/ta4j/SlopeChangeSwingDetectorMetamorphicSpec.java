@@ -7,12 +7,12 @@ import org.ta4j.core.Bar;
 import org.ta4j.core.BarSeries;
 import org.ta4j.core.BaseBar;
 import org.ta4j.core.BaseBarSeriesBuilder;
+import org.ta4j.core.analysis.elliott.swing.SlopeChangeSwingDetector;
 import org.ta4j.core.analysis.elliott.swing.SwingDetectorResult;
 import org.ta4j.core.analysis.elliott.swing.SwingPivot;
+import org.ta4j.core.indicators.elliott.ElliottDegree;
 import org.ta4j.core.indicators.elliott.ElliottSwing;
 import org.ta4j.core.num.Num;
-
-import mtllm.examples.ta4j.SlopeChangeSwingDetectorSut.SlopeChangeCase;
 
 /** Uniform price-translation relation for the Ta4j slope-change swing detector. */
 public final class SlopeChangeSwingDetectorMetamorphicSpec {
@@ -23,9 +23,14 @@ public final class SlopeChangeSwingDetectorMetamorphicSpec {
     private SlopeChangeSwingDetectorMetamorphicSpec() {
     }
 
-    public static SlopeChangeCase generateFollowUp(SlopeChangeCase source) {
-        Objects.requireNonNull(source, "source");
-        BarSeries sourceSeries = source.series();
+    public static Object[] generateFollowUp(
+            SlopeChangeSwingDetector detector,
+            BarSeries sourceSeries,
+            int index,
+            ElliottDegree degree) {
+        Objects.requireNonNull(detector, "detector");
+        Objects.requireNonNull(sourceSeries, "sourceSeries");
+        Objects.requireNonNull(degree, "degree");
         if (sourceSeries.getBeginIndex() != 0) {
             throw new IllegalArgumentException(
                     "Price-translation MR requires a source series whose begin index is zero");
@@ -37,8 +42,8 @@ public final class SlopeChangeSwingDetectorMetamorphicSpec {
                 .build();
         Num translation = sourceSeries.numFactory().numOf(TRANSLATION);
 
-        for (int index = sourceSeries.getBeginIndex(); index <= sourceSeries.getEndIndex(); index++) {
-            Bar sourceBar = sourceSeries.getBar(index);
+        for (int barIndex = sourceSeries.getBeginIndex(); barIndex <= sourceSeries.getEndIndex(); barIndex++) {
+            Bar sourceBar = sourceSeries.getBar(barIndex);
             Num translatedAmount = sourceBar.getAmount()
                     .plus(translation.multipliedBy(sourceBar.getVolume()));
             translatedSeries.addBar(new BaseBar(
@@ -54,11 +59,11 @@ public final class SlopeChangeSwingDetectorMetamorphicSpec {
                     sourceBar.getTrades()));
         }
 
-        return new SlopeChangeCase(
+        return new Object[]{
+                new SlopeChangeSwingDetector(detector.getConfig()),
                 translatedSeries,
-                source.index(),
-                source.config(),
-                source.degree());
+                index,
+                degree};
     }
 
     public static void assertRelation(SwingDetectorResult sourceOutput, SwingDetectorResult followUpOutput) {
