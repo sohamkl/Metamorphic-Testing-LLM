@@ -12,12 +12,17 @@ import randoop.operation.TypedOperation;
 import randoop.reflection.AccessibilityPredicate;
 import randoop.reflection.DefaultReflectionPredicate;
 import randoop.reflection.OperationModel;
+import randoop.reflection.ReflectionPredicate;
 import randoop.sequence.ExecutableSequence;
 import randoop.sequence.Variable;
 import randoop.test.DummyCheckGenerator;
 import randoop.types.ClassOrInterfaceType;
 
 import java.util.ArrayList;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -50,6 +55,7 @@ import java.util.regex.Pattern;
  * @param <T> the object type to harvest
  */
 public final class RandoopHarvester<T> {
+    private static final int MAX_REPLAY_STATEMENTS = 160;
 
     /**
      * A harvested object together with the Randoop sequence that constructed it.
@@ -106,7 +112,7 @@ public final class RandoopHarvester<T> {
 
         OperationModel model = OperationModel.createModel(
                 AccessibilityPredicate.IS_PUBLIC,
-                new DefaultReflectionPredicate(),
+                new ConstructionReflectionPredicate(classNames),
                 new ArrayList<Pattern>(),
                 new LinkedHashSet<>(classNames),
                 new LinkedHashSet<String>(),
@@ -122,7 +128,7 @@ public final class RandoopHarvester<T> {
         }
         ComponentManager comp = new ComponentManager(seeds);
         GenInputsAbstract.Limits limits =
-                new GenInputsAbstract.Limits(timeLimitMillis, 1_000_000, 5_000, 5_000);
+                new GenInputsAbstract.Limits(timeLimitMillis, 10_000, 5_000, 5_000);
 
         ForwardGenerator gen = new ForwardGenerator(
                 ops,
@@ -149,6 +155,9 @@ public final class RandoopHarvester<T> {
                 }
                 Object o = normal.getRuntimeValue();
                 if (targetClass.isInstance(o) && seenIdentity.put(o, true) == null) {
+                    if (statementIndex >= MAX_REPLAY_STATEMENTS) {
+                        continue;
+                    }
                     T value = targetClass.cast(o);
                     String sig = StructuralSignature.of(value);
                     if (!distinct.containsKey(sig)) {
@@ -162,5 +171,41 @@ public final class RandoopHarvester<T> {
                 + "  identity-distinct " + targetClass.getSimpleName() + "s=" + seenIdentity.size()
                 + "  structurally-distinct=" + distinct.size());
         return distinct;
+    }
+
+    /** Restricts Randoop to replayable object-construction operations from the discovered graph. */
+    private static final class ConstructionReflectionPredicate implements ReflectionPredicate {
+        private final DefaultReflectionPredicate delegate = new DefaultReflectionPredicate();
+        private final Set<String> allowedClasses;
+
+        private ConstructionReflectionPredicate(Set<String> allowedClasses) {
+            this.allowedClasses = Set.copyOf(allowedClasses);
+        }
+
+        @Override
+        public boolean test(Class<?> type) {
+            return allowedClasses.contains(type.getName()) && delegate.test(type);
+        }
+
+        @Override
+        public boolean test(Method method) {
+            return allowedClasses.contains(method.getDeclaringClass().getName())
+                    && Modifier.isStatic(method.getModifiers())
+                    && method.getReturnType() != void.class
+                    && delegate.test(method);
+        }
+
+        @Override
+        public boolean test(Constructor<?> constructor) {
+            return allowedClasses.contains(constructor.getDeclaringClass().getName())
+                    && delegate.test(constructor);
+        }
+
+        @Override
+        public boolean test(Field field) {
+            return allowedClasses.contains(field.getDeclaringClass().getName())
+                    && Modifier.isStatic(field.getModifiers())
+                    && delegate.test(field);
+        }
     }
 }

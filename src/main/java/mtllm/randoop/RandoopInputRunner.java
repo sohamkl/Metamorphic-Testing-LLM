@@ -14,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
 /**
@@ -244,7 +245,7 @@ public final class RandoopInputRunner {
             java.add("--invocation-class=" + compilation.wrapper.className());
         }
         java.addAll(extraArgs);
-        return runProcess(java);
+        return runProcess(java, 240);
     }
 
     /** Build a classpath of project runtime dependency jars needed by the generator subprocess. */
@@ -364,6 +365,11 @@ public final class RandoopInputRunner {
     }
 
     private ProcessResult runProcess(List<String> command) throws IOException, InterruptedException {
+        return runProcess(command, 0);
+    }
+
+    private ProcessResult runProcess(List<String> command, long timeoutSeconds)
+            throws IOException, InterruptedException {
         ProcessBuilder builder = new ProcessBuilder(command)
                 .directory(repoRoot.toFile())
                 .redirectErrorStream(true);
@@ -371,9 +377,33 @@ public final class RandoopInputRunner {
         builder.environment().put("PATH", "/bin:/usr/bin:/opt/homebrew/bin:/usr/local/bin:" + existingPath);
         Process process = builder.start();
         ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-        process.getInputStream().transferTo(buffer);
-        int exitCode = process.waitFor();
+        Thread outputReader = new Thread(() -> {
+            try {
+                process.getInputStream().transferTo(buffer);
+            } catch (IOException ignored) {
+                // The stream may close when a timed-out subprocess is destroyed.
+            }
+        }, "mtllm-process-output");
+        outputReader.start();
+        boolean completed = timeoutSeconds <= 0
+                ? waitWithoutTimeout(process)
+                : process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
+        if (!completed) {
+            process.destroyForcibly();
+            process.waitFor();
+        }
+        outputReader.join();
+        int exitCode = completed ? process.exitValue() : 124;
+        if (!completed) {
+            buffer.write(("\nProcess timed out after " + timeoutSeconds + " seconds: "
+                    + String.join(" ", command) + "\n").getBytes(StandardCharsets.UTF_8));
+        }
         return new ProcessResult(exitCode, buffer.toString(StandardCharsets.UTF_8));
+    }
+
+    private static boolean waitWithoutTimeout(Process process) throws InterruptedException {
+        process.waitFor();
+        return true;
     }
 
     private static final class ProcessResult {

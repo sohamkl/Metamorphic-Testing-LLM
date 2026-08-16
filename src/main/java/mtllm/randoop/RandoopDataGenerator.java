@@ -50,7 +50,10 @@ public final class RandoopDataGenerator {
 
     private final int timeLimitMillis;
     private final String invocationClassName;
-    private static final long[] RANDOM_SEEDS = {0L, 1L, 2L, 3L, 4L};
+    // Keep harvesting deterministic and bounded. A single Randoop run already explores thousands
+    // of sequences; additional seeds can enter long-running third-party operations and discard the
+    // useful inputs harvested by earlier seeds when the subprocess timeout is reached.
+    private static final long[] RANDOM_SEEDS = {0L};
     private static final Pattern PACKAGE_DECLARATION =
             Pattern.compile("(?m)^\\s*package\\s+([A-Za-z_$][\\w$]*(?:\\.[A-Za-z_$][\\w$]*)*)\\s*;");
 
@@ -274,7 +277,7 @@ public final class RandoopDataGenerator {
     private Set<String> randoopClassNames(PromptConfig config, Class<?> inputType) throws Exception {
         Set<String> classNames = new LinkedHashSet<>();
         ConstructionGraphDiscoverer.Result discovery = ConstructionGraphDiscoverer.discover(config, inputType);
-        discovery.classNames().stream()
+        discovery.runtimeClassNames().stream()
                 .filter(RandoopDataGenerator::isLoadableClass)
                 .forEach(classNames::add);
         if (!config.randoopTargetClasses().isEmpty()) {

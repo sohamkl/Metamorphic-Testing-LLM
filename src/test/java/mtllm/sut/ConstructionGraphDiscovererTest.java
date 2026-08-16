@@ -35,6 +35,7 @@ class ConstructionGraphDiscovererTest {
         assertTrue(result.classNames().contains(RootInput.class.getName()));
         assertTrue(result.classNames().contains(PublicImplementation.class.getName()));
         assertTrue(result.classNames().contains(Leaf.class.getName()));
+        assertTrue(result.classNames().contains(java.time.Duration.class.getName()));
         assertTrue(result.classNames().contains("sample.ExternalFactory"));
     }
 
@@ -60,7 +61,7 @@ class ConstructionGraphDiscovererTest {
     }
 
     public static final class RootInput {
-        public RootInput(PublicContract contract, List<Leaf> leaves) {
+        public RootInput(PublicContract contract, List<Leaf> leaves, java.time.Duration duration) {
         }
     }
 }

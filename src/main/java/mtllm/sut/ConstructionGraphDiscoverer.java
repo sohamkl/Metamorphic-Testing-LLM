@@ -68,8 +68,9 @@ public final class ConstructionGraphDiscoverer {
             }
         }
 
+        Set<String> runtimeClasses = Set.copyOf(classes);
         addSourceEvidence(config, rootType, classes, evidence);
-        return new Result(Set.copyOf(classes), List.copyOf(evidence));
+        return new Result(Set.copyOf(classes), List.copyOf(evidence), runtimeClasses);
     }
 
     private static void visit(
@@ -79,11 +80,17 @@ public final class ConstructionGraphDiscoverer {
             Deque<Node> pending,
             ScanResult scan) {
         Class<?> type = node.type;
-        if (type == null || node.depth > MAX_DEPTH || terminal(type) || classes.size() >= MAX_CLASSES) {
+        if (type == null || node.depth > MAX_DEPTH || classes.size() >= MAX_CLASSES) {
             return;
         }
         if (type.isArray()) {
             pending.addFirst(new Node(type.getComponentType(), node.depth + 1, type.getTypeName()));
+            return;
+        }
+        if (terminal(type)) {
+            if (factoryTerminal(type) && classes.add(type.getName())) {
+                evidence.add(type.getName() + " <- constructible terminal for " + node.reason);
+            }
             return;
         }
         if (!classes.add(type.getName())) {
@@ -201,6 +208,11 @@ public final class ConstructionGraphDiscoverer {
                 || type == Character.class;
     }
 
+    private static boolean factoryTerminal(Class<?> type) {
+        return type.getName().startsWith("java.time.")
+                || type.getName().startsWith("java.math.");
+    }
+
     private static void addSourceEvidence(
             PromptConfig config,
             Class<?> targetType,
@@ -279,6 +291,6 @@ public final class ConstructionGraphDiscoverer {
     private record Node(Class<?> type, int depth, String reason) {
     }
 
-    public record Result(Set<String> classNames, List<String> evidence) {
+    public record Result(Set<String> classNames, List<String> evidence, Set<String> runtimeClassNames) {
     }
 }

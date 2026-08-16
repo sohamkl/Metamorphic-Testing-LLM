@@ -7,6 +7,11 @@ import mtllm.sut.TargetMethodResolver;
 
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
+import java.lang.reflect.GenericArrayType;
+import java.lang.reflect.ParameterizedType;
+import java.lang.reflect.Type;
+import java.lang.reflect.TypeVariable;
+import java.lang.reflect.WildcardType;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -14,6 +19,8 @@ import java.util.List;
 
 /** Generates the typed one-input boundary required by Randoop for instance or non-unary SUT methods. */
 public final class InvocationWrapperGenerator {
+    private static final int MAX_COLLECTION_ARITY = 6;
+
     private InvocationWrapperGenerator() {
     }
 
@@ -21,7 +28,7 @@ public final class InvocationWrapperGenerator {
         Class<?> sutClass = Class.forName(JavaSourceNames.qualifiedName(config.sutClassFile()), false, loader);
         Method target = TargetMethodResolver.resolve(sutClass, config.targetFunction());
         boolean instanceMethod = !Modifier.isStatic(target.getModifiers());
-        if (!instanceMethod && target.getParameterCount() == 1) {
+        if (!instanceMethod && target.getParameterCount() == 1 && collectionBridge(target) == null) {
             return null;
         }
         if (target.getReturnType() == void.class) {
@@ -62,8 +69,10 @@ public final class InvocationWrapperGenerator {
 
     static String render(String className, Class<?> sutClass, Method target, Method developerFollowUp) {
         Class<?>[] parameters = target.getParameterTypes();
+        Type[] genericParameters = target.getGenericParameterTypes();
         boolean instanceMethod = !Modifier.isStatic(target.getModifiers());
         Class<?>[] components = invocationComponentTypes(sutClass, target);
+        CollectionBridge collectionBridge = collectionBridge(target);
         StringBuilder out = new StringBuilder();
         out.append("/** Framework-generated typed invocation boundary for Randoop. */\n");
         out.append("public final class ").append(className).append(" {\n");
@@ -73,10 +82,11 @@ public final class InvocationWrapperGenerator {
             out.append("        private final ").append(typeName(sutClass)).append(" receiver;\n");
         }
         for (int i = 0; i < parameters.length; i++) {
-            out.append("        private final ").append(typeName(parameters[i])).append(" arg").append(i).append(";\n");
+            out.append("        private final ").append(typeName(genericParameters[i]))
+                    .append(" arg").append(i).append(";\n");
         }
-        out.append("\n        public Input(");
-        appendInputParameters(out, sutClass, parameters, instanceMethod);
+        out.append("\n        ").append(collectionBridge == null ? "public" : "private").append(" Input(");
+        appendInputParameters(out, sutClass, genericParameters, instanceMethod);
         out.append(") {\n");
         if (instanceMethod) {
             out.append("            this.receiver = receiver;\n");
@@ -85,17 +95,21 @@ public final class InvocationWrapperGenerator {
             out.append("            this.arg").append(i).append(" = arg").append(i).append(";\n");
         }
         out.append("        }\n");
+        if (collectionBridge != null) {
+            appendCollectionConstructors(out, sutClass, genericParameters, instanceMethod, collectionBridge);
+        }
         if (instanceMethod) {
             out.append("\n        public ").append(typeName(sutClass))
                     .append(" receiver() { return receiver; }\n");
         }
         for (int i = 0; i < parameters.length; i++) {
-            out.append("\n        public ").append(typeName(parameters[i])).append(" arg").append(i)
+            out.append("\n        public ").append(typeName(genericParameters[i])).append(" arg").append(i)
                     .append("() { return arg").append(i).append("; }\n");
         }
         out.append("    }\n\n");
 
-        out.append("    public static ").append(typeName(target.getReturnType())).append(" invoke(Input source) {\n");
+        out.append("    public static ").append(typeName(target.getGenericReturnType()))
+                .append(" invoke(Input source) {\n");
         out.append("        try {\n            ");
         out.append("return ")
                 .append(instanceMethod ? "source.receiver()" : typeName(sutClass))
@@ -115,6 +129,16 @@ public final class InvocationWrapperGenerator {
             if (synthesizedCallbackParameter && !parameters[i].isPrimitive()) {
                 usabilityChecks.add("source.arg" + i + "() != null");
             }
+        }
+        if (collectionBridge != null) {
+            if (instanceMethod) {
+                usabilityChecks.add("source.receiver() != null");
+            }
+            String accessor = "source.arg" + collectionBridge.parameterIndex + "()";
+            usabilityChecks.add(accessor + " != null");
+            usabilityChecks.add("!" + accessor + ".isEmpty()");
+            usabilityChecks.add(accessor + ".stream().allMatch(value -> value instanceof "
+                    + typeName(collectionBridge.runtimeElementType) + ")");
         }
         if (!usabilityChecks.isEmpty()) {
             out.append("\n    public static boolean isUsable(Input source) {\n")
@@ -144,13 +168,64 @@ public final class InvocationWrapperGenerator {
     }
 
     private static void appendInputParameters(
-            StringBuilder out, Class<?> sutClass, Class<?>[] types, boolean instanceMethod) {
+            StringBuilder out, Class<?> sutClass, Type[] types, boolean instanceMethod) {
         if (instanceMethod) {
             out.append(typeName(sutClass)).append(" receiver");
         }
         for (int i = 0; i < types.length; i++) {
             if (instanceMethod || i > 0) out.append(", ");
             out.append(typeName(types[i])).append(" arg").append(i);
+        }
+    }
+
+    private static void appendCollectionConstructors(
+            StringBuilder out,
+            Class<?> sutClass,
+            Type[] parameterTypes,
+            boolean instanceMethod,
+            CollectionBridge bridge) {
+        for (int arity = 1; arity <= MAX_COLLECTION_ARITY; arity++) {
+            out.append("\n        public Input(");
+            boolean comma = false;
+            if (instanceMethod) {
+                out.append(typeName(sutClass)).append(" receiver");
+                comma = true;
+            }
+            for (int parameterIndex = 0; parameterIndex < parameterTypes.length; parameterIndex++) {
+                if (parameterIndex == bridge.parameterIndex) {
+                    for (int elementIndex = 0; elementIndex < arity; elementIndex++) {
+                        if (comma) out.append(", ");
+                        out.append(typeName(bridge.elementType)).append(" arg")
+                                .append(parameterIndex).append("Element").append(elementIndex);
+                        comma = true;
+                    }
+                } else {
+                    if (comma) out.append(", ");
+                    out.append(typeName(parameterTypes[parameterIndex])).append(" arg").append(parameterIndex);
+                    comma = true;
+                }
+            }
+            out.append(") {\n            this(");
+            comma = false;
+            if (instanceMethod) {
+                out.append("receiver");
+                comma = true;
+            }
+            for (int parameterIndex = 0; parameterIndex < parameterTypes.length; parameterIndex++) {
+                if (comma) out.append(", ");
+                if (parameterIndex == bridge.parameterIndex) {
+                    out.append(bridge.factoryMethod).append('(');
+                    for (int elementIndex = 0; elementIndex < arity; elementIndex++) {
+                        if (elementIndex > 0) out.append(", ");
+                        out.append("arg").append(parameterIndex).append("Element").append(elementIndex);
+                    }
+                    out.append(')');
+                } else {
+                    out.append("arg").append(parameterIndex);
+                }
+                comma = true;
+            }
+            out.append(");\n        }\n");
         }
     }
 
@@ -196,9 +271,79 @@ public final class InvocationWrapperGenerator {
         return components;
     }
 
-    private static String typeName(Class<?> type) {
-        String canonical = type.getCanonicalName();
-        return canonical == null ? type.getTypeName().replace('$', '.') : canonical;
+    private static CollectionBridge collectionBridge(Method target) {
+        CollectionBridge found = null;
+        Type[] genericParameters = target.getGenericParameterTypes();
+        for (int index = 0; index < genericParameters.length; index++) {
+            Type parameter = genericParameters[index];
+            if (!(parameter instanceof ParameterizedType parameterized)
+                    || !(parameterized.getRawType() instanceof Class<?> rawType)
+                    || parameterized.getActualTypeArguments().length != 1) {
+                continue;
+            }
+            String factoryMethod;
+            if (rawType == java.util.List.class || rawType == java.util.Collection.class) {
+                factoryMethod = "java.util.List.of";
+            } else if (rawType == java.util.Set.class) {
+                factoryMethod = "java.util.Set.of";
+            } else {
+                continue;
+            }
+            Type elementType = parameterized.getActualTypeArguments()[0];
+            Class<?> runtimeElementType = runtimeClass(elementType);
+            if (runtimeElementType == null || runtimeElementType.isPrimitive() || found != null) {
+                return null;
+            }
+            found = new CollectionBridge(index, elementType, runtimeElementType, factoryMethod);
+        }
+        return found;
+    }
+
+    private static Class<?> runtimeClass(Type type) {
+        if (type instanceof Class<?> clazz) return clazz;
+        if (type instanceof ParameterizedType parameterized
+                && parameterized.getRawType() instanceof Class<?> rawType) {
+            return rawType;
+        }
+        if (type instanceof WildcardType wildcard && wildcard.getUpperBounds().length > 0) {
+            return runtimeClass(wildcard.getUpperBounds()[0]);
+        }
+        if (type instanceof TypeVariable<?> variable && variable.getBounds().length > 0) {
+            return runtimeClass(variable.getBounds()[0]);
+        }
+        return null;
+    }
+
+    private static String typeName(Type type) {
+        if (type instanceof Class<?> clazz) {
+            String canonical = clazz.getCanonicalName();
+            return canonical == null ? clazz.getTypeName().replace('$', '.') : canonical;
+        }
+        if (type instanceof ParameterizedType parameterized) {
+            StringBuilder name = new StringBuilder(typeName(parameterized.getRawType())).append('<');
+            Type[] arguments = parameterized.getActualTypeArguments();
+            for (int i = 0; i < arguments.length; i++) {
+                if (i > 0) name.append(", ");
+                name.append(typeName(arguments[i]));
+            }
+            return name.append('>').toString();
+        }
+        if (type instanceof WildcardType wildcard) {
+            if (wildcard.getLowerBounds().length > 0) {
+                return "? super " + typeName(wildcard.getLowerBounds()[0]);
+            }
+            if (wildcard.getUpperBounds().length > 0 && wildcard.getUpperBounds()[0] != Object.class) {
+                return "? extends " + typeName(wildcard.getUpperBounds()[0]);
+            }
+            return "?";
+        }
+        if (type instanceof GenericArrayType array) {
+            return typeName(array.getGenericComponentType()) + "[]";
+        }
+        if (type instanceof TypeVariable<?> variable) {
+            return variable.getName();
+        }
+        return type.getTypeName().replace('$', '.');
     }
 
     private static String simpleName(String qualified) {
@@ -215,5 +360,9 @@ public final class InvocationWrapperGenerator {
     }
 
     public record Generated(String className, String inputClassName, Path sourceFile) {
+    }
+
+    private record CollectionBridge(
+            int parameterIndex, Type elementType, Class<?> runtimeElementType, String factoryMethod) {
     }
 }
