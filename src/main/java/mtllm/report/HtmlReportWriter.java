@@ -5,6 +5,7 @@ import freemarker.template.Template;
 import freemarker.template.TemplateException;
 import freemarker.template.TemplateExceptionHandler;
 import mtllm.config.PromptConfig;
+import mtllm.util.GeneratedNames;
 import mtllm.sut.SutContext;
 
 import java.io.IOException;
@@ -69,7 +70,7 @@ public final class HtmlReportWriter {
             List<String> failingTestNames) throws IOException {
         Files.createDirectories(reportsDir);
 
-        Path reportFile = reportsDir.resolve(baseName(config.generatedClassName()) + "Report.html");
+        Path reportFile = reportsDir.resolve(GeneratedNames.baseName(config.generatedClassName()) + "Report.html");
         boolean reportUsesTestSuite = config.testSuiteRequired()
                 && (!passingTestNames.isEmpty() || !failingTestNames.isEmpty());
         int totalCount = reportUsesTestSuite
@@ -79,7 +80,7 @@ public final class HtmlReportWriter {
         int failingCount = reportUsesTestSuite ? failingTestNames.size() : failingEntries.size();
 
         Map<String, Object> model = new LinkedHashMap<>();
-        model.put("title", baseName(config.generatedClassName()) + " Metamorphic Test Report");
+        model.put("title", GeneratedNames.baseName(config.generatedClassName()) + " Metamorphic Test Report");
         model.put("generatedAt", LocalDateTime.now().toString());
         model.put("sutClassFile", valueOrMissing(sutContext.classFile()));
         model.put("targetFunction", valueOrMissing(config.targetFunction()));
@@ -340,16 +341,6 @@ public final class HtmlReportWriter {
         configuration.setLogTemplateExceptions(false);
         configuration.setWrapUncheckedExceptions(true);
         return configuration;
-    }
-
-    private static String baseName(String generatedClassName) {
-        if (generatedClassName.endsWith("Data")) {
-            return generatedClassName.substring(0, generatedClassName.length() - "Data".length());
-        }
-        if (generatedClassName.endsWith("Test")) {
-            return generatedClassName.substring(0, generatedClassName.length() - "Test".length());
-        }
-        return generatedClassName;
     }
 
     private static String valueOrMissing(Object value) {

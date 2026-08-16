@@ -3,6 +3,7 @@ package mtllm.runner;
 import mtllm.config.PromptConfig;
 import mtllm.report.HtmlReportWriter;
 import mtllm.sut.SutContext;
+import mtllm.util.GeneratedNames;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -258,11 +259,11 @@ public final class DataGeneratorRunner {
         }
         command.add(generatedFile.toString());
 
-        ProcessResult result = runProcess(command, repoRoot);
-        if (result.exitCode == 0) {
-            return TestRunResult.passed(result.output);
+        ProcessRunner.Result result = ProcessRunner.run(command, repoRoot);
+        if (result.exitCode() == 0) {
+            return TestRunResult.passed(result.output());
         }
-        return TestRunResult.failed("Compilation failed:\n" + result.output);
+        return TestRunResult.failed("Compilation failed:\n" + result.output());
     }
 
     private TestRunResult run(String className) throws Exception {
@@ -272,11 +273,11 @@ public final class DataGeneratorRunner {
         command.add(classesDir.toString());
         command.add(className);
 
-        ProcessResult result = runProcess(command, repoRoot);
-        if (result.exitCode == 0) {
-            return TestRunResult.passed(result.output);
+        ProcessRunner.Result result = ProcessRunner.run(command, repoRoot);
+        if (result.exitCode() == 0) {
+            return TestRunResult.passed(result.output());
         }
-        return TestRunResult.failed("Execution failed:\n" + result.output);
+        return TestRunResult.failed("Execution failed:\n" + result.output());
     }
 
     private String validateJsonOutput(String output, PromptConfig config) {
@@ -305,7 +306,7 @@ public final class DataGeneratorRunner {
             }
         }
 
-        String baseName = baseName(config.generatedClassName());
+        String baseName = GeneratedNames.baseName(config.generatedClassName());
         Path passingFile = outputDir.resolve(baseName + "Passing.json");
         Path failingFile = outputDir.resolve(baseName + "Failing.json");
         Files.writeString(passingFile, prettyPrintJsonLike(toJsonArray(passing)) + System.lineSeparator(), StandardCharsets.UTF_8);
@@ -362,13 +363,6 @@ public final class DataGeneratorRunner {
 
     private String toJsonArray(List<String> entries) {
         return "[" + String.join(",", entries) + "]";
-    }
-
-    private String baseName(String generatedClassName) {
-        if (generatedClassName.endsWith("Data")) {
-            return generatedClassName.substring(0, generatedClassName.length() - "Data".length());
-        }
-        return generatedClassName;
     }
 
     private String prettyPrintJsonLike(String json) {
@@ -439,29 +433,6 @@ public final class DataGeneratorRunner {
         out.append(System.lineSeparator());
         for (int i = 0; i < indent; i++) {
             out.append("  ");
-        }
-    }
-
-    private ProcessResult runProcess(List<String> command, Path workDir) throws IOException, InterruptedException {
-        ProcessBuilder builder = new ProcessBuilder(command)
-                .directory(workDir.toFile())
-                .redirectErrorStream(true);
-        String existingPath = builder.environment().getOrDefault("PATH", "");
-        builder.environment().put("PATH", "/bin:/usr/bin:/opt/homebrew/bin:/usr/local/bin:" + existingPath);
-        Process process = builder.start();
-        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-        process.getInputStream().transferTo(buffer);
-        int exitCode = process.waitFor();
-        return new ProcessResult(exitCode, buffer.toString(StandardCharsets.UTF_8));
-    }
-
-    private static final class ProcessResult {
-        private final int exitCode;
-        private final String output;
-
-        private ProcessResult(int exitCode, String output) {
-            this.exitCode = exitCode;
-            this.output = output == null ? "" : output;
         }
     }
 

@@ -4,7 +4,6 @@ import mtllm.config.PromptConfig;
 import mtllm.sut.CompiledClassPath;
 import mtllm.sut.SutContext;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -91,17 +90,17 @@ public final class GeneratedTestRunner {
             Files.deleteIfExists(repoRoot.resolve("target")
                     .resolve("surefire-reports")
                     .resolve("TEST-" + config.generatedClassName() + ".xml"));
-            ProcessResult result = runProcess(command, repoRoot);
-            if (result.exitCode == 0) {
-                return splitActualResults(generatedTestFile, config, result.output);
+            ProcessRunner.Result result = ProcessRunner.run(command, repoRoot);
+            if (result.exitCode() == 0) {
+                return splitActualResults(generatedTestFile, config, result.output());
             }
-            if (isCompilationFailure(result.output)) {
-                return TestRunResult.failed("Maven compilation failed:\n" + result.output);
+            if (isCompilationFailure(result.output())) {
+                return TestRunResult.failed("Maven compilation failed:\n" + result.output());
             }
-            if (isExpectedTestFailureOutput(result.output)) {
-                return splitActualResults(generatedTestFile, config, result.output);
+            if (isExpectedTestFailureOutput(result.output())) {
+                return splitActualResults(generatedTestFile, config, result.output());
             }
-            return TestRunResult.failed("Maven test failed:\n" + result.output);
+            return TestRunResult.failed("Maven test failed:\n" + result.output());
         } catch (IOException e) {
             return TestRunResult.skipped(
                     "Generated test was written, but Maven could not be started. "
@@ -214,11 +213,11 @@ public final class GeneratedTestRunner {
         command.addAll(generatedSupportSourceFiles(config).stream().map(Path::toString).toList());
         command.add(generatedTestFile.toString());
 
-        ProcessResult result = runProcess(command, repoRoot);
-        if (result.exitCode == 0) {
-            return TestRunResult.passed(result.output);
+        ProcessRunner.Result result = ProcessRunner.run(command, repoRoot);
+        if (result.exitCode() == 0) {
+            return TestRunResult.passed(result.output());
         }
-        return TestRunResult.failed("Compilation failed:\n" + result.output);
+        return TestRunResult.failed("Compilation failed:\n" + result.output());
     }
 
     private List<Path> generatedDataSourceFiles(PromptConfig config) throws IOException {
@@ -255,14 +254,14 @@ public final class GeneratedTestRunner {
         command.add("--select-class");
         command.add(generatedClassName);
 
-        ProcessResult result = runProcess(command, repoRoot);
-        if (result.exitCode == 0) {
-            return TestRunResult.passed(result.output);
+        ProcessRunner.Result result = ProcessRunner.run(command, repoRoot);
+        if (result.exitCode() == 0) {
+            return TestRunResult.passed(result.output());
         }
-        if (isExpectedTestFailureOutput(result.output)) {
-            return TestRunResult.passed("Generated failing-only suite found MR violations:\n" + result.output);
+        if (isExpectedTestFailureOutput(result.output())) {
+            return TestRunResult.passed("Generated failing-only suite found MR violations:\n" + result.output());
         }
-        return TestRunResult.failed("JUnit execution failed:\n" + result.output);
+        return TestRunResult.failed("JUnit execution failed:\n" + result.output());
     }
 
     private static boolean isCompilationFailure(String output) {
@@ -295,26 +294,4 @@ public final class GeneratedTestRunner {
         return System.getProperty("path.separator");
     }
 
-    private static ProcessResult runProcess(List<String> command, Path workDir) throws IOException, InterruptedException {
-        ProcessBuilder builder = new ProcessBuilder(command)
-                .directory(workDir.toFile())
-                .redirectErrorStream(true);
-        String existingPath = builder.environment().getOrDefault("PATH", "");
-        builder.environment().put("PATH", "/bin:/usr/bin:/opt/homebrew/bin:/usr/local/bin:" + existingPath);
-        Process process = builder.start();
-        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-        process.getInputStream().transferTo(buffer);
-        int exitCode = process.waitFor();
-        return new ProcessResult(exitCode, buffer.toString(StandardCharsets.UTF_8));
-    }
-
-    private static final class ProcessResult {
-        private final int exitCode;
-        private final String output;
-
-        private ProcessResult(int exitCode, String output) {
-            this.exitCode = exitCode;
-            this.output = output == null ? "" : output;
-        }
-    }
 }

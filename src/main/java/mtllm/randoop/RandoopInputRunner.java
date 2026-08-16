@@ -1,10 +1,11 @@
 package mtllm.randoop;
 
 import mtllm.config.PromptConfig;
+import mtllm.runner.ProcessRunner;
 import mtllm.runner.RuntimeResourceCopier;
 import mtllm.sut.CompiledClassPath;
+import mtllm.util.GeneratedNames;
 
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.net.URL;
@@ -14,7 +15,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
 /**
@@ -58,9 +58,9 @@ public final class RandoopInputRunner {
         // Run the generator in a subprocess; it writes the JSON to outJson and (when a test suite
         // is required) the object JUnit suite into <outputRoot>/junit-tests.
         Path outJson = workDir.resolve("randoop-data.json");
-        ProcessResult run = runGenerator(config, promptPath, outJson, compilation, List.of());
+        ProcessRunner.Result run = runGenerator(config, promptPath, outJson, compilation, List.of());
         if (!Files.exists(outJson)) {
-            throw new IllegalStateException("Randoop generation produced no output file.\n" + run.output);
+            throw new IllegalStateException("Randoop generation produced no output file.\n" + run.output());
         }
         String json = Files.readString(outJson, StandardCharsets.UTF_8);
 
@@ -68,18 +68,18 @@ public final class RandoopInputRunner {
             return new GenerationResult(json, false, null, null, false, "");
         }
 
-        String base = baseName(config.generatedClassName());
+        String base = GeneratedNames.baseName(config.generatedClassName());
         Path junitDir = config.outputRoot().resolve("junit-tests");
         Path passingFile = junitDir.resolve(base + "PassingTest.java");
         Path failingFile = junitDir.resolve(base + "FailingTest.java");
         if (!Files.exists(passingFile) || !Files.exists(failingFile)) {
             throw new IllegalStateException("Randoop test-suite generation produced no JUnit files in "
-                    + junitDir + ".\n" + run.output);
+                    + junitDir + ".\n" + run.output());
         }
 
-        ProcessResult gate = compileSuiteGate(config, compilation.classesDir, passingFile, failingFile);
-        requireSuccessfulSuiteCompile(gate.exitCode, gate.output);
-        return new GenerationResult(json, true, passingFile, failingFile, true, gate.output);
+        ProcessRunner.Result gate = compileSuiteGate(config, compilation.classesDir, passingFile, failingFile);
+        requireSuccessfulSuiteCompile(gate.exitCode(), gate.output());
+        return new GenerationResult(json, true, passingFile, failingFile, true, gate.output());
     }
 
     static void requireSuccessfulSuiteCompile(int exitCode, String output) {
@@ -92,9 +92,9 @@ public final class RandoopInputRunner {
     public String generateSeedExamples(PromptConfig config, Path promptPath) throws Exception {
         Compilation compilation = compileSut(config);
         Path outJson = workDir.resolve("randoop-seeds.json");
-        ProcessResult run = runGenerator(config, promptPath, outJson, compilation, List.of("--seeds-only"));
+        ProcessRunner.Result run = runGenerator(config, promptPath, outJson, compilation, List.of("--seeds-only"));
         if (!Files.exists(outJson)) {
-            throw new IllegalStateException("Randoop seed generation produced no output file.\n" + run.output);
+            throw new IllegalStateException("Randoop seed generation produced no output file.\n" + run.output());
         }
         return Files.readString(outJson, StandardCharsets.UTF_8);
     }
@@ -103,11 +103,11 @@ public final class RandoopInputRunner {
     public String generateLlmSeededSourceExamples(PromptConfig config, Path promptPath) throws Exception {
         Compilation compilation = compileSut(config);
         Path outJson = workDir.resolve("randoop-hybrid-sources.json");
-        ProcessResult run = runGenerator(
+        ProcessRunner.Result run = runGenerator(
                 config, promptPath, outJson, compilation, List.of("--seeded-sources-only"));
         if (!Files.exists(outJson)) {
             throw new IllegalStateException(
-                    "LLM-seeded Randoop source generation produced no output file.\n" + run.output);
+                    "LLM-seeded Randoop source generation produced no output file.\n" + run.output());
         }
         return Files.readString(outJson, StandardCharsets.UTF_8);
     }
@@ -139,9 +139,9 @@ public final class RandoopInputRunner {
             javac.add("-d");
             javac.add(classesDir.toString());
             javac.addAll(sources);
-            ProcessResult compile = runProcess(javac);
-            if (compile.exitCode != 0) {
-                throw new IllegalStateException("Randoop SUT compilation failed:\n" + compile.output);
+            ProcessRunner.Result compile = ProcessRunner.run(javac, repoRoot);
+            if (compile.exitCode() != 0) {
+                throw new IllegalStateException("Randoop SUT compilation failed:\n" + compile.output());
             }
         }
         RuntimeResourceCopier.copyFor(config, classesDir);
@@ -170,9 +170,9 @@ public final class RandoopInputRunner {
                 "javac", "-encoding", "UTF-8",
                 "-cp", String.join(File.pathSeparator, classesDir.toString(), compileClasspath),
                 "-d", classesDir.toString(), wrapper.sourceFile().toString()));
-        ProcessResult compile = runProcess(javac);
-        if (compile.exitCode != 0) {
-            throw new IllegalStateException("Generated invocation-wrapper compilation failed:\n" + compile.output);
+        ProcessRunner.Result compile = ProcessRunner.run(javac, repoRoot);
+        if (compile.exitCode() != 0) {
+            throw new IllegalStateException("Generated invocation-wrapper compilation failed:\n" + compile.output());
         }
         Path junitSupport = config.outputRoot().resolve("junit-support");
         Files.createDirectories(junitSupport);
@@ -203,9 +203,9 @@ public final class RandoopInputRunner {
                 "-cp", String.join(File.pathSeparator, classesDir.toString(), compileClasspath),
                 "-d", classesDir.toString()));
         generated.sourceFiles().forEach(source -> javac.add(source.toString()));
-        ProcessResult compile = runProcess(javac);
-        if (compile.exitCode != 0) {
-            throw new IllegalStateException("Generated callback-policy compilation failed:\n" + compile.output);
+        ProcessRunner.Result compile = ProcessRunner.run(javac, repoRoot);
+        if (compile.exitCode() != 0) {
+            throw new IllegalStateException("Generated callback-policy compilation failed:\n" + compile.output());
         }
         Path junitSupport = config.outputRoot().resolve("junit-support");
         Files.createDirectories(junitSupport);
@@ -231,7 +231,7 @@ public final class RandoopInputRunner {
         }
     }
 
-    private ProcessResult runGenerator(
+    private ProcessRunner.Result runGenerator(
             PromptConfig config, Path promptPath, Path outJson, Compilation compilation, List<String> extraArgs)
             throws Exception {
         Files.deleteIfExists(outJson);
@@ -245,7 +245,7 @@ public final class RandoopInputRunner {
             java.add("--invocation-class=" + compilation.wrapper.className());
         }
         java.addAll(extraArgs);
-        return runProcess(java, 240);
+        return ProcessRunner.run(java, repoRoot, 240);
     }
 
     /** Build a classpath of project runtime dependency jars needed by the generator subprocess. */
@@ -266,13 +266,13 @@ public final class RandoopInputRunner {
      * JUnit API jars from the local Maven repo. A missing JUnit classpath or compilation error is
      * fatal because {@code TestSuiteRequired: true} promises a compilable generated suite.
      */
-    private ProcessResult compileSuiteGate(
+    private ProcessRunner.Result compileSuiteGate(
             PromptConfig config, Path sutClassesDir, Path passingFile, Path failingFile)
             throws IOException, InterruptedException {
         String junitClasspath = locateJUnitClasspath();
         if (junitClasspath.isEmpty()) {
-            return new ProcessResult(1,
-                    "JUnit API jars not found under the local Maven repository; suite compile-gate skipped.");
+            return new ProcessRunner.Result(1,
+                    "JUnit API jars not found under the local Maven repository; suite compile-gate skipped.", false);
         }
         Path gateClasses = workDir.resolve("junit-gate-classes");
         Files.createDirectories(gateClasses);
@@ -282,7 +282,7 @@ public final class RandoopInputRunner {
                         junitClasspath, runtimeDependencyClasspath(), sutClassesDir.toString(), sutClasspath(config)),
                 "-d", gateClasses.toString(),
                 passingFile.toString(), failingFile.toString()));
-        return runProcess(javac);
+        return ProcessRunner.run(javac, repoRoot);
     }
 
     private static String sutClasspath(PromptConfig config, Path... additionalEntries) {
@@ -352,68 +352,6 @@ public final class RandoopInputRunner {
             return leftNumeric ? 1 : -1;
         }
         return left.compareTo(right);
-    }
-
-    private static String baseName(String generatedClassName) {
-        if (generatedClassName.endsWith("Data")) {
-            return generatedClassName.substring(0, generatedClassName.length() - "Data".length());
-        }
-        if (generatedClassName.endsWith("Test")) {
-            return generatedClassName.substring(0, generatedClassName.length() - "Test".length());
-        }
-        return generatedClassName;
-    }
-
-    private ProcessResult runProcess(List<String> command) throws IOException, InterruptedException {
-        return runProcess(command, 0);
-    }
-
-    private ProcessResult runProcess(List<String> command, long timeoutSeconds)
-            throws IOException, InterruptedException {
-        ProcessBuilder builder = new ProcessBuilder(command)
-                .directory(repoRoot.toFile())
-                .redirectErrorStream(true);
-        String existingPath = builder.environment().getOrDefault("PATH", "");
-        builder.environment().put("PATH", "/bin:/usr/bin:/opt/homebrew/bin:/usr/local/bin:" + existingPath);
-        Process process = builder.start();
-        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-        Thread outputReader = new Thread(() -> {
-            try {
-                process.getInputStream().transferTo(buffer);
-            } catch (IOException ignored) {
-                // The stream may close when a timed-out subprocess is destroyed.
-            }
-        }, "mtllm-process-output");
-        outputReader.start();
-        boolean completed = timeoutSeconds <= 0
-                ? waitWithoutTimeout(process)
-                : process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
-        if (!completed) {
-            process.destroyForcibly();
-            process.waitFor();
-        }
-        outputReader.join();
-        int exitCode = completed ? process.exitValue() : 124;
-        if (!completed) {
-            buffer.write(("\nProcess timed out after " + timeoutSeconds + " seconds: "
-                    + String.join(" ", command) + "\n").getBytes(StandardCharsets.UTF_8));
-        }
-        return new ProcessResult(exitCode, buffer.toString(StandardCharsets.UTF_8));
-    }
-
-    private static boolean waitWithoutTimeout(Process process) throws InterruptedException {
-        process.waitFor();
-        return true;
-    }
-
-    private static final class ProcessResult {
-        private final int exitCode;
-        private final String output;
-
-        private ProcessResult(int exitCode, String output) {
-            this.exitCode = exitCode;
-            this.output = output == null ? "" : output;
-        }
     }
 
     private static final class Compilation {

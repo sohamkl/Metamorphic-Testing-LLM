@@ -1,6 +1,7 @@
 package mtllm.prompt;
 
 import mtllm.config.PromptConfig;
+import mtllm.sut.JavaSourceNames;
 import mtllm.runner.TestRunResult;
 import mtllm.sut.SutContext;
 
@@ -394,22 +395,11 @@ public final class PromptBuilder {
             return methodReference;
         }
 
-        String className = classNameFromPath(config.sutClassFile());
+        String className = JavaSourceNames.qualifiedName(config.sutClassFile());
         if (className.isBlank()) {
             return methodReference;
         }
         return className + "." + methodReference;
-    }
-
-    private static String classNameFromPath(java.nio.file.Path path) {
-        if (path == null) {
-            return "";
-        }
-        String fileName = path.getFileName().toString();
-        if (fileName.endsWith(".java")) {
-            return fileName.substring(0, fileName.length() - ".java".length());
-        }
-        return fileName;
     }
 
 }

@@ -2,13 +2,12 @@ package mtllm.generation;
 
 import mtllm.config.PromptConfig;
 import mtllm.runner.DataGeneratorRunner;
+import mtllm.sut.JavaSourceNames;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Writes JUnit tests that reuse the generated Java data class as their source of inputs.
@@ -17,9 +16,6 @@ import java.util.regex.Pattern;
  * {@code generateSources()} method instead of asking the LLM to invent two separate test sets.</p>
  */
 public final class DataBackedJUnitWriter {
-    private static final Pattern PACKAGE_DECLARATION =
-            Pattern.compile("(?m)^\\s*package\\s+([\\w.]+)\\s*;");
-
     private DataBackedJUnitWriter() {
     }
 
@@ -114,22 +110,11 @@ public final class DataBackedJUnitWriter {
             return methodReference;
         }
 
-        String className = classNameOf(config.sutClassFile());
+        String className = JavaSourceNames.qualifiedName(config.sutClassFile());
         if (className.isBlank()) {
             return methodReference;
         }
         return className + "." + methodReference;
     }
 
-    private static String classNameOf(Path path) throws IOException {
-        if (path == null) {
-            return "";
-        }
-        String fileName = path.getFileName().toString();
-        String simpleName = fileName.endsWith(".java")
-                ? fileName.substring(0, fileName.length() - ".java".length())
-                : fileName;
-        Matcher packageMatcher = PACKAGE_DECLARATION.matcher(Files.readString(path, StandardCharsets.UTF_8));
-        return packageMatcher.find() ? packageMatcher.group(1) + "." + simpleName : simpleName;
-    }
 }

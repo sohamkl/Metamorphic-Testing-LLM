@@ -5,9 +5,10 @@ import mtllm.config.PromptConfigLoader;
 import mtllm.llm.LlmClient;
 import mtllm.llm.OpenAiClient;
 import mtllm.sut.ConstructionGraphDiscoverer;
-import mtllm.sut.ReflectiveObjectFactory;
+import mtllm.sut.JavaSourceNames;
 import mtllm.sut.TargetMethodResolver;
 import mtllm.util.DotEnv;
+import mtllm.util.GeneratedNames;
 
 import randoop.sequence.Variable;
 
@@ -24,8 +25,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * RANDOOP input-generation mode: harvests source inputs with Randoop instead of the LLM, then
@@ -54,8 +53,6 @@ public final class RandoopDataGenerator {
     // of sequences; additional seeds can enter long-running third-party operations and discard the
     // useful inputs harvested by earlier seeds when the subprocess timeout is reached.
     private static final long[] RANDOM_SEEDS = {0L};
-    private static final Pattern PACKAGE_DECLARATION =
-            Pattern.compile("(?m)^\\s*package\\s+([A-Za-z_$][\\w$]*(?:\\.[A-Za-z_$][\\w$]*)*)\\s*;");
 
     public RandoopDataGenerator(int timeLimitMillis, String invocationClassName) {
         this.timeLimitMillis = timeLimitMillis;
@@ -203,7 +200,7 @@ public final class RandoopDataGenerator {
 
         String json = emitJson(kept);
 
-        String base = baseName(config.generatedClassName());
+        String base = GeneratedNames.baseName(config.generatedClassName());
         String sutCallee = sutCallee(bundle);
         String specClassName = sourceClassName(bundle.specClass);
         String followUpCallee = sourceClassName(bundle.followUpMethod.getDeclaringClass())
@@ -235,7 +232,7 @@ public final class RandoopDataGenerator {
     private MethodBundle resolveMethods(PromptConfig config) throws Exception {
         SutInvocation invocation = resolveSutInvocation(config);
         Class<?> sutClass = invocation.sutClass;
-        Class<?> specClass = Class.forName(classNameOf(config.developerMrFile()));
+        Class<?> specClass = Class.forName(JavaSourceNames.qualifiedName(config.developerMrFile()));
 
         Method sutMethod = invocation.method;
         Class<?> inputType = invocation.inputType;
@@ -283,9 +280,9 @@ public final class RandoopDataGenerator {
         if (!config.randoopTargetClasses().isEmpty()) {
             classNames.addAll(config.randoopTargetClasses());
         } else {
-            classNames.add(classNameOf(config.sutClassFile()));
+            classNames.add(JavaSourceNames.qualifiedName(config.sutClassFile()));
             for (Path support : config.sutSupportFiles()) {
-                classNames.add(classNameOf(support));
+                classNames.add(JavaSourceNames.qualifiedName(support));
             }
         }
         System.err.println("[discovery] Randoop construction graph: " + classNames.size() + " classes");
@@ -358,7 +355,10 @@ public final class RandoopDataGenerator {
             if (emitted > 0) {
                 json.append(',');
             }
-            String constructionCode = constructionCode(candidate);
+            Construction construction = construction(candidate);
+            String constructionCode = construction == null
+                    ? ""
+                    : construction.code() + "// source input variable: " + construction.variableName();
             json.append("{\"value\":")
                     .append(JsonSerializer.toJson(candidate.value()))
                     .append(",\"constructionCode\":")
@@ -369,10 +369,10 @@ public final class RandoopDataGenerator {
         return json.append(']').toString();
     }
 
-    private String constructionCode(RandoopHarvester.Harvested<Object> harvested) {
+    private Construction construction(RandoopHarvester.Harvested<Object> harvested) {
         Variable variable = harvested.variable();
         if (variable == null) {
-            return "";
+            return null;
         }
         Set<Integer> requiredStatements = new TreeSet<>();
         collectRequiredStatements(harvested.sequence().sequence, variable.getDeclIndex(), requiredStatements);
@@ -380,8 +380,7 @@ public final class RandoopDataGenerator {
         for (int statementIndex : requiredStatements) {
             code.append(harvested.sequence().statementToCodeString(statementIndex)).append('\n');
         }
-        code.append("// source input variable: ").append(variable.getName());
-        return code.toString();
+        return new Construction(code.toString(), variable.getName());
     }
 
     private void collectRequiredStatements(
@@ -442,48 +441,27 @@ public final class RandoopDataGenerator {
         return json.toString();
     }
 
-    /**
-     * Render the truncated Randoop construction code for a harvested shape: statements
-     * {@code 0..declIndex} of the variable that holds the object, which drops the trailing
-     * exploration statements Randoop appended after building it. Returns null when no variable was
-     * captured (cannot render the shape as a test).
-     */
+    /** Render only the statements required to construct the harvested target variable. */
     private RandoopJUnitEmitter.Case toCase(RandoopHarvester.Harvested<Object> h) {
-        Variable v = h.variable();
-        if (v == null) {
+        Construction construction = construction(h);
+        if (construction == null) {
             return null;
         }
-        int declIndex = v.getDeclIndex();
-        StringBuilder code = new StringBuilder();
-        for (int i = 0; i <= declIndex; i++) {
-            code.append(h.sequence().statementToCodeString(i)).append('\n');
-        }
-        return new RandoopJUnitEmitter.Case(code.toString(), v.getName());
+        return new RandoopJUnitEmitter.Case(construction.code(), construction.variableName());
     }
 
-    /** Static SUT -> {@code Class.method}; instance SUT -> {@code new Class().method}. */
+    /** Randoop invokes either a static unary SUT directly or a generated static wrapper. */
     private static String sutCallee(MethodBundle b) {
-        String method = b.sutMethod.getName();
-        String className = sourceClassName(b.sutClass);
-        if (Modifier.isStatic(b.sutMethod.getModifiers())) {
-            return className + "." + method;
+        if (!Modifier.isStatic(b.sutMethod.getModifiers())) {
+            throw new IllegalStateException("Randoop instance invocation requires a generated wrapper: "
+                    + b.sutMethod);
         }
-        return "new " + className + "()." + method;
+        return sourceClassName(b.sutClass) + "." + b.sutMethod.getName();
     }
 
     private static String sourceClassName(Class<?> type) {
         String canonicalName = type.getCanonicalName();
         return canonicalName != null ? canonicalName : type.getName().replace('$', '.');
-    }
-
-    private static String baseName(String generatedClassName) {
-        if (generatedClassName.endsWith("Data")) {
-            return generatedClassName.substring(0, generatedClassName.length() - "Data".length());
-        }
-        if (generatedClassName.endsWith("Test")) {
-            return generatedClassName.substring(0, generatedClassName.length() - "Test".length());
-        }
-        return generatedClassName;
     }
 
     private List<String> readSutSources(Path repoRoot, PromptConfig config) throws Exception {
@@ -533,12 +511,13 @@ public final class RandoopDataGenerator {
                     usabilityMethod);
         }
 
-        Class<?> sutClass = Class.forName(classNameOf(config.sutClassFile()));
+        Class<?> sutClass = Class.forName(JavaSourceNames.qualifiedName(config.sutClassFile()));
         Method sutMethod = requireSingleArgument(TargetMethodResolver.resolve(sutClass, config.targetFunction()));
-        Object receiver = Modifier.isStatic(sutMethod.getModifiers())
-                ? null
-                : ReflectiveObjectFactory.create(sutClass);
-        return new SutInvocation(sutClass, sutMethod, receiver, sutMethod.getParameterTypes()[0], false, null);
+        if (!Modifier.isStatic(sutMethod.getModifiers())) {
+            throw new IllegalStateException("Randoop instance invocation requires --invocation-class: "
+                    + sutMethod.toGenericString());
+        }
+        return new SutInvocation(sutClass, sutMethod, null, sutMethod.getParameterTypes()[0], false, null);
     }
 
     private static Method requireSingleArgument(Method method) {
@@ -585,14 +564,6 @@ public final class RandoopDataGenerator {
         if (t == boolean.class) return Boolean.class;
         if (t == Boolean.class) return boolean.class;
         return null;
-    }
-
-    /** Resolve a source file to its runtime name, including a declared Java package when present. */
-    private static String classNameOf(Path file) throws java.io.IOException {
-        String name = file.getFileName().toString();
-        String simpleName = name.endsWith(".java") ? name.substring(0, name.length() - ".java".length()) : name;
-        Matcher packageMatcher = PACKAGE_DECLARATION.matcher(Files.readString(file, StandardCharsets.UTF_8));
-        return packageMatcher.find() ? packageMatcher.group(1) + "." + simpleName : simpleName;
     }
 
     /** "OrderMetamorphicSpec.generateFollowUp" / "X.INSTANCE.foo" -> simple method name. */
@@ -674,5 +645,8 @@ public final class RandoopDataGenerator {
             this.followUpOutput = followUpOutput;
             this.passed = passed;
         }
+    }
+
+    private record Construction(String code, String variableName) {
     }
 }

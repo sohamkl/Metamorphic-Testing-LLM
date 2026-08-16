@@ -9,6 +9,7 @@ import mtllm.llm.LlmClient;
 import mtllm.prompt.PromptBuilder;
 import mtllm.report.HtmlReportWriter;
 import mtllm.sut.SutContext;
+import mtllm.util.GeneratedNames;
 
 import java.nio.file.Path;
 import java.nio.file.Files;
@@ -47,7 +48,7 @@ public final class RepairLoop {
     }
 
     private TestRunResult generateBothOutputs(PromptConfig config, SutContext sutContext) throws Exception {
-        String baseName = baseName(config.generatedClassName());
+        String baseName = GeneratedNames.baseName(config.generatedClassName());
         PromptConfig dataConfig = config.withOutputMode(
                 config.mode() == GenerationMode.DEVELOPER_MR_BOTH
                         ? GenerationMode.DEVELOPER_MR_DATA
@@ -132,16 +133,6 @@ public final class RepairLoop {
             result = runGeneratedFile(generatedFile, config, sutContext);
         }
         return result;
-    }
-
-    private String baseName(String generatedClassName) {
-        if (generatedClassName.endsWith("Data")) {
-            return generatedClassName.substring(0, generatedClassName.length() - "Data".length());
-        }
-        if (generatedClassName.endsWith("Test")) {
-            return generatedClassName.substring(0, generatedClassName.length() - "Test".length());
-        }
-        return generatedClassName;
     }
 
     private Path writeGeneratedFile(PromptConfig config, String code) throws Exception {

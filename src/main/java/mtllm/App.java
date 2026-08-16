@@ -16,6 +16,7 @@ import mtllm.sut.SutContext;
 import mtllm.sut.SutContextLoader;
 import mtllm.sut.ProjectDiscovery;
 import mtllm.util.DotEnv;
+import mtllm.util.GeneratedNames;
 
 import java.nio.file.Path;
 import java.util.Map;
@@ -162,7 +163,7 @@ public final class App {
 
         // Derive the executed-data sub-config so writeSplitAndReport runs the passing/failing split
         // + report (the combined BOTH mode does not, by itself, generate executed MT data).
-        String baseName = stripGeneratedSuffix(config.generatedClassName());
+        String baseName = GeneratedNames.baseName(config.generatedClassName());
         PromptConfig dataConfig = config.withOutputMode(
                 GenerationMode.DEVELOPER_MR_DATA, true, false, baseName + "Data");
 
@@ -189,13 +190,4 @@ public final class App {
         return result;
     }
 
-    private static String stripGeneratedSuffix(String name) {
-        if (name.endsWith("Data")) {
-            return name.substring(0, name.length() - "Data".length());
-        }
-        if (name.endsWith("Test")) {
-            return name.substring(0, name.length() - "Test".length());
-        }
-        return name;
-    }
 }
