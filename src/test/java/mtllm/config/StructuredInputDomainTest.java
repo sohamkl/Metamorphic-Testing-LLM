@@ -1,6 +1,7 @@
 package mtllm.config;
 
 import mtllm.prompt.PromptBuilder;
+import mtllm.runner.TestRunResult;
 import mtllm.sut.SutContext;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -8,6 +9,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -58,6 +60,8 @@ class StructuredInputDomainTest {
         assertTrue(prompt.contains("Target cases: 2"));
         assertTrue(prompt.contains("Empty source output allowed: no"));
         assertTrue(prompt.contains("Include the scenario ID in every generated test method name"));
+        assertTrue(prompt.contains("Backend-allocated source scenario plan:"));
+        assertTrue(prompt.contains("slot 1: scenario=ABOVE_THRESHOLD, variation=1, sizes=small"));
     }
 
     @Test
@@ -133,6 +137,43 @@ class StructuredInputDomainTest {
                 """));
 
         assertTrue(error.getMessage().contains("unknown field: scenarious"));
+    }
+
+    @Test
+    void missingScenarioRepairPromptRequestsOnlyAdditiveTests() throws Exception {
+        PromptConfig config = loadPrompt("""
+                SUTClassFile: ExampleSut.java
+                TargetFunction: public static int ExampleSut.run(int source)
+                Count: 3
+                InputDomain:
+                  scenarios:
+                    - id: ABOVE_THRESHOLD
+                      description: Cross the threshold.
+                      targetCases: 2
+                """);
+        SutContext context = new SutContext(
+                config.sutClassFile(), Files.readString(config.sutClassFile()), List.of());
+
+        String prompt = PromptBuilder.buildMissingScenarioRepairPrompt(
+                config,
+                context,
+                "public class GeneratedMetamorphicTest {}",
+                Map.of("ABOVE_THRESHOLD", 1));
+
+        assertTrue(prompt.contains("ABOVE_THRESHOLD: 1 additional @Test method"));
+        assertTrue(prompt.contains("Do not rewrite, remove, rename, or repeat"));
+        assertTrue(prompt.contains("containing only:"));
+        assertTrue(prompt.contains("the requested new @Test methods"));
+
+        String retryPrompt = PromptBuilder.buildMissingScenarioRepairPrompt(
+                config,
+                context,
+                "public class GeneratedMetamorphicTest {}",
+                Map.of("ABOVE_THRESHOLD", 1),
+                "public class GeneratedMetamorphicTest { void broken() {} }",
+                TestRunResult.failed("cannot find symbol"));
+        assertTrue(retryPrompt.contains("Previous additive class that must be replaced"));
+        assertTrue(retryPrompt.contains("cannot find symbol"));
     }
 
     private PromptConfig loadPrompt(String yaml) throws Exception {

@@ -304,6 +304,37 @@ public final class PromptConfig {
                 randoopSeedExamples);
     }
 
+    public PromptConfig withInputDomainRequirements(InputDomainRequirements newRequirements) {
+        return new PromptConfig(
+                projectRoot,
+                automaticDiscovery,
+                sutClassFile,
+                targetFunction,
+                sutSupportFiles,
+                sutClasspath,
+                sutDescription,
+                mrInput,
+                mrOutput,
+                mr,
+                count,
+                newRequirements,
+                generatedClassName,
+                mode,
+                jsonRequired,
+                testSuiteRequired,
+                mrProvider,
+                developerMrFile,
+                developerMrSource,
+                developerFollowUpMethod,
+                developerAssertMethod,
+                outputRoot,
+                maxRepairAttempts,
+                inputGenerator,
+                mavenProfiles,
+                randoopTargetClasses,
+                randoopSeedExamples);
+    }
+
     private static String valueOrEmpty(String value) {
         return value == null ? "" : value;
     }

@@ -65,6 +65,7 @@ JUNIT_PLATFORM_CONSOLE_STANDALONE_JAR=/absolute/path/to/junit-platform-console-s
 | `prompt.yaml` | Active generation config |
 | `prompt.class-level.example.yaml` | Template config |
 | `docs/CONFIGURATION.md` | Explanation of output/MR-provider configuration combinations |
+| `docs/AUTOMATIC_INPUT_PIPELINE.md` | Automatic domain inference, scenario planning, quality gates, and current boundary |
 | `docs/PITEST.md` | PIT mutation testing profile, command, target scope, and report paths |
 
 ## Prompt Config
@@ -104,7 +105,12 @@ MR: Cleaning an already-cleaned document must not change the cleaned result.
 Count: 20
 ```
 
-`InputDomain`, `SUTSupportFiles`, and `SUTClasspath` are optional in this form. The framework inspects
+`InputDomain`, `SUTSupportFiles`, and `SUTClasspath` are optional in this form. When `InputDomain` is
+omitted in an LLM-backed mode, the framework first asks the LLM to infer a structured domain grounded
+in the resolved target method, SUT source, MR, and discovered construction API. The inferred domain is
+validated and written to `<OutputRoot>/input-domain/inferred-input-domain.yaml` before source-input
+generation begins. An explicitly supplied scalar or structured `InputDomain` always takes precedence.
+The framework inspects
 the resolved method's generic parameter and return types and sends discovered public constructors and
 static factory methods to the LLM. It also builds a bounded construction graph: ClassGraph discovers
 concrete implementations of interface and abstract parameters, reflection follows public constructors,
@@ -115,18 +121,25 @@ one-input invocation wrapper for Randoop and stores its source under `generated-
 `junit-support`. Instance wrappers include the receiver before the method arguments, allowing Randoop
 to construct and vary the complete invocation scenario.
 
-Automatic discovery follows this workflow:
+Automatic discovery and LLM-backed generation follow this workflow:
 
 1. Resolve the project, SUT source, exact target method, compiled outputs, and Maven dependencies.
 2. Inspect the target signature and generate an invocation wrapper for instance methods or when the
    method's arity is not one.
 3. Discover the bounded construction graph from reflection, ClassGraph implementations, and
    JavaParser factory/builder evidence.
-4. Give the resulting construction classes to Randoop and retain only distinct inputs accepted by
-   the target method.
-5. In `HYBRID` or `NEW_HYBRID` only, if Randoop finds no executable seed, try deterministic Instancio
+4. If `InputDomain` is absent, infer and validate structured constraints, diversity dimensions, and
+   measurable scenarios. Allocate deterministic source-case slots without exceeding `Count`.
+5. Give the resulting construction classes to Randoop where the selected input mode uses it, and
+   retain only distinct inputs accepted by the target method.
+6. In `HYBRID` or `NEW_HYBRID` only, if Randoop finds no executable seed, try deterministic Instancio
    seeds and validate each one by executing the SUT. Pure `RANDOOP` deliberately has no fallback.
-6. Apply or generate the MR, execute source and follow-up cases, split actual passing/failing tests,
+7. Generate candidate tests from the validated domain and scenario plan. Reject duplicate test bodies,
+   missing scenario IDs, missing assertion paths, malformed Java, and suites above `Count`; repair LLM
+   output when the configured attempt budget permits.
+8. When missing scenarios are the only defect, request and merge only those additional tests while
+   retaining the original candidate methods. Other defects continue through whole-class repair.
+9. Apply or generate the MR, execute source and follow-up cases, split actual passing/failing tests,
    compile-gate generated JUnit, and write JSON/HTML artifacts requested by the prompt.
 
 For `MRProvider: DEV` with a wrapped target, the developer follow-up method accepts the original typed
@@ -207,10 +220,10 @@ InputGenerator: LLM
 
 | Value | Source inputs come from | API calls |
 |---|---|---|
-| `LLM` (default) | the LLM (existing behavior) | yes |
+| `LLM` (default) | the LLM (existing behavior) | generation, repair, and one domain-inference call when `InputDomain` is absent |
 | `RANDOOP` | Randoop, building objects by calling the SUT's own constructors/methods | none (fully offline) |
-| `HYBRID` | the LLM suggests seed values, then Randoop builds objects from them at scale | one small seeding call |
-| `NEW_HYBRID` | Randoop first discovers API-valid source examples; the LLM then generalizes them into the final constrained input set | final generation call plus any repair calls |
+| `HYBRID` | the LLM suggests seed values, then Randoop builds objects from them at scale | one seeding call, plus one domain-inference call when `InputDomain` is absent |
+| `NEW_HYBRID` | Randoop first discovers API-valid source examples; the LLM then generalizes them into the final constrained input set | final generation and repair calls, plus one domain-inference call when `InputDomain` is absent |
 
 Key points:
 

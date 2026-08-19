@@ -5,7 +5,6 @@ import mtllm.sut.CompiledClassPath;
 import mtllm.sut.SutContext;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -25,6 +24,8 @@ public final class GeneratedTestRunner {
     private final String junitConsoleJar;
     private final String mavenCommand;
     private ActualResultTestSplitter.SplitResult lastSplitResult;
+    private GeneratedTestQualityGate.ValidationResult lastQualityResult =
+            GeneratedTestQualityGate.ValidationResult.valid();
 
     public GeneratedTestRunner(Path repoRoot, Path classesDir, Path supportSourceDir, String junitConsoleJar, String mavenCommand) {
         this.repoRoot = repoRoot;
@@ -36,9 +37,9 @@ public final class GeneratedTestRunner {
 
     public TestRunResult compileAndRun(Path generatedTestFile, PromptConfig config, SutContext sutContext) throws Exception {
         lastSplitResult = null;
-        String countValidationError = validateGeneratedTestCount(generatedTestFile, config);
-        if (countValidationError != null) {
-            return TestRunResult.failed("Generated JUnit validation failed:\n" + countValidationError);
+        lastQualityResult = GeneratedTestQualityGate.validateDetailed(generatedTestFile, config);
+        if (!lastQualityResult.passed()) {
+            return TestRunResult.failed("Generated JUnit validation failed:\n" + lastQualityResult.error());
         }
         if (junitConsoleJar.isBlank()) {
             return runWithMavenIfAvailable(generatedTestFile, config, sutContext);
@@ -51,20 +52,6 @@ public final class GeneratedTestRunner {
         }
         RuntimeResourceCopier.copyFor(config, classesDir);
         return run(config.generatedClassName());
-    }
-
-    private String validateGeneratedTestCount(Path generatedTestFile, PromptConfig config) throws IOException {
-        int testCount = 0;
-        for (String line : Files.readAllLines(generatedTestFile, StandardCharsets.UTF_8)) {
-            String trimmed = line.trim();
-            if ("@Test".equals(trimmed) || trimmed.startsWith("@Test(")) {
-                testCount++;
-            }
-        }
-        if (testCount > config.count()) {
-            return "Expected at most " + config.count() + " JUnit test methods, found " + testCount + ".";
-        }
-        return null;
     }
 
     private TestRunResult runWithMavenIfAvailable(Path generatedTestFile, PromptConfig config, SutContext sutContext) throws Exception {
@@ -186,6 +173,10 @@ public final class GeneratedTestRunner {
 
     public ActualResultTestSplitter.SplitResult lastSplitResult() {
         return lastSplitResult;
+    }
+
+    GeneratedTestQualityGate.ValidationResult lastQualityResult() {
+        return lastQualityResult;
     }
 
     private TestRunResult compile(Path generatedTestFile, PromptConfig config, SutContext sutContext) throws Exception {

@@ -9,7 +9,7 @@ import java.util.Map;
 import java.util.Set;
 
 /** Parses and validates scalar or structured InputDomain YAML values. */
-final class InputDomainRequirementsParser {
+public final class InputDomainRequirementsParser {
     private static final Set<String> DOMAIN_FIELDS = Set.of(
             "summary", "globalConstraints", "diversity", "scenarios");
     private static final Set<String> SCENARIO_FIELDS = Set.of(
@@ -19,7 +19,7 @@ final class InputDomainRequirementsParser {
     private InputDomainRequirementsParser() {
     }
 
-    static InputDomainRequirements parse(Object raw, String legacyFallback, int count) {
+    public static InputDomainRequirements parse(Object raw, String legacyFallback, int count) {
         if (raw == null) {
             return legacyFallback == null || legacyFallback.isBlank()
                     ? InputDomainRequirements.empty()

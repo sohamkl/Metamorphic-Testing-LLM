@@ -13,6 +13,8 @@ import mtllm.util.GeneratedNames;
 
 import java.nio.file.Path;
 import java.nio.file.Files;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * Coordinates generation, validation, and optional repair of the generated test.
@@ -125,12 +127,51 @@ public final class RepairLoop {
 
         TestRunResult result = runGeneratedFile(generatedFile, config, sutContext);
         int attempts = 0;
+        String additiveBaseCode = null;
+        String previousAddition = "";
+        Map<String, Integer> additiveMissing = null;
         while (result.failed() && attempts < config.maxRepairAttempts()) {
             attempts++;
-            System.out.println("Generated code failed. Requesting repair attempt " + attempts + "...");
-            code = llmClient.complete(PromptBuilder.buildRepairPrompt(config, sutContext, code, result));
+            GeneratedTestQualityGate.ValidationResult quality = testRunner.lastQualityResult();
+            if (config.mode().generatesJUnit()
+                    && (additiveBaseCode != null || quality.onlyMissingScenarios())) {
+                if (additiveBaseCode == null) {
+                    additiveBaseCode = code;
+                    additiveMissing = new LinkedHashMap<>();
+                    for (GeneratedTestQualityGate.MissingScenario scenario : quality.missingScenarios()) {
+                        additiveMissing.put(scenario.id(), scenario.needed());
+                    }
+                }
+                System.out.println("Generated suite is missing scenario coverage. Requesting additive repair attempt "
+                        + attempts + "...");
+                String addition = llmClient.complete(PromptBuilder.buildMissingScenarioRepairPrompt(
+                        config,
+                        sutContext,
+                        additiveBaseCode,
+                        additiveMissing,
+                        previousAddition,
+                        result));
+                try {
+                    code = GeneratedJUnitScenarioMerger.merge(
+                            additiveBaseCode, addition, config.generatedClassName(), additiveMissing);
+                    previousAddition = addition;
+                } catch (RuntimeException mergeFailure) {
+                    previousAddition = addition;
+                    result = TestRunResult.failed(
+                            "Missing-scenario addition could not be merged: " + mergeFailure.getMessage());
+                    continue;
+                }
+            } else {
+                System.out.println("Generated code failed. Requesting repair attempt " + attempts + "...");
+                code = llmClient.complete(PromptBuilder.buildRepairPrompt(config, sutContext, code, result));
+            }
             generatedFile = writeGeneratedFile(config, code);
             result = runGeneratedFile(generatedFile, config, sutContext);
+        }
+        if (result.failed() && additiveBaseCode != null) {
+            writeGeneratedFile(config, additiveBaseCode);
+            return TestRunResult.failed(result.output()
+                    + "\n\nAdditive repair attempts were exhausted; the original generated suite was retained unchanged.");
         }
         return result;
     }

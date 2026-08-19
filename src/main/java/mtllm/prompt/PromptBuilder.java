@@ -1,9 +1,12 @@
 package mtllm.prompt;
 
 import mtllm.config.PromptConfig;
+import mtllm.domain.SourceScenarioPlanner;
 import mtllm.sut.JavaSourceNames;
 import mtllm.runner.TestRunResult;
 import mtllm.sut.SutContext;
+
+import java.util.Map;
 
 /**
  * Builds the text prompts sent to the LLM.
@@ -55,6 +58,55 @@ public final class PromptBuilder {
             prompt.append("- Fix compilation errors, invalid types, runtime errors, and JSON validation issues.\n");
         }
         prompt.append("- Output only Java code. No markdown fences and no explanation.\n");
+        return prompt.toString();
+    }
+
+    public static String buildMissingScenarioRepairPrompt(
+            PromptConfig config,
+            SutContext sutContext,
+            String existingCode,
+            Map<String, Integer> missingScenarios) {
+        return buildMissingScenarioRepairPrompt(
+                config, sutContext, existingCode, missingScenarios, "", null);
+    }
+
+    public static String buildMissingScenarioRepairPrompt(
+            PromptConfig config,
+            SutContext sutContext,
+            String existingCode,
+            Map<String, Integer> missingScenarios,
+            String previousAddition,
+            TestRunResult previousFailure) {
+        StringBuilder prompt = new StringBuilder();
+        appendSutSection(prompt, config, sutContext);
+        prompt.append("The following generated JUnit class already contains valid candidate tests.\n")
+                .append("Do not rewrite, remove, rename, or repeat any existing test or helper.\n")
+                .append("```java\n").append(existingCode).append("\n```\n\n")
+                .append("Metamorphic relation:\n")
+                .append(config.metamorphicRelationStatement()).append("\n\n");
+        if (!config.inputDomain().isBlank()) {
+            prompt.append("Structured input domain and scenario requirements:\n")
+                    .append(config.inputDomain()).append("\n\n");
+        }
+        prompt.append("Add only these missing source scenarios:\n");
+        missingScenarios.forEach((id, needed) -> prompt.append("- ")
+                .append(id).append(": ").append(needed).append(" additional @Test method(s)\n"));
+        if (!previousAddition.isBlank()) {
+            prompt.append("\nPrevious additive class that must be replaced:\n")
+                    .append("```java\n").append(previousAddition).append("\n```\n");
+        }
+        if (previousFailure != null && !previousFailure.output().isBlank()) {
+            prompt.append("\nValidation, compilation, or execution failure to correct:\n")
+                    .append("```text\n").append(previousFailure.output()).append("\n```\n");
+        }
+        prompt.append("\nReturn a Java class named ").append(config.generatedClassName()).append(" containing only:\n")
+                .append("- the requested new @Test methods, with the exact scenario ID in each method name\n")
+                .append("- imports and genuinely new helper members required by those methods\n")
+                .append("The addition class may call helpers shown in the existing class without repeating them.\n")
+                .append("Every added test must construct a distinct valid source input and reach the same MR assertion path.\n")
+                .append("Do not include unrelated scenarios or copies of existing methods.\n")
+                .append("The backend will merge this addition into the existing class and revalidate the combined suite.\n")
+                .append("Output only Java code. No markdown fences and no explanation.\n");
         return prompt.toString();
     }
 
@@ -155,6 +207,13 @@ public final class PromptBuilder {
         prompt.append(config.inputGenerator().seedsWithLlm()
                 ? "- For fixed HYBRID sources, use scenarios to validate and name the harvested cases; do not invent replacements.\n\n"
                 : "- Scenario descriptions guide source-input construction and expected source behavior.\n\n");
+        var sourcePlan = SourceScenarioPlanner.plan(config.inputDomainRequirements(), config.count());
+        if (!sourcePlan.isEmpty()) {
+            prompt.append("Backend-allocated source scenario plan:\n");
+            sourcePlan.forEach(slot -> prompt.append("- ").append(slot).append("\n"));
+            prompt.append("Generate one distinct source case for each listed slot. Treat dimension values as coverage goals, ")
+                    .append("while satisfying the scenario preconditions and discovered Java API.\n\n");
+        }
     }
 
     private static void appendHybridSourceExamples(StringBuilder prompt, PromptConfig config) {

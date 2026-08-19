@@ -5,6 +5,7 @@ import mtllm.config.InputGenerator;
 import mtllm.config.MRProvider;
 import mtllm.config.PromptConfig;
 import mtllm.config.PromptConfigLoader;
+import mtllm.domain.InputDomainInferenceService;
 import mtllm.llm.LlmClient;
 import mtllm.llm.OpenAiClient;
 import mtllm.randoop.RandoopInputRunner;
@@ -66,6 +67,14 @@ public final class App {
 
             config = ProjectDiscovery.enrichClasspath(config, mavenCommand);
             SutContext sutContext = SutContextLoader.load(config, repoRoot);
+            LlmClient llmClient = needsApiKey ? new OpenAiClient(apiKey, model, baseUrl) : null;
+            if (needsApiKey && config.inputDomainRequirements().isEmpty()) {
+                System.out.println("No InputDomain supplied; inferring a grounded structured domain...");
+                InputDomainInferenceService.InferenceResult inference =
+                        new InputDomainInferenceService(llmClient).infer(config, sutContext);
+                config = config.withInputDomainRequirements(inference.requirements());
+                System.out.println("Wrote inferred input domain to " + inference.artifact());
+            }
             Path outputRoot = config.outputRoot();
             GeneratedTestRunner testRunner = new GeneratedTestRunner(
                     repoRoot,
@@ -97,7 +106,6 @@ public final class App {
 
                 PromptConfig harvestedConfig = config.withRandoopSeedExamples(sourceExamples);
                 SutContext harvestedContext = SutContextLoader.load(harvestedConfig, repoRoot);
-                LlmClient llmClient = new OpenAiClient(apiKey, model, baseUrl);
                 RepairLoop repairLoop = new RepairLoop(
                         llmClient,
                         testRunner,
@@ -117,7 +125,6 @@ public final class App {
 
                 PromptConfig groundedConfig = config.withRandoopSeedExamples(seedExamples);
                 SutContext groundedContext = SutContextLoader.load(groundedConfig, repoRoot);
-                LlmClient llmClient = new OpenAiClient(apiKey, model, baseUrl);
                 RepairLoop repairLoop = new RepairLoop(
                         llmClient,
                         testRunner,
@@ -128,7 +135,6 @@ public final class App {
             } else if (config.inputGenerator().usesRandoop()) {
                 result = runRandoop(config, sutContext, repoRoot, promptPath, dataGeneratorRunner);
             } else {
-                LlmClient llmClient = new OpenAiClient(apiKey, model, baseUrl);
                 RepairLoop repairLoop = new RepairLoop(
                         llmClient,
                         testRunner,
