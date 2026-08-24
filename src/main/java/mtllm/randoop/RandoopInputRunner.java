@@ -1,6 +1,7 @@
 package mtllm.randoop;
 
 import mtllm.config.PromptConfig;
+import mtllm.domain.InputDomainInferenceService;
 import mtllm.runner.ProcessRunner;
 import mtllm.runner.RuntimeResourceCopier;
 import mtllm.sut.CompiledClassPath;
@@ -241,6 +242,12 @@ public final class RandoopInputRunner {
         List<String> java = new ArrayList<>(List.of(
                 "java", "-cp", classpath, "mtllm.randoop.RandoopDataGenerator",
                 promptPath.toString(), outJson.toString()));
+        Path inferredDomain = config.outputRoot().resolve("input-domain/inferred-input-domain.yaml");
+        if (Files.isRegularFile(inferredDomain)
+                && InputDomainInferenceService.readArtifact(inferredDomain, config.count())
+                        .equals(config.inputDomainRequirements())) {
+            java.add("--input-domain-file=" + inferredDomain);
+        }
         if (compilation.wrapper != null) {
             java.add("--invocation-class=" + compilation.wrapper.className());
         }

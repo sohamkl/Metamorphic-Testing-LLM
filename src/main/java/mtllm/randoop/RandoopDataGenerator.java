@@ -2,6 +2,7 @@ package mtllm.randoop;
 
 import mtllm.config.PromptConfig;
 import mtllm.config.PromptConfigLoader;
+import mtllm.domain.InputDomainInferenceService;
 import mtllm.llm.LlmClient;
 import mtllm.llm.OpenAiClient;
 import mtllm.sut.ConstructionGraphDiscoverer;
@@ -76,6 +77,11 @@ public final class RandoopDataGenerator {
         Path outJson = Path.of(args[1]).toAbsolutePath().normalize();
 
         PromptConfig config = PromptConfigLoader.load(promptPath, repoRoot);
+        String inputDomainFile = optionValue(args, "--input-domain-file=");
+        if (inputDomainFile != null && !inputDomainFile.isBlank()) {
+            config = config.withInputDomainRequirements(InputDomainInferenceService.readArtifact(
+                    Path.of(inputDomainFile), config.count()));
+        }
         String invocationClassName = optionValue(args, "--invocation-class=");
         RandoopDataGenerator generator = new RandoopDataGenerator(15000, invocationClassName);
         if (hasFlag(args, "--seeds-only")) {
