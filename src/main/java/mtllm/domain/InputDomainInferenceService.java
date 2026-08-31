@@ -46,10 +46,17 @@ public final class InputDomainInferenceService {
 
     static String buildPrompt(PromptConfig config, SutContext context) {
         StringBuilder prompt = new StringBuilder();
-        prompt.append("Infer a concise, measurable source-input domain for metamorphic testing.\n");
+        prompt.append("Infer a thorough, measurable source-input domain for metamorphic testing.\n");
         prompt.append("Ground every constraint and scenario in the supplied Java API, source, and metamorphic relation.\n");
         prompt.append("Do not invent constructors, methods, fields, business rules, or invalid-input behavior.\n");
-        prompt.append("Count is an upper limit; scenario targetCases must total no more than ")
+        prompt.append("Cover the supplied source broadly: prefer scenarios that reach distinct branches, "
+                + "boundary conditions, and sentinel paths in the target class over repeated values through "
+                + "the same path.\n");
+        prompt.append("Do not exclude a reachable class of valid input merely to keep the follow-up simple. "
+                + "If an input class must be excluded, record the reason as a global constraint.\n");
+        prompt.append("Count is a budget of source cases. Use most of it, and spend it on additional distinct "
+                + "scenarios rather than extra variations of an existing scenario; scenario targetCases must "
+                + "total no more than ")
                 .append(config.count()).append(".\n\n");
         if (!config.sutDescription().isBlank()) {
             prompt.append("SUT description:\n").append(config.sutDescription()).append("\n\n");
