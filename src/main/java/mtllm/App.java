@@ -8,6 +8,7 @@ import mtllm.config.PromptConfigLoader;
 import mtllm.domain.InputDomainInferenceService;
 import mtllm.llm.LlmClient;
 import mtllm.llm.OpenAiClient;
+import mtllm.llm.TokenUsage;
 import mtllm.randoop.RandoopInputRunner;
 import mtllm.runner.DataGeneratorRunner;
 import mtllm.runner.GeneratedTestRunner;
@@ -18,8 +19,12 @@ import mtllm.sut.SutContextLoader;
 import mtllm.sut.ProjectDiscovery;
 import mtllm.util.DotEnv;
 import mtllm.util.GeneratedNames;
+import mtllm.util.JsonUtil;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -33,6 +38,7 @@ public final class App {
     }
 
     public static void main(String[] args) {
+        long startNanos = System.nanoTime();
         try {
             Path repoRoot = Path.of("").toAbsolutePath().normalize();
             Path promptPath = args.length > 0
@@ -121,6 +127,15 @@ public final class App {
                         config.outputRoot().resolve("new-hybrid-randoop"));
                 System.out.println("Generating API-grounded seed examples with Randoop (NEW_HYBRID)...");
                 String seedExamples = seedRunner.generateSeedExamples(config, promptPath);
+                if (seedExamples.isBlank() || seedExamples.trim().equals("[]")) {
+                    throw new IllegalStateException(
+                            "NEW_HYBRID harvested no Randoop seed examples, so this run would "
+                            + "silently degrade into a plain LLM run and be recorded as a hybrid. "
+                            + "Check that the target method gets an invocation wrapper "
+                            + "(InvocationWrapperGenerator skips static single-argument methods) and "
+                            + "that Randoop can construct every parameter type (interfaces such as "
+                            + "java.time.temporal.Temporal have no constructor for it to call).");
+                }
                 System.out.println("Randoop seed examples harvested; asking the LLM to generate final source inputs...");
 
                 PromptConfig groundedConfig = config.withRandoopSeedExamples(seedExamples);
@@ -147,10 +162,44 @@ public final class App {
             if (!result.output().isBlank()) {
                 System.out.println(result.output());
             }
+            writeRunMetrics(outputRoot, config, String.valueOf(result.status()),
+                    llmClient == null ? TokenUsage.EMPTY : llmClient.tokenUsage(), startNanos);
         } catch (Exception e) {
             System.err.println("Runner failed: " + e.getMessage());
             e.printStackTrace(System.err);
             System.exit(1);
+        }
+    }
+
+    /**
+     * Records what the run cost, so the input-generation arms can be compared on more than
+     * mutation score. Tokens cover every call including repairs; RANDOOP reports 0 because it
+     * never builds an LLM client. Failing to write metrics must not fail the run.
+     */
+    private static void writeRunMetrics(
+            Path outputRoot, PromptConfig config, String status, TokenUsage usage, long startNanos) {
+        double elapsedSeconds = (System.nanoTime() - startNanos) / 1_000_000_000.0;
+        // Locale.ROOT so a comma-decimal locale cannot emit "32,4" and break the JSON.
+        String elapsed = String.format(Locale.ROOT, "%.1f", elapsedSeconds);
+        System.out.println("Run took " + elapsed + "s and used " + usage.totalTokens()
+                + " tokens (" + usage.promptTokens() + " in, " + usage.completionTokens() + " out).");
+        try {
+            Files.createDirectories(outputRoot);
+            String json = "{\n"
+                    + "  \"dataset\": " + JsonUtil.quote(String.valueOf(outputRoot.getFileName())) + ",\n"
+                    + "  \"inputGenerator\": " + JsonUtil.quote(config.inputGenerator().name()) + ",\n"
+                    + "  \"mrProvider\": " + JsonUtil.quote(config.mrProvider().name()) + ",\n"
+                    + "  \"status\": " + JsonUtil.quote(status) + ",\n"
+                    + "  \"promptTokens\": " + usage.promptTokens() + ",\n"
+                    + "  \"completionTokens\": " + usage.completionTokens() + ",\n"
+                    + "  \"totalTokens\": " + usage.totalTokens() + ",\n"
+                    + "  \"elapsedSeconds\": " + elapsed + "\n"
+                    + "}\n";
+            Path artifact = outputRoot.resolve("metrics.json");
+            Files.writeString(artifact, json, StandardCharsets.UTF_8);
+            System.out.println("Wrote run metrics to " + artifact);
+        } catch (Exception e) {
+            System.err.println("Could not write run metrics: " + e.getMessage());
         }
     }
 
