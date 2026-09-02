@@ -77,8 +77,32 @@ public final class RandoopHarvester<T> {
     private final Set<String> classNames;
     /** Harvest {@code targetClass} instances; de-dup with the reflection auto-signature. */
     public RandoopHarvester(Class<T> targetClass, Set<String> classNames) {
-        this.targetClass = targetClass;
+        this.targetClass = box(targetClass);
         this.classNames = new LinkedHashSet<>(classNames);
+    }
+
+    /**
+     * Randoop hands back runtime values as objects, so a primitive target type can never match:
+     * {@link Class#isInstance} is specified to return false for every primitive Class. A SUT whose
+     * input is a bare {@code double} would therefore harvest nothing at all while still reporting
+     * success. Boxing first makes the filter mean what it reads as. Reference types pass through
+     * untouched, so this only affects the path that was previously guaranteed to return zero.
+     */
+    @SuppressWarnings("unchecked")
+    private static <T> Class<T> box(Class<T> type) {
+        if (type == null || !type.isPrimitive()) {
+            return type;
+        }
+        Class<?> boxed = type == boolean.class ? Boolean.class
+                : type == byte.class ? Byte.class
+                : type == char.class ? Character.class
+                : type == short.class ? Short.class
+                : type == int.class ? Integer.class
+                : type == long.class ? Long.class
+                : type == float.class ? Float.class
+                : type == double.class ? Double.class
+                : type;
+        return (Class<T>) boxed;
     }
 
     /**
