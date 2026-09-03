@@ -13,6 +13,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /** Infers a validated structured input domain when prompt.yaml does not provide one. */
@@ -107,11 +108,67 @@ public final class InputDomainInferenceService {
             throw new IllegalArgumentException("The inferred YAML may contain only the InputDomain field.");
         }
         Object rawDomain = root.containsKey("InputDomain") ? root.get("InputDomain") : root;
+        rawDomain = normalizeInferredScenarioBudget(rawDomain, count);
         InputDomainRequirements requirements = InputDomainRequirementsParser.parse(rawDomain, "", count);
         if (!requirements.isStructured() || requirements.scenarios().isEmpty()) {
             throw new IllegalArgumentException("The inferred domain must contain at least one scenario.");
         }
         return requirements;
+    }
+
+    /**
+     * Keeps model-inferred scenario quotas within Count without weakening validation of prompt.yaml.
+     * Every inferred scenario retains at least one requested case; malformed quotas still reach the
+     * normal parser and trigger a repair attempt.
+     */
+    private static Object normalizeInferredScenarioBudget(Object rawDomain, int count) {
+        if (!(rawDomain instanceof Map<?, ?> domain) || !(domain.get("scenarios") instanceof List<?> scenarios)) {
+            return rawDomain;
+        }
+
+        List<Map<Object, Object>> copies = new java.util.ArrayList<>();
+        int total = 0;
+        for (Object item : scenarios) {
+            if (!(item instanceof Map<?, ?> scenario)) {
+                return rawDomain;
+            }
+            Map<Object, Object> copy = new LinkedHashMap<>();
+            scenario.forEach(copy::put);
+            int targetCases;
+            try {
+                Object rawTarget = copy.get("targetCases");
+                targetCases = rawTarget == null ? 1 : Integer.parseInt(String.valueOf(rawTarget));
+            } catch (NumberFormatException ignored) {
+                return rawDomain;
+            }
+            if (targetCases <= 0) {
+                return rawDomain;
+            }
+            total += targetCases;
+            copies.add(copy);
+        }
+
+        if (total <= count || copies.size() > count) {
+            return rawDomain;
+        }
+        int excess = total - count;
+        while (excess > 0) {
+            Map<Object, Object> largest = copies.stream()
+                    .filter(scenario -> Integer.parseInt(String.valueOf(
+                            scenario.getOrDefault("targetCases", 1))) > 1)
+                    .max(java.util.Comparator.comparingInt(scenario -> Integer.parseInt(
+                            String.valueOf(scenario.getOrDefault("targetCases", 1)))))
+                    .orElseThrow();
+            int current = Integer.parseInt(String.valueOf(largest.getOrDefault("targetCases", 1)));
+            int reduction = Math.min(excess, current - 1);
+            largest.put("targetCases", current - reduction);
+            excess -= reduction;
+        }
+
+        Map<Object, Object> normalized = new LinkedHashMap<>();
+        domain.forEach(normalized::put);
+        normalized.put("scenarios", copies);
+        return normalized;
     }
 
     public static InputDomainRequirements readArtifact(Path artifact, int count) throws Exception {

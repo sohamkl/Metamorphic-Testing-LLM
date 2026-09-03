@@ -73,6 +73,37 @@ class InputDomainInferenceServiceTest {
         assertTrue(prompt.contains("Do not invent constructors"));
     }
 
+    @Test
+    void normalizesInferredScenarioTargetsThatExceedCount() throws Exception {
+        PromptConfig config = configWithoutInputDomain();
+        QueueClient client = new QueueClient("""
+                InputDomain:
+                  summary: Cover both paths.
+                  scenarios:
+                    - id: BELOW_THRESHOLD
+                      category: NORMAL
+                      description: Value below the threshold.
+                      targetCases: 3
+                    - id: ABOVE_THRESHOLD
+                      category: NORMAL
+                      description: Value above the threshold.
+                      targetCases: 3
+                """);
+        SutContext context = new SutContext(
+                config.sutClassFile(), Files.readString(config.sutClassFile()), List.of(), "");
+
+        InputDomainInferenceService.InferenceResult result =
+                new InputDomainInferenceService(client).infer(config, context);
+
+        assertEquals(1, client.calls);
+        assertEquals(2, result.requirements().scenarios().size());
+        assertEquals(4, result.requirements().scenarios().stream()
+                .mapToInt(scenario -> scenario.targetCases())
+                .sum());
+        assertTrue(result.requirements().scenarios().stream()
+                .allMatch(scenario -> scenario.targetCases() >= 1));
+    }
+
     private PromptConfig configWithoutInputDomain() throws Exception {
         Files.writeString(repoRoot.resolve("ExampleSut.java"), """
                 public final class ExampleSut {

@@ -126,15 +126,18 @@ public final class RepairLoop {
         Path generatedFile = writeGeneratedFile(config, code);
 
         TestRunResult result = runGeneratedFile(generatedFile, config, sutContext);
-        int attempts = 0;
+        int repairAttempts = 0;
+        int additiveAttempts = 0;
         String additiveBaseCode = null;
         String previousAddition = "";
         Map<String, Integer> additiveMissing = null;
-        while (result.failed() && attempts < config.maxRepairAttempts()) {
-            attempts++;
+        while (result.failed()) {
             GeneratedTestQualityGate.ValidationResult quality = testRunner.lastQualityResult();
-            if (config.mode().generatesJUnit()
-                    && (additiveBaseCode != null || quality.onlyMissingScenarios())) {
+            if (config.mode().generatesJUnit() && quality.onlyMissingScenarios()) {
+                if (additiveAttempts >= config.maxRepairAttempts()) {
+                    break;
+                }
+                additiveAttempts++;
                 if (additiveBaseCode == null) {
                     additiveBaseCode = code;
                     additiveMissing = new LinkedHashMap<>();
@@ -143,7 +146,7 @@ public final class RepairLoop {
                     }
                 }
                 System.out.println("Generated suite is missing scenario coverage. Requesting additive repair attempt "
-                        + attempts + "...");
+                        + additiveAttempts + "...");
                 String addition = llmClient.complete(PromptBuilder.buildMissingScenarioRepairPrompt(
                         config,
                         sutContext,
@@ -162,7 +165,15 @@ public final class RepairLoop {
                     continue;
                 }
             } else {
-                System.out.println("Generated code failed. Requesting repair attempt " + attempts + "...");
+                if (repairAttempts >= config.maxRepairAttempts()) {
+                    break;
+                }
+                repairAttempts++;
+                // Compilation/runtime repair applies to the current merged suite, not the pre-addition base.
+                additiveBaseCode = null;
+                additiveMissing = null;
+                previousAddition = "";
+                System.out.println("Generated code failed. Requesting repair attempt " + repairAttempts + "...");
                 code = llmClient.complete(PromptBuilder.buildRepairPrompt(config, sutContext, code, result));
             }
             generatedFile = writeGeneratedFile(config, code);
