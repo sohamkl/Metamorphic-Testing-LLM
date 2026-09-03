@@ -240,7 +240,7 @@ public final class RandoopInputRunner {
                 compilation.classesDir.toString(), projectClasses.toString(), randoopJar.toString(),
                 runtimeDependencyClasspath(), sutClasspath(config));
         List<String> java = new ArrayList<>(List.of(
-                "java", "-cp", classpath, "mtllm.randoop.RandoopDataGenerator",
+                "java", "-ea", "-cp", classpath, "mtllm.randoop.RandoopDataGenerator",
                 promptPath.toString(), outJson.toString()));
         Path inferredDomain = config.outputRoot().resolve("input-domain/inferred-input-domain.yaml");
         if (Files.isRegularFile(inferredDomain)

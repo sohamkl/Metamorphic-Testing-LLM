@@ -66,7 +66,8 @@ class InputDomainInferenceServiceTest {
 
         String prompt = InputDomainInferenceService.buildPrompt(config, context);
 
-        assertTrue(prompt.contains("Count is an upper limit"));
+        assertTrue(prompt.contains("Count is a budget of source cases"));
+        assertTrue(prompt.contains("targetCases must total no more than"));
         assertTrue(prompt.contains("Construction path: ExampleSut.run(int)"));
         assertTrue(prompt.contains("public static int run"));
         assertTrue(prompt.contains("Do not invent constructors"));

@@ -282,14 +282,27 @@ public final class PromptConfigLoader {
         try (var paths = Files.walk(projectRoot)) {
             return paths.filter(Files::isRegularFile)
                     .filter(path -> path.getFileName().toString().equals(fileName))
-                    .filter(path -> !path.toString().contains("/target/"))
-                    .filter(path -> !path.toString().contains("/generated/"))
+                    .filter(path -> !hasDirectoryNamed(path, "target"))
+                    .filter(path -> !hasDirectoryNamed(path, "generated"))
                     .filter(path -> className.equals(qualifiedNameOrEmpty(path)))
                     .findFirst()
                     .map(Path::normalize)
                     .orElseThrow(() -> new IllegalArgumentException(
                             "Could not find source for SUTClass " + className + " under " + projectRoot));
         }
+    }
+
+    /**
+     * True when any directory along {@code path} carries {@code name}. Compares path elements rather
+     * than the rendered string so build output is skipped on Windows too, where the separator is '\'.
+     */
+    private static boolean hasDirectoryNamed(Path path, String name) {
+        for (Path element : path) {
+            if (element.toString().equals(name)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static String qualifiedNameOrEmpty(Path path) {

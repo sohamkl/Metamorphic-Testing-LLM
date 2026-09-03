@@ -21,6 +21,7 @@ public final class OpenAiClient implements LlmClient {
     private final String apiKey;
     private final String model;
     private final String baseUrl;
+    private TokenUsage tokenUsage = TokenUsage.EMPTY;
 
     public OpenAiClient(String apiKey, String model, String baseUrl) {
         this.httpClient = HttpClient.newBuilder()
@@ -48,11 +49,21 @@ public final class OpenAiClient implements LlmClient {
             throw new IllegalStateException("OpenAI HTTP error " + response.statusCode() + ": " + response.body());
         }
 
+        tokenUsage = tokenUsage.plus(new TokenUsage(
+                JsonUtil.extractUsageField(response.body(), "prompt_tokens"),
+                JsonUtil.extractUsageField(response.body(), "completion_tokens"),
+                JsonUtil.extractUsageField(response.body(), "total_tokens")));
+
         String content = JsonUtil.extractOpenAiContent(response.body());
         if (content == null) {
             throw new IllegalStateException("Could not extract response content from OpenAI output.");
         }
         return CodeFence.strip(content).trim();
+    }
+
+    @Override
+    public TokenUsage tokenUsage() {
+        return tokenUsage;
     }
 
     static String buildPayload(String model, String prompt) {

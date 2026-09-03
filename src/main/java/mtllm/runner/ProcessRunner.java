@@ -5,10 +5,14 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 
 /** Runs framework subprocesses with consistent output capture, PATH setup, and timeouts. */
 public final class ProcessRunner {
+    private static final boolean WINDOWS =
+            System.getProperty("os.name", "").toLowerCase(Locale.ROOT).startsWith("windows");
+
     private ProcessRunner() {
     }
 
@@ -21,8 +25,13 @@ public final class ProcessRunner {
         ProcessBuilder builder = new ProcessBuilder(command)
                 .directory(workDir.toFile())
                 .redirectErrorStream(true);
-        String existingPath = builder.environment().getOrDefault("PATH", "");
-        builder.environment().put("PATH", "/bin:/usr/bin:/opt/homebrew/bin:/usr/local/bin:" + existingPath);
+        // The POSIX defaults help GUI-launched JVMs on macOS find Homebrew tools. On Windows PATH is
+        // ';'-separated, so prepending a ':'-joined list would fuse onto the first real entry and
+        // destroy it; leave PATH untouched there.
+        if (!WINDOWS) {
+            String existingPath = builder.environment().getOrDefault("PATH", "");
+            builder.environment().put("PATH", "/bin:/usr/bin:/opt/homebrew/bin:/usr/local/bin:" + existingPath);
+        }
 
         Process process = builder.start();
         ByteArrayOutputStream buffer = new ByteArrayOutputStream();
