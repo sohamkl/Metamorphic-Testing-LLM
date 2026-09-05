@@ -28,6 +28,8 @@ public final class RepairLoop {
     private final DataGeneratorRunner dataGeneratorRunner;
     private final Path generatedTestsDir;
     private final Path generatedCodeDir;
+    private int lastRepairAttempts;
+    private int lastAdditiveRepairAttempts;
 
     public RepairLoop(
             LlmClient llmClient,
@@ -43,10 +45,20 @@ public final class RepairLoop {
     }
 
     public TestRunResult generateRunAndRepair(PromptConfig config, SutContext sutContext) throws Exception {
+        lastRepairAttempts = 0;
+        lastAdditiveRepairAttempts = 0;
         if (config.mode().generatesBothOutputs()) {
             return generateBothOutputs(config, sutContext);
         }
         return generateSingleOutput(config, sutContext);
+    }
+
+    public int lastRepairAttempts() {
+        return lastRepairAttempts;
+    }
+
+    public int lastAdditiveRepairAttempts() {
+        return lastAdditiveRepairAttempts;
     }
 
     private TestRunResult generateBothOutputs(PromptConfig config, SutContext sutContext) throws Exception {
@@ -138,6 +150,7 @@ public final class RepairLoop {
                     break;
                 }
                 additiveAttempts++;
+                lastAdditiveRepairAttempts++;
                 if (additiveBaseCode == null) {
                     additiveBaseCode = code;
                     additiveMissing = new LinkedHashMap<>();
@@ -169,6 +182,7 @@ public final class RepairLoop {
                     break;
                 }
                 repairAttempts++;
+                lastRepairAttempts++;
                 // Compilation/runtime repair applies to the current merged suite, not the pre-addition base.
                 additiveBaseCode = null;
                 additiveMissing = null;

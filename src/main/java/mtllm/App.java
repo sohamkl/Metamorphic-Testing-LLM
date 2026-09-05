@@ -98,6 +98,8 @@ public final class App {
                     outputRoot.resolve("reports"));
 
             TestRunResult result;
+            int repairAttempts = 0;
+            int additiveRepairAttempts = 0;
             if (config.inputGenerator() == InputGenerator.HYBRID
                     && config.mrProvider() == MRProvider.LLM) {
                 RandoopInputRunner sourceRunner = new RandoopInputRunner(
@@ -122,6 +124,8 @@ public final class App {
                         outputRoot.resolve("junit-tests"),
                         outputRoot.resolve("data-generator-code"));
                 result = repairLoop.generateRunAndRepair(harvestedConfig, harvestedContext);
+                repairAttempts = repairLoop.lastRepairAttempts();
+                additiveRepairAttempts = repairLoop.lastAdditiveRepairAttempts();
             } else if (config.inputGenerator().randoopSeedsLlm()) {
                 RandoopInputRunner seedRunner = new RandoopInputRunner(
                         repoRoot,
@@ -162,6 +166,8 @@ public final class App {
                             outputRoot.resolve("junit-tests"),
                             outputRoot.resolve("data-generator-code"));
                     result = repairLoop.generateRunAndRepair(config, fallbackContext);
+                    repairAttempts = repairLoop.lastRepairAttempts();
+                    additiveRepairAttempts = repairLoop.lastAdditiveRepairAttempts();
                 } else {
                     randoopSeedStatus = "GENERATED";
                     effectiveExecutionTag = "NEW_HYBRID_WITH_RANDOOP_SEEDS";
@@ -176,6 +182,8 @@ public final class App {
                             outputRoot.resolve("junit-tests"),
                             outputRoot.resolve("data-generator-code"));
                     result = repairLoop.generateRunAndRepair(groundedConfig, groundedContext);
+                    repairAttempts = repairLoop.lastRepairAttempts();
+                    additiveRepairAttempts = repairLoop.lastAdditiveRepairAttempts();
                 }
             } else if (config.inputGenerator().usesRandoop()) {
                 result = runRandoop(config, sutContext, repoRoot, promptPath, dataGeneratorRunner);
@@ -187,6 +195,8 @@ public final class App {
                         outputRoot.resolve("junit-tests"),
                         outputRoot.resolve("data-generator-code"));
                 result = repairLoop.generateRunAndRepair(config, sutContext);
+                repairAttempts = repairLoop.lastRepairAttempts();
+                additiveRepairAttempts = repairLoop.lastAdditiveRepairAttempts();
             }
             System.out.println("\n--- Result: " + result.status() + " ---");
             if (!result.output().isBlank()) {
@@ -194,7 +204,8 @@ public final class App {
             }
             writeRunMetrics(outputRoot, config, String.valueOf(result.status()),
                     requestedInputGenerator, effectiveExecutionTag, randoopSeedStatus,
-                    llmClient == null ? TokenUsage.EMPTY : llmClient.tokenUsage(), startNanos);
+                    llmClient == null ? TokenUsage.EMPTY : llmClient.tokenUsage(), startNanos,
+                    repairAttempts, additiveRepairAttempts);
         } catch (Exception e) {
             System.err.println("Runner failed: " + e.getMessage());
             e.printStackTrace(System.err);
@@ -209,12 +220,14 @@ public final class App {
      */
     private static void writeRunMetrics(
             Path outputRoot, PromptConfig config, String status, InputGenerator requestedInputGenerator,
-            String effectiveExecutionTag, String randoopSeedStatus, TokenUsage usage, long startNanos) {
+            String effectiveExecutionTag, String randoopSeedStatus, TokenUsage usage, long startNanos,
+            int repairAttempts, int additiveRepairAttempts) {
         double elapsedSeconds = (System.nanoTime() - startNanos) / 1_000_000_000.0;
         // Locale.ROOT so a comma-decimal locale cannot emit "32,4" and break the JSON.
         String elapsed = String.format(Locale.ROOT, "%.1f", elapsedSeconds);
         System.out.println("Run took " + elapsed + "s and used " + usage.totalTokens()
-                + " tokens (" + usage.promptTokens() + " in, " + usage.completionTokens() + " out).");
+                + " tokens (" + usage.promptTokens() + " in, " + usage.completionTokens()
+                + " out, " + usage.reasoningTokens() + " reasoning).");
         try {
             Files.createDirectories(outputRoot);
             String json = "{\n"
@@ -228,7 +241,11 @@ public final class App {
                     + "  \"status\": " + JsonUtil.quote(status) + ",\n"
                     + "  \"promptTokens\": " + usage.promptTokens() + ",\n"
                     + "  \"completionTokens\": " + usage.completionTokens() + ",\n"
+                    + "  \"reasoningTokens\": " + usage.reasoningTokens() + ",\n"
                     + "  \"totalTokens\": " + usage.totalTokens() + ",\n"
+                    + "  \"repairAttempts\": " + repairAttempts + ",\n"
+                    + "  \"additiveRepairAttempts\": " + additiveRepairAttempts + ",\n"
+                    + "  \"totalRepairAttempts\": " + (repairAttempts + additiveRepairAttempts) + ",\n"
                     + "  \"elapsedSeconds\": " + elapsed + "\n"
                     + "}\n";
             Path artifact = outputRoot.resolve("metrics.json");
