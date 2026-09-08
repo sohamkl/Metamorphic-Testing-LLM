@@ -1,12 +1,16 @@
 # Output And MR Provider Configuration
 
+> Note: the `pricing` example used throughout this document now lives under
+> `examples/_archive/pricing/`. It is kept as a reference walkthrough and is no longer
+> compiled by the build. The live SUTs are spatial4j, threeten-extra, ta4j and jsoup.
+
 The public configuration no longer uses numbered modes. Developers choose the output artifact and who owns the MR implementation:
 
 ```text
 JsonRequired: true|false
 TestSuiteRequired: true|false
 MRProvider: DEV|LLM
-OutputRoot: examples/pricing/generated
+OutputRoot: examples/_archive/pricing/generated
 ```
 
 `MRProvider` means who writes the metamorphic relation implementation:
@@ -21,17 +25,17 @@ At least one output must be requested. The backend supports JSON output, JUnit t
 `OutputRoot` controls where generated artifacts are written. For example:
 
 ```text
-OutputRoot: examples/pricing/generated
+OutputRoot: examples/_archive/pricing/generated
 ```
 
 creates:
 
 ```text
-examples/pricing/generated/data-generator-code/
-examples/pricing/generated/json-data/
-examples/pricing/generated/junit-tests/
-examples/pricing/generated/junit-support/
-examples/pricing/generated/reports/
+examples/_archive/pricing/generated/data-generator-code/
+examples/_archive/pricing/generated/json-data/
+examples/_archive/pricing/generated/junit-tests/
+examples/_archive/pricing/generated/junit-support/
+examples/_archive/pricing/generated/reports/
 ```
 
 If `OutputRoot` is omitted and the SUT is inside `examples/<name>/src`, the backend defaults to
@@ -43,7 +47,7 @@ If `OutputRoot` is omitted and the SUT is inside `examples/<name>/src`, the back
 JsonRequired: true
 TestSuiteRequired: false
 MRProvider: DEV
-DeveloperMrFile: examples/pricing/mr/PricingMetamorphicSpec.java
+DeveloperMrFile: examples/_archive/pricing/mr/PricingMetamorphicSpec.java
 DeveloperFollowUpMethod: PricingMetamorphicSpec.generateFollowUp
 DeveloperAssertMethod: PricingMetamorphicSpec.assertRelation
 ```
@@ -75,7 +79,7 @@ This is the lowest LLM-responsibility option because the developer controls the 
 JsonRequired: false
 TestSuiteRequired: true
 MRProvider: DEV
-DeveloperMrFile: examples/pricing/mr/PricingMetamorphicSpec.java
+DeveloperMrFile: examples/_archive/pricing/mr/PricingMetamorphicSpec.java
 DeveloperFollowUpMethod: PricingMetamorphicSpec.generateFollowUp
 DeveloperAssertMethod: PricingMetamorphicSpec.assertRelation
 ```

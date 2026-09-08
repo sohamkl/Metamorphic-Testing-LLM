@@ -68,6 +68,35 @@ class GeneratedTestQualityGateTest {
         assertEquals(2, detailed.missingScenarios().get(0).needed());
     }
 
+    /**
+     * A retired scenario is one the SUT or developer MR proved impossible, so demanding it again
+     * would only drain the repair budget. Contrast with the test above: a scenario that is merely
+     * missing is still demanded, because that is the model being lazy rather than the scenario
+     * being unsatisfiable.
+     */
+    @Test
+    void doesNotDemandARetiredScenario() throws Exception {
+        PromptConfig config = config();
+        Path generated = write("""
+                import org.junit.jupiter.api.Test;
+                import static org.junit.jupiter.api.Assertions.assertEquals;
+                public class GeneratedExampleTest {
+                    @Test void unrelatedCaseOne() { assertEquals(1, 1); }
+                    @Test void unrelatedCaseTwo() { assertEquals(2, 2); }
+                }
+                """);
+
+        GeneratedTestQualityGate.ValidationResult stillDemanded =
+                GeneratedTestQualityGate.validateDetailed(generated, config);
+        assertEquals(1, stillDemanded.missingScenarios().size());
+
+        GeneratedTestQualityGate.ValidationResult afterRetirement =
+                GeneratedTestQualityGate.validateDetailed(
+                        generated, config, java.util.Set.of("THRESHOLD_BOUNDARY"));
+        assertTrue(afterRetirement.missingScenarios().isEmpty());
+        assertTrue(afterRetirement.passed());
+    }
+
     @Test
     void rejectsAnEmptyRequiredSuite() throws Exception {
         PromptConfig config = config();

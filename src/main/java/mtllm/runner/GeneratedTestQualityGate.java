@@ -27,6 +27,19 @@ final class GeneratedTestQualityGate {
     }
 
     static ValidationResult validateDetailed(Path generatedTestFile, PromptConfig config) {
+        return validateDetailed(generatedTestFile, config, Set.of());
+    }
+
+    /**
+     * @param retiredScenarioIds scenarios proven unsatisfiable by
+     *                           {@link UnsatisfiableScenarioDetector}. They are no longer demanded,
+     *                           because a scenario that contradicts a precondition the generated
+     *                           code cannot change will never be satisfiable no matter how many
+     *                           repairs are spent on it. Scenarios that are merely <em>absent</em>
+     *                           are still demanded: that is laziness, not impossibility.
+     */
+    static ValidationResult validateDetailed(
+            Path generatedTestFile, PromptConfig config, Set<String> retiredScenarioIds) {
         CompilationUnit unit;
         try {
             unit = StaticJavaParser.parse(generatedTestFile);
@@ -57,7 +70,7 @@ final class GeneratedTestQualityGate {
 
         List<MissingScenario> missingScenarios = List.of();
         if (config.inputGenerator() != InputGenerator.HYBRID) {
-            missingScenarios = missingScenarioCoverage(tests, config);
+            missingScenarios = missingScenarioCoverage(tests, config, retiredScenarioIds);
         }
 
         Map<String, MethodDeclaration> methods = new HashMap<>();
@@ -80,12 +93,15 @@ final class GeneratedTestQualityGate {
     }
 
     private static List<MissingScenario> missingScenarioCoverage(
-            List<MethodDeclaration> tests, PromptConfig config) {
+            List<MethodDeclaration> tests, PromptConfig config, Set<String> retiredScenarioIds) {
         if (!config.inputDomainRequirements().isStructured()) {
             return List.of();
         }
         List<MissingScenario> missing = new java.util.ArrayList<>();
         for (ScenarioRequirement scenario : config.inputDomainRequirements().scenarios()) {
+            if (retiredScenarioIds.contains(scenario.id())) {
+                continue;
+            }
             String expected = normalized(scenario.id());
             long matches = tests.stream()
                     .map(MethodDeclaration::getNameAsString)

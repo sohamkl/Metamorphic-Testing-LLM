@@ -55,12 +55,14 @@ JUNIT_PLATFORM_CONSOLE_STANDALONE_JAR=/absolute/path/to/junit-platform-console-s
 | `src/main/java/mtllm/runner/` | Compiles, runs, and repairs generated tests |
 | `src/main/java/mtllm/util/` | Small helpers for `.env`, JSON, and code fences |
 | `lib/randoop-all-4.3.4.jar` | Vendored Randoop jar (system-scoped dependency in `pom.xml`) |
-| `examples/pricing/` | Example shopping-cart SUT, MR helper, and prompt |
-| `examples/pricing/generated/data-generator-code/` | Generated Java code that creates and evaluates pricing JSON data |
-| `examples/pricing/generated/json-data/` | Generated pricing JSON data and pass/fail splits |
-| `examples/pricing/generated/junit-tests/` | Generated pricing JUnit tests and pass/fail splits |
-| `examples/pricing/generated/junit-support/` | Copied pricing SUT/support/MR sources used only to compile generated JUnit tests |
-| `examples/pricing/generated/reports/` | Generated pricing HTML reports |
+| `examples/spatial4j/`, `examples/threeten-extra/`, `examples/ta4j/`, `examples/jsoup/` | The four live SUTs (11 metamorphic relations between them) |
+| `examples/_archive/` | Superseded examples, kept for reference only. Not compiled by the build. |
+| `examples/_archive/pricing/` | Archived shopping-cart SUT, MR helper, and prompt. Still the worked example in the config docs below. |
+| `examples/_archive/pricing/generated/data-generator-code/` | Generated Java code that creates and evaluates pricing JSON data |
+| `examples/_archive/pricing/generated/json-data/` | Generated pricing JSON data and pass/fail splits |
+| `examples/_archive/pricing/generated/junit-tests/` | Generated pricing JUnit tests and pass/fail splits |
+| `examples/_archive/pricing/generated/junit-support/` | Copied pricing SUT/support/MR sources used only to compile generated JUnit tests |
+| `examples/_archive/pricing/generated/reports/` | Generated pricing HTML reports |
 | `src/main/resources/reports/` | FreeMarker templates for generated HTML reports |
 | `prompt.yaml` | Active generation config |
 | `prompt.class-level.example.yaml` | Template config |
@@ -252,19 +254,19 @@ RandoopTargetClasses:
 Example (Randoop builds the carts, developer owns the MR):
 
 ```yaml
-SUTClassFile: examples/pricing/src/PricingEngine.java
+SUTClassFile: examples/_archive/pricing/src/PricingEngine.java
 SUTSupportFiles:
-  - examples/pricing/src/Cart.java
-  - examples/pricing/src/CartItem.java
-  - examples/pricing/src/Customer.java
-  - examples/pricing/src/CustomerTier.java
-  - examples/pricing/src/DiscountCode.java
+  - examples/_archive/pricing/src/Cart.java
+  - examples/_archive/pricing/src/CartItem.java
+  - examples/_archive/pricing/src/Customer.java
+  - examples/_archive/pricing/src/CustomerTier.java
+  - examples/_archive/pricing/src/DiscountCode.java
 TargetFunction: public static BigDecimal calculateDiscountedSubtotal(Cart cart)
 InputGenerator: HYBRID
 JsonRequired: true
 TestSuiteRequired: true
 MRProvider: DEV
-DeveloperMrFile: examples/pricing/mr/PricingMetamorphicSpec.java
+DeveloperMrFile: examples/_archive/pricing/mr/PricingMetamorphicSpec.java
 DeveloperFollowUpMethod: PricingMetamorphicSpec.generateFollowUp
 DeveloperAssertMethod: PricingMetamorphicSpec.assertRelation
 ```
@@ -280,7 +282,7 @@ Generated data code is compiled with plain `javac`, so it must use only the Java
 If `MRProvider: DEV`, add:
 
 ```yaml
-DeveloperMrFile: examples/pricing/mr/PricingMetamorphicSpec.java
+DeveloperMrFile: examples/_archive/pricing/mr/PricingMetamorphicSpec.java
 DeveloperFollowUpMethod: PricingMetamorphicSpec.generateFollowUp
 DeveloperAssertMethod: PricingMetamorphicSpec.assertRelation
 ```
@@ -372,11 +374,9 @@ Run PIT with:
 mvn clean -Ppitest test-compile org.pitest:pitest-maven:mutationCoverage
 ```
 
-The profile follows the PIT Maven quickstart flow and pins explicit plugin versions. It mutates the compiled example SUT classes currently registered as main sources:
+The profile follows the PIT Maven quickstart flow and pins explicit plugin versions. The default `pitest` profile mutates:
 
-- `DijkstraAlgorithm*`
-- `MatrixRank`
-- `PricingEngine*`
+- `org.ta4j.core.analysis.elliott.swing.SlopeChangeSwingDetector`
 
 It runs only generated `*PassingTest` classes and excludes generated `*FailingTest` classes. This is intentional: the framework stores failing tests as bug-revealing artifacts, while PIT requires the selected test suite to be green before mutation analysis starts.
 
