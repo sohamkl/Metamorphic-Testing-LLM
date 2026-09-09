@@ -75,7 +75,7 @@ def parse_args() -> argparse.Namespace:
         "--input-generator",
         dest="input_generators",
         action="append",
-        choices=["llm", "new-hybrid", "hybrid", "randoop"],
+        choices=["llm", "new-hybrid", "randoop"],
         help="Restrict to an input generator.",
     )
     parser.add_argument("--model", dest="models", action="append", help="Restrict to a model id.")
@@ -377,10 +377,24 @@ def run_command(cmd: list[str], log_path: Path, env: dict[str, str]) -> dict[str
     start = time.monotonic()
     with log_path.open("w") as log:
         log.write("$ " + sh_join(cmd) + "\n\n")
-        proc = subprocess.run(cmd, cwd=REPO_ROOT, env=env, text=True, stdout=log, stderr=subprocess.STDOUT)
+        log.flush()
+        proc = subprocess.Popen(
+            cmd,
+            cwd=REPO_ROOT,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            bufsize=1,
+        )
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            print(line, end="")
+            log.write(line)
+        returncode = proc.wait()
     return {
         "command": cmd,
-        "returncode": proc.returncode,
+        "returncode": returncode,
         "durationSeconds": round(time.monotonic() - start, 3),
         "log": rel(log_path),
     }
