@@ -273,6 +273,37 @@ public final class PromptConfig {
                 newRandoopSeedExamples);
     }
 
+    public PromptConfig withInputGenerator(InputGenerator newInputGenerator) {
+        return new PromptConfig(
+                projectRoot,
+                automaticDiscovery,
+                sutClassFile,
+                targetFunction,
+                sutSupportFiles,
+                sutClasspath,
+                sutDescription,
+                mrInput,
+                mrOutput,
+                mr,
+                count,
+                inputDomainRequirements,
+                generatedClassName,
+                mode,
+                jsonRequired,
+                testSuiteRequired,
+                mrProvider,
+                developerMrFile,
+                developerMrSource,
+                developerFollowUpMethod,
+                developerAssertMethod,
+                outputRoot,
+                maxRepairAttempts,
+                newInputGenerator,
+                mavenProfiles,
+                randoopTargetClasses,
+                randoopSeedExamples);
+    }
+
     public PromptConfig withSutClasspath(List<Path> newSutClasspath) {
         return new PromptConfig(
                 projectRoot,

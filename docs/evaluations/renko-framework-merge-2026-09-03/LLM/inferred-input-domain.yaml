@@ -1,0 +1,424 @@
+InputDomain:
+  summary: The source-input domain for RenkoBarAggregator.aggregate(List<Bar>) consists
+    of non-null, non-empty, chronologically ordered lists of contiguous, evenly spaced
+    Bar objects with non-null close prices. Each Bar must have valid open, high, low,
+    close, volume, amount, trades, time period, and timestamps. The aggregator receiver
+    must be constructed with a finite, positive boxSize and a positive integer reversalAmount.
+    The domain covers diverse bar sequences to exercise all major Renko aggregation
+    paths, including no brick emission, single/multiple brick emission, reversals,
+    and edge cases at brick thresholds.
+  globalConstraints:
+  - The bars list must be non-null.
+  - Each Bar in the list must have a non-null close price.
+  - The bars list must be in chronological order.
+  - The bars must be contiguous and evenly spaced in time.
+  - The RenkoBarAggregator receiver must be constructed with a finite, positive boxSize
+    and reversalAmount > 0.
+  - All Bar numeric fields (open, high, low, close, volume, amount) must be valid
+    and compatible with the Num implementation.
+  diversity:
+    BarCount:
+    - '1'
+    - '2'
+    - '3'
+    - '4'
+    - '5'
+    BarPricePattern:
+    - flat
+    - up
+    - down
+    - up-then-down
+    - down-then-up
+    - multi-brick
+    - reversal
+    - threshold
+    - no-move
+    BarVolumeAmount:
+    - zero
+    - positive
+    - mixed
+    ReversalAmount:
+    - '1'
+    - '2'
+    - '3'
+    BoxSize:
+    - small
+    - medium
+    - large
+  scenarios:
+  - id: SINGLE_BAR_NO_MOVE
+    category: NORMAL
+    description: Single bar, no price movement (open == close), no brick emitted.
+    preconditions:
+    - bars.size() == 1
+    - bar.open == bar.close
+    - boxSize > 0
+    - reversalAmount > 0
+    expectedSourceBehavior:
+    - aggregate returns an empty list (no bricks emitted)
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: SINGLE_BAR_ONE_BRICK_UP
+    category: BOUNDARY
+    description: Single bar, close price exactly one boxSize above open, emits one
+      up brick.
+    preconditions:
+    - bars.size() == 1
+    - bar.close == bar.open + boxSize
+    - boxSize > 0
+    - reversalAmount > 0
+    expectedSourceBehavior:
+    - aggregate returns a list with one up brick
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SINGLE_BAR_ONE_BRICK_DOWN
+    category: BOUNDARY
+    description: Single bar, close price exactly one boxSize below open, emits one
+      down brick.
+    preconditions:
+    - bars.size() == 1
+    - bar.close == bar.open - boxSize
+    - boxSize > 0
+    - reversalAmount > 0
+    expectedSourceBehavior:
+    - aggregate returns a list with one down brick
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MULTI_BAR_NO_BRICKS
+    category: NORMAL
+    description: Multiple bars, all close prices within one boxSize of the starting
+      price, no bricks emitted.
+    preconditions:
+    - bars.size() >= 2
+    - For all bars, abs(bar.close - bars[0].close) < boxSize
+    - boxSize > 0
+    - reversalAmount > 0
+    expectedSourceBehavior:
+    - aggregate returns an empty list
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: MULTI_BAR_SINGLE_UP_BRICK
+    category: NORMAL
+    description: Multiple bars, cumulative close price movement just reaches one boxSize
+      up, emits one up brick.
+    preconditions:
+    - bars.size() >= 2
+    - sum of (bar.close - previous bar.close) over bars >= boxSize
+    - no single bar triggers a brick alone
+    - boxSize > 0
+    - reversalAmount > 0
+    expectedSourceBehavior:
+    - aggregate returns a list with one up brick
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MULTI_BAR_MULTI_BRICK_UP
+    category: NORMAL
+    description: Multiple bars, close price rises steadily, emitting multiple up bricks.
+    preconditions:
+    - bars.size() >= 3
+    - Each bar.close > previous bar.close
+    - Total rise >= 2 * boxSize
+    - boxSize > 0
+    - reversalAmount > 0
+    expectedSourceBehavior:
+    - aggregate returns a list with multiple up bricks
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MULTI_BAR_MULTI_BRICK_DOWN
+    category: NORMAL
+    description: Multiple bars, close price falls steadily, emitting multiple down
+      bricks.
+    preconditions:
+    - bars.size() >= 3
+    - Each bar.close < previous bar.close
+    - Total drop >= 2 * boxSize
+    - boxSize > 0
+    - reversalAmount > 0
+    expectedSourceBehavior:
+    - aggregate returns a list with multiple down bricks
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MULTI_BAR_REVERSAL_UP_TO_DOWN
+    category: NORMAL
+    description: Bars first rise enough for up bricks, then fall enough for a reversal
+      to down bricks.
+    preconditions:
+    - bars.size() >= 4
+    - Initial bars cause at least one up brick
+    - Later bars drop close price by at least reversalAmount * boxSize below last
+      up brick close
+    - boxSize > 0
+    - reversalAmount > 1
+    expectedSourceBehavior:
+    - aggregate emits up bricks, then down bricks after reversal
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MULTI_BAR_REVERSAL_DOWN_TO_UP
+    category: NORMAL
+    description: Bars first fall enough for down bricks, then rise enough for a reversal
+      to up bricks.
+    preconditions:
+    - bars.size() >= 4
+    - Initial bars cause at least one down brick
+    - Later bars raise close price by at least reversalAmount * boxSize above last
+      down brick close
+    - boxSize > 0
+    - reversalAmount > 1
+    expectedSourceBehavior:
+    - aggregate emits down bricks, then up bricks after reversal
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MULTI_BAR_REVERSAL_AT_THRESHOLD
+    category: BOUNDARY
+    description: Reversal occurs with close price exactly at reversal threshold.
+    preconditions:
+    - bars.size() >= 3
+    - Initial direction established (up or down)
+    - A bar's close price equals last brick close ± (reversalAmount * boxSize)
+    - boxSize > 0
+    - reversalAmount > 1
+    expectedSourceBehavior:
+    - aggregate emits reversal bricks at the threshold
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MULTI_BAR_MIXED_VOLUME_AMOUNT
+    category: NORMAL
+    description: Bars with varying volume and amount, including zeros, to test aggregation
+      and zeroing for multi-brick emission.
+    preconditions:
+    - bars.size() >= 3
+    - At least one bar has volume == 0 and/or amount == 0
+    - At least one bar has positive volume and amount
+    - boxSize > 0
+    - reversalAmount > 0
+    expectedSourceBehavior:
+    - aggregate emits bricks with correct volume/amount assignment per emission rules
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MULTI_BAR_TRADES_ACCUMULATION
+    category: NORMAL
+    description: Bars with varying trade counts, including zeros, to test trade aggregation
+      and zeroing for multi-brick emission.
+    preconditions:
+    - bars.size() >= 3
+    - At least one bar has trades == 0
+    - At least one bar has trades > 0
+    - boxSize > 0
+    - reversalAmount > 0
+    expectedSourceBehavior:
+    - aggregate emits bricks with correct trades assignment per emission rules
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MULTI_BAR_EVENLY_SPACED_PERIODS
+    category: NORMAL
+    description: Bars with non-standard but evenly spaced time periods (e.g., 7 minutes),
+      to test period handling.
+    preconditions:
+    - bars.size() >= 2
+    - All bars have the same non-standard period (not 1m, 5m, etc.)
+    - boxSize > 0
+    - reversalAmount > 0
+    expectedSourceBehavior:
+    - aggregate emits bricks with correct time periods and end times
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MULTI_BAR_NONZERO_START_PRICE
+    category: NORMAL
+    description: Bars start at a nonzero price, to test independence from absolute
+      price level.
+    preconditions:
+    - bars.size() >= 2
+    - bars[0].open > 0
+    - boxSize > 0
+    - reversalAmount > 0
+    expectedSourceBehavior:
+    - aggregate emits bricks as per price movement, regardless of starting price
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MULTI_BAR_HIGH_LOW_VARIATION
+    category: NORMAL
+    description: Bars with high and low prices differing from open/close, to test
+      high/low calculation in bricks.
+    preconditions:
+    - bars.size() >= 2
+    - At least one bar has high > max(open, close) and low < min(open, close)
+    - boxSize > 0
+    - reversalAmount > 0
+    expectedSourceBehavior:
+    - aggregate emits bricks with correct high/low values (max/min of open/close)
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MULTI_BAR_MIXED_DIRECTION
+    category: NORMAL
+    description: Bars alternate between up and down movements, but do not trigger
+      a reversal.
+    preconditions:
+    - bars.size() >= 3
+    - Price alternates but never moves enough for reversalAmount * boxSize in opposite
+      direction
+    - boxSize > 0
+    - reversalAmount > 1
+    expectedSourceBehavior:
+    - aggregate emits bricks only in the initial direction, no reversal
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MULTI_BAR_EXACTLY_AT_BRICK_EDGE
+    category: BOUNDARY
+    description: Bar closes exactly at the next brick threshold, testing edge emission.
+    preconditions:
+    - bars.size() >= 2
+    - At least one bar.close == lastBrickClose ± boxSize
+    - boxSize > 0
+    - reversalAmount > 0
+    expectedSourceBehavior:
+    - aggregate emits a brick exactly at the threshold
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MULTI_BAR_MULTI_BRICK_FROM_SINGLE_BAR
+    category: NORMAL
+    description: A single bar's close price moves enough to emit multiple bricks at
+      once.
+    preconditions:
+    - bars.size() >= 2
+    - At least one bar.close differs from lastBrickClose by >= 2 * boxSize
+    - boxSize > 0
+    - reversalAmount > 0
+    expectedSourceBehavior:
+    - aggregate emits multiple bricks from a single source bar, with only the first
+      brick carrying volume/amount/trades
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MULTI_BAR_LONG_FLAT_THEN_MOVE
+    category: NORMAL
+    description: Sequence of flat bars followed by a bar that triggers brick emission.
+    preconditions:
+    - bars.size() >= 3
+    - '{Initial bars=bar.close == previous bar.close}'
+    - '{Later bar=bar.close differs by >= boxSize}'
+    - boxSize > 0
+    - reversalAmount > 0
+    expectedSourceBehavior:
+    - aggregate emits bricks only after the move, not during flat period
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MULTI_BAR_ZERO_VOLUME_AMOUNT
+    category: EDGE
+    description: All bars have zero volume and amount, testing zero propagation.
+    preconditions:
+    - bars.size() >= 2
+    - For all bars, volume == 0 and amount == 0
+    - boxSize > 0
+    - reversalAmount > 0
+    expectedSourceBehavior:
+    - aggregate emits bricks with zero volume and amount
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MULTI_BAR_ZERO_TRADES
+    category: EDGE
+    description: All bars have zero trades, testing zero propagation.
+    preconditions:
+    - bars.size() >= 2
+    - For all bars, trades == 0
+    - boxSize > 0
+    - reversalAmount > 0
+    expectedSourceBehavior:
+    - aggregate emits bricks with zero trades
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MULTI_BAR_LARGE_REVERSAL_AMOUNT
+    category: EDGE
+    description: ReversalAmount set to a large value, requiring a large move for reversal.
+    preconditions:
+    - bars.size() >= 3
+    - reversalAmount >= 3
+    - Price moves enough for initial bricks but not enough for reversal
+    - boxSize > 0
+    expectedSourceBehavior:
+    - aggregate emits bricks only in initial direction, no reversal
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MULTI_BAR_SMALL_BOX_SIZE
+    category: EDGE
+    description: Very small boxSize, so small price moves trigger bricks.
+    preconditions:
+    - bars.size() >= 2
+    - boxSize is a small positive value (e.g., 0.0001)
+    - Price moves by at least boxSize
+    - reversalAmount > 0
+    expectedSourceBehavior:
+    - aggregate emits bricks for small price changes
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MULTI_BAR_LARGE_BOX_SIZE
+    category: EDGE
+    description: Very large boxSize, so only large price moves trigger bricks.
+    preconditions:
+    - bars.size() >= 2
+    - boxSize is a large positive value (e.g., 1000)
+    - Price moves by less than boxSize in most bars
+    - reversalAmount > 0
+    expectedSourceBehavior:
+    - aggregate emits bricks only for large price changes
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MULTI_BAR_NON_INTEGER_BOX_SIZE
+    category: EDGE
+    description: Non-integer boxSize (e.g., 1.5), to test decimal handling.
+    preconditions:
+    - bars.size() >= 2
+    - boxSize is a positive non-integer value
+    - Price moves by multiples of boxSize
+    - reversalAmount > 0
+    expectedSourceBehavior:
+    - aggregate emits bricks at correct decimal thresholds
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MULTI_BAR_NON_INTEGER_PRICES
+    category: EDGE
+    description: Bars with non-integer open/close prices, to test decimal handling.
+    preconditions:
+    - bars.size() >= 2
+    - At least one bar.open or bar.close is non-integer
+    - boxSize > 0
+    - reversalAmount > 0
+    expectedSourceBehavior:
+    - aggregate emits bricks at correct decimal thresholds
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MULTI_BAR_DIFFERENT_NUM_IMPLEMENTATION
+    category: EDGE
+    description: Bars use a different Num implementation (e.g., DecimalNum, DoubleNum).
+    preconditions:
+    - bars.size() >= 2
+    - All bars use the same non-default Num implementation
+    - boxSize > 0
+    - reversalAmount > 0
+    expectedSourceBehavior:
+    - aggregate emits bricks correctly regardless of Num implementation
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MULTI_BAR_TIME_GAP_EDGE
+    category: EDGE
+    description: Bars are contiguous but at the minimum allowed time gap (e.g., 1
+      nanosecond), testing time handling.
+    preconditions:
+    - bars.size() >= 2
+    - All bars are evenly spaced by the minimum supported duration
+    - boxSize > 0
+    - reversalAmount > 0
+    expectedSourceBehavior:
+    - aggregate emits bricks with correct time periods and end times
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MULTI_BAR_MAX_BAR_COUNT
+    category: EDGE
+    description: Large number of bars (e.g., 50), to test performance and accumulation.
+    preconditions:
+    - bars.size() == 50
+    - Prices move to trigger multiple bricks and at least one reversal
+    - boxSize > 0
+    - reversalAmount > 0
+    expectedSourceBehavior:
+    - aggregate emits many bricks, including reversals
+    targetCases: 1
+    emptyOutputAllowed: false

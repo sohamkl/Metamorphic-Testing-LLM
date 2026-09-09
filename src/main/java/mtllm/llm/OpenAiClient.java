@@ -52,6 +52,7 @@ public final class OpenAiClient implements LlmClient {
         tokenUsage = tokenUsage.plus(new TokenUsage(
                 JsonUtil.extractUsageField(response.body(), "prompt_tokens"),
                 JsonUtil.extractUsageField(response.body(), "completion_tokens"),
+                JsonUtil.extractUsageField(response.body(), "reasoning_tokens"),
                 JsonUtil.extractUsageField(response.body(), "total_tokens")));
 
         String content = JsonUtil.extractOpenAiContent(response.body());

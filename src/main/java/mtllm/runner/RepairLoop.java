@@ -36,6 +36,8 @@ public final class RepairLoop {
     private final Path generatedTestsDir;
     private final Path generatedCodeDir;
     private final List<UnsatisfiableScenarioDetector.Retired> retiredScenarios = new ArrayList<>();
+    private int lastRepairAttempts;
+    private int lastAdditiveRepairAttempts;
 
     public RepairLoop(
             LlmClient llmClient,
@@ -51,10 +53,20 @@ public final class RepairLoop {
     }
 
     public TestRunResult generateRunAndRepair(PromptConfig config, SutContext sutContext) throws Exception {
+        lastRepairAttempts = 0;
+        lastAdditiveRepairAttempts = 0;
         if (config.mode().generatesBothOutputs()) {
             return generateBothOutputs(config, sutContext);
         }
         return generateSingleOutput(config, sutContext);
+    }
+
+    public int lastRepairAttempts() {
+        return lastRepairAttempts;
+    }
+
+    public int lastAdditiveRepairAttempts() {
+        return lastAdditiveRepairAttempts;
     }
 
     private TestRunResult generateBothOutputs(PromptConfig config, SutContext sutContext) throws Exception {
@@ -213,15 +225,19 @@ public final class RepairLoop {
         Path generatedFile = attempt.file();
         TestRunResult result = attempt.result();
 
-        int attempts = 0;
+        int repairAttempts = 0;
+        int additiveAttempts = 0;
         String additiveBaseCode = null;
         String previousAddition = "";
         Map<String, Integer> additiveMissing = null;
-        while (result.failed() && attempts < config.maxRepairAttempts()) {
-            attempts++;
+        while (result.failed()) {
             GeneratedTestQualityGate.ValidationResult quality = testRunner.lastQualityResult();
-            if (config.mode().generatesJUnit()
-                    && (additiveBaseCode != null || quality.onlyMissingScenarios())) {
+            if (config.mode().generatesJUnit() && quality.onlyMissingScenarios()) {
+                if (additiveAttempts >= config.maxRepairAttempts()) {
+                    break;
+                }
+                additiveAttempts++;
+                lastAdditiveRepairAttempts++;
                 if (additiveBaseCode == null) {
                     additiveBaseCode = code;
                     additiveMissing = new LinkedHashMap<>();
@@ -230,7 +246,7 @@ public final class RepairLoop {
                     }
                 }
                 System.out.println("Generated suite is missing scenario coverage. Requesting additive repair attempt "
-                        + attempts + "...");
+                        + additiveAttempts + "...");
                 String addition = llmClient.complete(PromptBuilder.buildMissingScenarioRepairPrompt(
                         config,
                         sutContext,
@@ -249,7 +265,16 @@ public final class RepairLoop {
                     continue;
                 }
             } else {
-                System.out.println("Generated code failed. Requesting repair attempt " + attempts + "...");
+                if (repairAttempts >= config.maxRepairAttempts()) {
+                    break;
+                }
+                repairAttempts++;
+                lastRepairAttempts++;
+                // Compilation/runtime repair applies to the current merged suite, not the pre-addition base.
+                additiveBaseCode = null;
+                additiveMissing = null;
+                previousAddition = "";
+                System.out.println("Generated code failed. Requesting repair attempt " + repairAttempts + "...");
                 code = llmClient.complete(PromptBuilder.buildRepairPrompt(config, sutContext, code, result));
             }
             attempt = runWithRetirement(code, config, sutContext);

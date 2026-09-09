@@ -47,6 +47,9 @@ public final class App {
 
             Map<String, String> env = DotEnv.load(repoRoot.resolve(".env"));
             PromptConfig config = PromptConfigLoader.load(promptPath, repoRoot);
+            InputGenerator requestedInputGenerator = config.inputGenerator();
+            String effectiveExecutionTag = "STANDARD";
+            String randoopSeedStatus = "NOT_APPLICABLE";
             String model = DotEnv.firstNonBlank(System.getenv("OPENAI_MODEL"), env.get("OPENAI_MODEL"), "gpt-4o-mini");
             String baseUrl = DotEnv.firstNonBlank(
                     System.getenv("OPENAI_BASE_URL"),
@@ -95,6 +98,8 @@ public final class App {
                     outputRoot.resolve("reports"));
 
             TestRunResult result;
+            int repairAttempts = 0;
+            int additiveRepairAttempts = 0;
             if (config.inputGenerator() == InputGenerator.HYBRID
                     && config.mrProvider() == MRProvider.LLM) {
                 RandoopInputRunner sourceRunner = new RandoopInputRunner(
@@ -119,6 +124,8 @@ public final class App {
                         outputRoot.resolve("junit-tests"),
                         outputRoot.resolve("data-generator-code"));
                 result = repairLoop.generateRunAndRepair(harvestedConfig, harvestedContext);
+                repairAttempts = repairLoop.lastRepairAttempts();
+                additiveRepairAttempts = repairLoop.lastAdditiveRepairAttempts();
             } else if (config.inputGenerator().randoopSeedsLlm()) {
                 RandoopInputRunner seedRunner = new RandoopInputRunner(
                         repoRoot,
@@ -126,27 +133,58 @@ public final class App {
                         repoRoot.resolve("target/classes"),
                         config.outputRoot().resolve("new-hybrid-randoop"));
                 System.out.println("Generating API-grounded seed examples with Randoop (NEW_HYBRID)...");
-                String seedExamples = seedRunner.generateSeedExamples(config, promptPath);
-                if (seedExamples.isBlank() || seedExamples.trim().equals("[]")) {
-                    throw new IllegalStateException(
-                            "NEW_HYBRID harvested no Randoop seed examples, so this run would "
-                            + "silently degrade into a plain LLM run and be recorded as a hybrid. "
-                            + "Check that the target method gets an invocation wrapper "
-                            + "(InvocationWrapperGenerator skips static single-argument methods) and "
-                            + "that Randoop can construct every parameter type (interfaces such as "
-                            + "java.time.temporal.Temporal have no constructor for it to call).");
+                String seedExamples = "";
+                String seedFailure = "";
+                try {
+                    seedExamples = seedRunner.generateSeedExamples(config, promptPath);
+                } catch (InterruptedException failure) {
+                    Thread.currentThread().interrupt();
+                    throw failure;
+                } catch (Exception failure) {
+                    seedFailure = failure.getMessage() == null
+                            ? failure.getClass().getSimpleName()
+                            : failure.getMessage();
+                    randoopSeedStatus = "ERROR";
                 }
-                System.out.println("Randoop seed examples harvested; asking the LLM to generate final source inputs...");
+                if (hasNoRandoopSeeds(seedExamples)) {
+                    if (!randoopSeedStatus.equals("ERROR")) {
+                        randoopSeedStatus = "EMPTY";
+                    }
+                    effectiveExecutionTag = randoopSeedStatus.equals("ERROR")
+                            ? "NEW_HYBRID_FALLBACK_LLM_SEED_ERROR"
+                            : "NEW_HYBRID_FALLBACK_LLM_NO_SEEDS";
+                    System.err.println("[INPUT_GENERATOR_FALLBACK] requested=NEW_HYBRID effective=LLM"
+                            + " seedStatus=" + randoopSeedStatus
+                            + (seedFailure.isBlank() ? "" : " reason=" + seedFailure.replace('\n', ' ')));
 
-                PromptConfig groundedConfig = config.withRandoopSeedExamples(seedExamples);
-                SutContext groundedContext = SutContextLoader.load(groundedConfig, repoRoot);
-                RepairLoop repairLoop = new RepairLoop(
-                        llmClient,
-                        testRunner,
-                        dataGeneratorRunner,
-                        outputRoot.resolve("junit-tests"),
-                        outputRoot.resolve("data-generator-code"));
-                result = repairLoop.generateRunAndRepair(groundedConfig, groundedContext);
+                    config = config.withInputGenerator(InputGenerator.LLM);
+                    SutContext fallbackContext = SutContextLoader.load(config, repoRoot);
+                    RepairLoop repairLoop = new RepairLoop(
+                            llmClient,
+                            testRunner,
+                            dataGeneratorRunner,
+                            outputRoot.resolve("junit-tests"),
+                            outputRoot.resolve("data-generator-code"));
+                    result = repairLoop.generateRunAndRepair(config, fallbackContext);
+                    repairAttempts = repairLoop.lastRepairAttempts();
+                    additiveRepairAttempts = repairLoop.lastAdditiveRepairAttempts();
+                } else {
+                    randoopSeedStatus = "GENERATED";
+                    effectiveExecutionTag = "NEW_HYBRID_WITH_RANDOOP_SEEDS";
+                    System.out.println("Randoop seed examples harvested; asking the LLM to generate final source inputs...");
+
+                    PromptConfig groundedConfig = config.withRandoopSeedExamples(seedExamples);
+                    SutContext groundedContext = SutContextLoader.load(groundedConfig, repoRoot);
+                    RepairLoop repairLoop = new RepairLoop(
+                            llmClient,
+                            testRunner,
+                            dataGeneratorRunner,
+                            outputRoot.resolve("junit-tests"),
+                            outputRoot.resolve("data-generator-code"));
+                    result = repairLoop.generateRunAndRepair(groundedConfig, groundedContext);
+                    repairAttempts = repairLoop.lastRepairAttempts();
+                    additiveRepairAttempts = repairLoop.lastAdditiveRepairAttempts();
+                }
             } else if (config.inputGenerator().usesRandoop()) {
                 result = runRandoop(config, sutContext, repoRoot, promptPath, dataGeneratorRunner);
             } else {
@@ -157,13 +195,17 @@ public final class App {
                         outputRoot.resolve("junit-tests"),
                         outputRoot.resolve("data-generator-code"));
                 result = repairLoop.generateRunAndRepair(config, sutContext);
+                repairAttempts = repairLoop.lastRepairAttempts();
+                additiveRepairAttempts = repairLoop.lastAdditiveRepairAttempts();
             }
             System.out.println("\n--- Result: " + result.status() + " ---");
             if (!result.output().isBlank()) {
                 System.out.println(result.output());
             }
             writeRunMetrics(outputRoot, config, String.valueOf(result.status()),
-                    llmClient == null ? TokenUsage.EMPTY : llmClient.tokenUsage(), startNanos);
+                    requestedInputGenerator, effectiveExecutionTag, randoopSeedStatus,
+                    llmClient == null ? TokenUsage.EMPTY : llmClient.tokenUsage(), startNanos,
+                    repairAttempts, additiveRepairAttempts);
         } catch (Exception e) {
             System.err.println("Runner failed: " + e.getMessage());
             e.printStackTrace(System.err);
@@ -177,22 +219,33 @@ public final class App {
      * never builds an LLM client. Failing to write metrics must not fail the run.
      */
     private static void writeRunMetrics(
-            Path outputRoot, PromptConfig config, String status, TokenUsage usage, long startNanos) {
+            Path outputRoot, PromptConfig config, String status, InputGenerator requestedInputGenerator,
+            String effectiveExecutionTag, String randoopSeedStatus, TokenUsage usage, long startNanos,
+            int repairAttempts, int additiveRepairAttempts) {
         double elapsedSeconds = (System.nanoTime() - startNanos) / 1_000_000_000.0;
         // Locale.ROOT so a comma-decimal locale cannot emit "32,4" and break the JSON.
         String elapsed = String.format(Locale.ROOT, "%.1f", elapsedSeconds);
         System.out.println("Run took " + elapsed + "s and used " + usage.totalTokens()
-                + " tokens (" + usage.promptTokens() + " in, " + usage.completionTokens() + " out).");
+                + " tokens (" + usage.promptTokens() + " in, " + usage.completionTokens()
+                + " out, " + usage.reasoningTokens() + " reasoning).");
         try {
             Files.createDirectories(outputRoot);
             String json = "{\n"
                     + "  \"dataset\": " + JsonUtil.quote(String.valueOf(outputRoot.getFileName())) + ",\n"
-                    + "  \"inputGenerator\": " + JsonUtil.quote(config.inputGenerator().name()) + ",\n"
+                    + "  \"inputGenerator\": " + JsonUtil.quote(requestedInputGenerator.name()) + ",\n"
+                    + "  \"requestedInputGenerator\": " + JsonUtil.quote(requestedInputGenerator.name()) + ",\n"
+                    + "  \"effectiveInputGenerator\": " + JsonUtil.quote(config.inputGenerator().name()) + ",\n"
+                    + "  \"executionTag\": " + JsonUtil.quote(effectiveExecutionTag) + ",\n"
+                    + "  \"randoopSeedStatus\": " + JsonUtil.quote(randoopSeedStatus) + ",\n"
                     + "  \"mrProvider\": " + JsonUtil.quote(config.mrProvider().name()) + ",\n"
                     + "  \"status\": " + JsonUtil.quote(status) + ",\n"
                     + "  \"promptTokens\": " + usage.promptTokens() + ",\n"
                     + "  \"completionTokens\": " + usage.completionTokens() + ",\n"
+                    + "  \"reasoningTokens\": " + usage.reasoningTokens() + ",\n"
                     + "  \"totalTokens\": " + usage.totalTokens() + ",\n"
+                    + "  \"repairAttempts\": " + repairAttempts + ",\n"
+                    + "  \"additiveRepairAttempts\": " + additiveRepairAttempts + ",\n"
+                    + "  \"totalRepairAttempts\": " + (repairAttempts + additiveRepairAttempts) + ",\n"
                     + "  \"elapsedSeconds\": " + elapsed + "\n"
                     + "}\n";
             Path artifact = outputRoot.resolve("metrics.json");
@@ -201,6 +254,11 @@ public final class App {
         } catch (Exception e) {
             System.err.println("Could not write run metrics: " + e.getMessage());
         }
+    }
+
+    static boolean hasNoRandoopSeeds(String seedExamples) {
+        return seedExamples == null || seedExamples.isBlank()
+                || seedExamples.replaceAll("\\s", "").equals("[]");
     }
 
     /**
