@@ -11,10 +11,17 @@ import mtllm.report.HtmlReportWriter;
 import mtllm.sut.SutContext;
 import mtllm.util.GeneratedNames;
 
+import com.github.javaparser.StaticJavaParser;
+import com.github.javaparser.ast.CompilationUnit;
+import com.github.javaparser.ast.body.MethodDeclaration;
+
 import java.nio.file.Path;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Coordinates generation, validation, and optional repair of the generated test.
@@ -28,6 +35,7 @@ public final class RepairLoop {
     private final DataGeneratorRunner dataGeneratorRunner;
     private final Path generatedTestsDir;
     private final Path generatedCodeDir;
+    private final List<UnsatisfiableScenarioDetector.Retired> retiredScenarios = new ArrayList<>();
     private int lastRepairAttempts;
     private int lastAdditiveRepairAttempts;
 
@@ -133,11 +141,102 @@ public final class RepairLoop {
         return "\n\nUpdated HTML report with generated JUnit test method names: " + reportFile;
     }
 
+    /** One write-run cycle, after any unsatisfiable scenarios have been retired. */
+    private record Attempt(String code, Path file, TestRunResult result) {
+    }
+
+    /**
+     * Writes and runs the suite, and if it failed because the inferred domain planned something the
+     * SUT or developer MR refuses, drops those tests and runs again.
+     *
+     * <p>Called after <em>every</em> run, not just the first. A static failure such as a duplicate
+     * test body stops the suite ever executing, so the precondition errors only become visible once
+     * a repair has cleared the earlier problem. Retiring only after the first run would miss them.</p>
+     */
+    private Attempt runWithRetirement(String code, PromptConfig config, SutContext sutContext)
+            throws Exception {
+        Path file = writeGeneratedFile(config, code);
+        TestRunResult result = runGeneratedFile(file, config, sutContext);
+        if (result.failed()) {
+            String pruned = retireUnsatisfiableScenarios(code, config, result.output());
+            if (pruned != null) {
+                code = pruned;
+                file = writeGeneratedFile(config, code);
+                result = runGeneratedFile(file, config, sutContext);
+            }
+        }
+        return new Attempt(code, file, result);
+    }
+
+    /** Scenarios retired this run, for reporting. Empty is the normal, healthy case. */
+    public List<UnsatisfiableScenarioDetector.Retired> retiredScenarios() {
+        return List.copyOf(retiredScenarios);
+    }
+
+    /**
+     * Deletes the tests for any scenario the inferred domain planned but the SUT or developer MR
+     * refuses, and stops the gate demanding them back.
+     *
+     * <p>Without this an impossible scenario is a permanent obligation: the gate reports it missing,
+     * the loop asks the model to add it, the model adds it, it throws again, and the repair budget
+     * drains. Retiring it lets the rest of the suite stand, and the exclusion is reported rather
+     * than hidden so a run that discards ten scenarios is visibly weaker than one that discards
+     * none.</p>
+     *
+     * @return the suite with those tests removed, or {@code null} when nothing qualifies
+     */
+    private String retireUnsatisfiableScenarios(String code, PromptConfig config, String runOutput) {
+        List<UnsatisfiableScenarioDetector.Retired> found =
+                UnsatisfiableScenarioDetector.detect(runOutput, config);
+        if (found.isEmpty()) {
+            return null;
+        }
+        String pruned = removeMethods(code, UnsatisfiableScenarioDetector.testMethods(found));
+        if (pruned == null) {
+            return null;
+        }
+        retiredScenarios.addAll(found);
+        testRunner.retireScenarios(UnsatisfiableScenarioDetector.scenarioIds(found));
+        for (UnsatisfiableScenarioDetector.Retired retired : found) {
+            System.out.println("Retired unsatisfiable scenario " + retired.describe());
+        }
+        System.out.println("Retired " + found.size() + " scenario(s) the SUT or developer MR rejects; "
+                + "re-running the remaining suite.");
+        return pruned;
+    }
+
+    /**
+     * Deletes the named test methods from a suite. Returns null when nothing was removed or the
+     * suite could not be parsed, in which case the caller keeps the code it already had.
+     */
+    private static String removeMethods(String code, Set<String> methodNames) {
+        if (methodNames.isEmpty()) {
+            return null;
+        }
+        try {
+            CompilationUnit unit = StaticJavaParser.parse(code);
+            List<MethodDeclaration> doomed = unit.findAll(MethodDeclaration.class).stream()
+                    .filter(method -> methodNames.contains(method.getNameAsString()))
+                    .toList();
+            if (doomed.isEmpty()) {
+                return null;
+            }
+            doomed.forEach(MethodDeclaration::remove);
+            return unit.toString();
+        } catch (RuntimeException unparsable) {
+            // A suite we cannot parse is the repair loop's problem, not ours.
+            return null;
+        }
+    }
+
     private TestRunResult generateSingleOutput(PromptConfig config, SutContext sutContext) throws Exception {
         String code = llmClient.complete(PromptBuilder.buildInitialPrompt(config, sutContext));
-        Path generatedFile = writeGeneratedFile(config, code);
 
-        TestRunResult result = runGeneratedFile(generatedFile, config, sutContext);
+        Attempt attempt = runWithRetirement(code, config, sutContext);
+        code = attempt.code();
+        Path generatedFile = attempt.file();
+        TestRunResult result = attempt.result();
+
         int repairAttempts = 0;
         int additiveAttempts = 0;
         String additiveBaseCode = null;
@@ -157,6 +256,14 @@ public final class RepairLoop {
                     for (GeneratedTestQualityGate.MissingScenario scenario : quality.missingScenarios()) {
                         additiveMissing.put(scenario.id(), scenario.needed());
                     }
+                }
+                // additiveMissing is captured once, but retirement keeps running on every attempt.
+                // Without this the loop spends its whole budget asking the model to cover scenarios
+                // already proven unsatisfiable.
+                additiveMissing.keySet()
+                        .removeAll(UnsatisfiableScenarioDetector.scenarioIds(retiredScenarios));
+                if (additiveMissing.isEmpty()) {
+                    break;
                 }
                 System.out.println("Generated suite is missing scenario coverage. Requesting additive repair attempt "
                         + additiveAttempts + "...");
@@ -190,11 +297,18 @@ public final class RepairLoop {
                 System.out.println("Generated code failed. Requesting repair attempt " + repairAttempts + "...");
                 code = llmClient.complete(PromptBuilder.buildRepairPrompt(config, sutContext, code, result));
             }
-            generatedFile = writeGeneratedFile(config, code);
-            result = runGeneratedFile(generatedFile, config, sutContext);
+            attempt = runWithRetirement(code, config, sutContext);
+            code = attempt.code();
+            generatedFile = attempt.file();
+            result = attempt.result();
         }
         if (result.failed() && additiveBaseCode != null) {
-            writeGeneratedFile(config, additiveBaseCode);
+            // additiveBaseCode is a snapshot from when additive mode began; scenarios retired after
+            // that point are still in it, so strip them before restoring or the file left on disk
+            // contradicts the retirement log.
+            String restored = removeMethods(
+                    additiveBaseCode, UnsatisfiableScenarioDetector.testMethods(retiredScenarios));
+            writeGeneratedFile(config, restored != null ? restored : additiveBaseCode);
             return TestRunResult.failed(result.output()
                     + "\n\nAdditive repair attempts were exhausted; the original generated suite was retained unchanged.");
         }

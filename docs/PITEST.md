@@ -8,11 +8,9 @@ Run mutation testing with:
 mvn -Ppitest test-compile org.pitest:pitest-maven:mutationCoverage
 ```
 
-The profile mutates the example SUT classes that are compiled as main sources:
+The default `pitest` profile mutates:
 
-- `DijkstraAlgorithm*`
-- `MatrixRank`
-- `PricingEngine*`
+- `org.ta4j.core.analysis.elliott.swing.SlopeChangeSwingDetector`
 
 It runs only generated `*PassingTest` classes and excludes `*FailingTest` classes. The framework keeps failing tests as bug-revealing artifacts, but PIT requires the selected test suite to be green before mutation analysis starts.
 

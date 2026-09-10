@@ -354,6 +354,14 @@ def build_run_env(java_version: int, model_name: str | None) -> dict[str, str]:
     if java_home:
         env["JAVA_HOME"] = java_home
         env["PATH"] = str(Path(java_home) / "bin") + os.pathsep + env["PATH"]
+    else:
+        # resolve_java_home only works where /usr/libexec/java_home exists, so it always returns ""
+        # on Windows, and also returns "" on macOS when the requested JDK is not installed. Either
+        # way the run inherits whatever JAVA_HOME the shell happened to have, which may not be the
+        # version the manifest asked for. That used to happen silently.
+        inherited = env.get("JAVA_HOME") or "(JAVA_HOME unset, using whatever java is on PATH)"
+        print(f"!! WARNING: could not select JDK {java_version}; falling back to {inherited}")
+        print("!!          requestedJavaVersion and resolvedJavaHome in the run JSON record this.")
     return env
 
 

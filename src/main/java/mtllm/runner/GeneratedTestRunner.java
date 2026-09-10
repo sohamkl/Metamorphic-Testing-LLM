@@ -8,7 +8,9 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Compiles and optionally executes the generated JUnit 5 test class.
@@ -26,6 +28,8 @@ public final class GeneratedTestRunner {
     private ActualResultTestSplitter.SplitResult lastSplitResult;
     private GeneratedTestQualityGate.ValidationResult lastQualityResult =
             GeneratedTestQualityGate.ValidationResult.valid();
+    /** Scenarios proven unsatisfiable, so the gate stops demanding them. */
+    private Set<String> retiredScenarioIds = Set.of();
 
     public GeneratedTestRunner(Path repoRoot, Path classesDir, Path supportSourceDir, String junitConsoleJar, String mavenCommand) {
         this.repoRoot = repoRoot;
@@ -37,7 +41,8 @@ public final class GeneratedTestRunner {
 
     public TestRunResult compileAndRun(Path generatedTestFile, PromptConfig config, SutContext sutContext) throws Exception {
         lastSplitResult = null;
-        lastQualityResult = GeneratedTestQualityGate.validateDetailed(generatedTestFile, config);
+        lastQualityResult =
+                GeneratedTestQualityGate.validateDetailed(generatedTestFile, config, retiredScenarioIds);
         if (!lastQualityResult.passed()) {
             return TestRunResult.failed("Generated JUnit validation failed:\n" + lastQualityResult.error());
         }
@@ -177,6 +182,16 @@ public final class GeneratedTestRunner {
 
     GeneratedTestQualityGate.ValidationResult lastQualityResult() {
         return lastQualityResult;
+    }
+
+    /**
+     * Marks scenarios as unsatisfiable so later validations stop requiring them. Additive, because
+     * separate runs can retire different scenarios and none of them become satisfiable again.
+     */
+    void retireScenarios(Set<String> scenarioIds) {
+        Set<String> merged = new LinkedHashSet<>(retiredScenarioIds);
+        merged.addAll(scenarioIds);
+        retiredScenarioIds = Set.copyOf(merged);
     }
 
     private TestRunResult compile(Path generatedTestFile, PromptConfig config, SutContext sutContext) throws Exception {
