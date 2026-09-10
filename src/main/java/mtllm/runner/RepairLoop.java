@@ -191,20 +191,8 @@ public final class RepairLoop {
         if (found.isEmpty()) {
             return null;
         }
-        Set<String> methodsToDrop = UnsatisfiableScenarioDetector.testMethods(found);
-        String pruned;
-        try {
-            CompilationUnit unit = StaticJavaParser.parse(code);
-            List<MethodDeclaration> doomed = unit.findAll(MethodDeclaration.class).stream()
-                    .filter(method -> methodsToDrop.contains(method.getNameAsString()))
-                    .toList();
-            if (doomed.isEmpty()) {
-                return null;
-            }
-            doomed.forEach(MethodDeclaration::remove);
-            pruned = unit.toString();
-        } catch (RuntimeException unparsable) {
-            // A suite we cannot parse is the repair loop's problem, not ours.
+        String pruned = removeMethods(code, UnsatisfiableScenarioDetector.testMethods(found));
+        if (pruned == null) {
             return null;
         }
         retiredScenarios.addAll(found);
@@ -215,6 +203,30 @@ public final class RepairLoop {
         System.out.println("Retired " + found.size() + " scenario(s) the SUT or developer MR rejects; "
                 + "re-running the remaining suite.");
         return pruned;
+    }
+
+    /**
+     * Deletes the named test methods from a suite. Returns null when nothing was removed or the
+     * suite could not be parsed, in which case the caller keeps the code it already had.
+     */
+    private static String removeMethods(String code, Set<String> methodNames) {
+        if (methodNames.isEmpty()) {
+            return null;
+        }
+        try {
+            CompilationUnit unit = StaticJavaParser.parse(code);
+            List<MethodDeclaration> doomed = unit.findAll(MethodDeclaration.class).stream()
+                    .filter(method -> methodNames.contains(method.getNameAsString()))
+                    .toList();
+            if (doomed.isEmpty()) {
+                return null;
+            }
+            doomed.forEach(MethodDeclaration::remove);
+            return unit.toString();
+        } catch (RuntimeException unparsable) {
+            // A suite we cannot parse is the repair loop's problem, not ours.
+            return null;
+        }
     }
 
     private TestRunResult generateSingleOutput(PromptConfig config, SutContext sutContext) throws Exception {
@@ -244,6 +256,14 @@ public final class RepairLoop {
                     for (GeneratedTestQualityGate.MissingScenario scenario : quality.missingScenarios()) {
                         additiveMissing.put(scenario.id(), scenario.needed());
                     }
+                }
+                // additiveMissing is captured once, but retirement keeps running on every attempt.
+                // Without this the loop spends its whole budget asking the model to cover scenarios
+                // already proven unsatisfiable.
+                additiveMissing.keySet()
+                        .removeAll(UnsatisfiableScenarioDetector.scenarioIds(retiredScenarios));
+                if (additiveMissing.isEmpty()) {
+                    break;
                 }
                 System.out.println("Generated suite is missing scenario coverage. Requesting additive repair attempt "
                         + additiveAttempts + "...");
@@ -283,7 +303,12 @@ public final class RepairLoop {
             result = attempt.result();
         }
         if (result.failed() && additiveBaseCode != null) {
-            writeGeneratedFile(config, additiveBaseCode);
+            // additiveBaseCode is a snapshot from when additive mode began; scenarios retired after
+            // that point are still in it, so strip them before restoring or the file left on disk
+            // contradicts the retirement log.
+            String restored = removeMethods(
+                    additiveBaseCode, UnsatisfiableScenarioDetector.testMethods(retiredScenarios));
+            writeGeneratedFile(config, restored != null ? restored : additiveBaseCode);
             return TestRunResult.failed(result.output()
                     + "\n\nAdditive repair attempts were exhausted; the original generated suite was retained unchanged.");
         }
