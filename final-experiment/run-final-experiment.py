@@ -90,13 +90,14 @@ def execute_one(args: argparse.Namespace, manifest: dict[str, Any], run: dict[st
                 mode: str, input_generator: dict[str, Any], model: dict[str, str], run_no: int) -> None:
     defaults = manifest["defaults"]
     rid = run_id(run, mode, input_generator, model, run_no)
+    effective = effective_run(run, input_generator)
     metadata_root = REPO_ROOT / defaults["metadataRoot"]
     pit_archive_root = REPO_ROOT / defaults["pitReportArchiveRoot"]
-    generated_root = REPO_ROOT / run["generatedOutputRoot"]
+    generated_root = REPO_ROOT / effective["generatedOutputRoot"]
     source_prompt = run["prompts"][mode]
     run_prompt = metadata_root / f"{rid}.prompt.yaml"
     model_name = model.get("openaiModel")
-    generation_profiles = ",".join(run["generationProfiles"])
+    generation_profiles = ",".join(effective["generationProfiles"])
 
     generation_log = metadata_root / f"{rid}.generation.log"
     test_log = metadata_root / f"{rid}.test.log"
@@ -111,9 +112,9 @@ def execute_one(args: argparse.Namespace, manifest: dict[str, Any], run: dict[st
         f"-Dexec.args={rel(run_prompt)}",
     ]
     test_cmd = [
-        "mvn", f"-P{generation_profiles}", f"-Dtest={run['passingTestClass']}", "test",
+        "mvn", f"-P{generation_profiles}", f"-Dtest={effective['passingTestClass']}", "test",
     ]
-    pit = run["pit"]
+    pit = effective["pit"]
     pit_cmd = [
         "mvn", f"-P{generation_profiles},{pit.get('profile')}",
         "process-classes", "test-compile", "org.pitest:pitest-maven:mutationCoverage",
@@ -137,7 +138,12 @@ def execute_one(args: argparse.Namespace, manifest: dict[str, Any], run: dict[st
 
     metadata_root.mkdir(parents=True, exist_ok=True)
     pit_archive_root.mkdir(parents=True, exist_ok=True)
-    write_run_prompt(REPO_ROOT / source_prompt, run_prompt, input_generator["configValue"])
+    write_run_prompt(REPO_ROOT / source_prompt, run_prompt, {
+        "InputGenerator": input_generator["configValue"],
+        "MavenProfiles": effective["generationProfiles"],
+        "GeneratedClassName": effective["generatedClassName"],
+        "OutputRoot": effective["generatedOutputRoot"],
+    })
     if model_name:
         update_env_file(REPO_ROOT / defaults["envFile"], defaults["modelEnvKey"], model_name)
     if not args.keep_generated:
@@ -175,7 +181,10 @@ def execute_one(args: argparse.Namespace, manifest: dict[str, Any], run: dict[st
         "resolvedJavaHome": env.get("JAVA_HOME"),
         "sourcePrompt": source_prompt,
         "runPrompt": rel(run_prompt),
-        "generatedOutputRoot": run["generatedOutputRoot"],
+        "generatedOutputRoot": effective["generatedOutputRoot"],
+        "generatedClassName": effective["generatedClassName"],
+        "passingTestClass": effective["passingTestClass"],
+        "generationProfiles": effective["generationProfiles"],
         "generatedArchive": rel(generated_archive),
         "pitReportArchive": rel(pit_archive) if pit_archive.exists() else None,
         "startedAt": started,
@@ -213,6 +222,8 @@ def load_manifest_without_pyyaml(path: Path) -> dict[str, Any]:
     current: dict[str, Any] | None = None
     subsection = None
     subsection_indent = 0
+    override_name = None
+    override_subsection = None
     block_key = None
     block_indent = 0
     block_lines: list[str] = []
@@ -234,24 +245,54 @@ def load_manifest_without_pyyaml(path: Path) -> dict[str, Any]:
             block_lines.append(line)
             continue
         finish_block()
-        if subsection is not None and indent <= subsection_indent and not line.startswith("- "):
+        if subsection is not None and indent <= subsection_indent:
             subsection = None
+            override_name = None
+            override_subsection = None
 
         if not raw.startswith(" ") and line.endswith(":"):
             section = line[:-1]
             current = None
             subsection = None
             subsection_indent = 0
+            override_name = None
+            override_subsection = None
             continue
 
         if subsection == "generationProfiles" and line.startswith("- "):
             current[subsection].append(parse_scalar(line[2:]))
             continue
 
+        if subsection == "inputGeneratorOverrides":
+            overrides = current[subsection]
+            if indent == subsection_indent + 2 and line.endswith(":"):
+                override_name = line[:-1]
+                override_subsection = None
+                overrides[override_name] = {}
+                continue
+            if override_name is None:
+                continue
+            override = overrides[override_name]
+            if indent == subsection_indent + 4 and line.endswith(":"):
+                override_subsection = line[:-1]
+                override[override_subsection] = [] if override_subsection == "generationProfiles" else {}
+                continue
+            if override_subsection == "generationProfiles" and line.startswith("- "):
+                override[override_subsection].append(parse_scalar(line[2:]))
+                continue
+            key, value = split_key_value(line)
+            if override_subsection == "pit":
+                override[override_subsection][key] = parse_scalar(value)
+            else:
+                override[key] = parse_scalar(value)
+            continue
+
         if section in {"models", "inputGenerators", "runs"} and line.startswith("- "):
             current = {}
             data[section].append(current)
             subsection = None
+            override_name = None
+            override_subsection = None
             rest = line[2:]
             if rest:
                 key, value = split_key_value(rest)
@@ -319,7 +360,17 @@ def validate_manifest(manifest: dict[str, Any]) -> None:
     for run in manifest["runs"]:
         for mode, prompt in run["prompts"].items():
             require_path(REPO_ROOT / prompt, f"{run['id']} {mode} prompt")
-        require_path(REPO_ROOT / run["generatedOutputRoot"], f"{run['id']} output root")
+
+
+def effective_run(run: dict[str, Any], input_generator: dict[str, Any]) -> dict[str, Any]:
+    override = run.get("inputGeneratorOverrides", {}).get(input_generator["id"], {})
+    effective = dict(run)
+    for key in ("generationProfiles", "generatedOutputRoot", "generatedClassName", "passingTestClass"):
+        if key in override:
+            effective[key] = override[key]
+    if "pit" in override:
+        effective["pit"] = dict(run.get("pit", {})) | dict(override["pit"])
+    return effective
 
 
 def filter_named(items: list[dict[str, Any]], key: str, selected: list[str] | None) -> list[dict[str, Any]]:
@@ -423,18 +474,43 @@ def update_env_file(path: Path, key: str, value: str) -> None:
     write_text(path, "\n".join(out) + "\n")
 
 
-def write_run_prompt(source: Path, destination: Path, input_generator: str) -> None:
+def write_run_prompt(source: Path, destination: Path, updates: dict[str, Any]) -> None:
     text = source.read_text()
-    updated, count = re.subn(
-        r"(?m)^InputGenerator:\s*.*$",
-        f"InputGenerator: {input_generator}",
-        text,
-        count=1,
-    )
-    if count == 0:
-        updated = text.rstrip() + f"\nInputGenerator: {input_generator}\n"
+    updated = text
+    for key, value in updates.items():
+        updated = update_top_level_yaml_field(updated, key, value)
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(updated)
+
+
+def update_top_level_yaml_field(text: str, key: str, value: Any) -> str:
+    lines = text.splitlines()
+    rendered = render_yaml_field(key, value)
+    out: list[str] = []
+    i = 0
+    found = False
+    pattern = re.compile(rf"^{re.escape(key)}\s*:")
+    while i < len(lines):
+        if pattern.match(lines[i]):
+            out.extend(rendered)
+            found = True
+            i += 1
+            while i < len(lines) and (lines[i].startswith(" ") or lines[i].startswith("\t")):
+                i += 1
+            continue
+        out.append(lines[i])
+        i += 1
+    if not found:
+        if out and out[-1].strip():
+            out.append("")
+        out.extend(rendered)
+    return "\n".join(out).rstrip() + "\n"
+
+
+def render_yaml_field(key: str, value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [f"{key}:"] + [f"  - {item}" for item in value]
+    return [f"{key}: {value}"]
 
 
 def archive_pit_report(source: Path, destination: Path) -> None:
