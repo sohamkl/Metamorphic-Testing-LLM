@@ -165,6 +165,7 @@ def execute_one(args: argparse.Namespace, manifest: dict[str, Any], run: dict[st
     if generated_root.exists():
         reset_directory(generated_archive)
         shutil.copytree(generated_root, generated_archive, dirs_exist_ok=True)
+    generated_test_counts = count_generated_tests(generated_archive)
 
     summary = {
         "runId": rid,
@@ -194,6 +195,7 @@ def execute_one(args: argparse.Namespace, manifest: dict[str, Any], run: dict[st
         "test": test,
         "pit": pit_result | {"profile": pit.get("profile"), "sourceReportDir": pit.get("reportDir")},
         "frameworkMetrics": metrics,
+        "generatedTestCounts": generated_test_counts,
         "pitSummary": read_pit_summary(pit_archive / "mutations.xml"),
     }
     write_json(run_json, summary)
@@ -534,6 +536,51 @@ def read_pit_summary(mutations_xml: Path) -> dict[str, Any]:
         if mutation.attrib.get("detected") == "true":
             detected += 1
     return {"totalMutations": total, "detectedMutations": detected, "statuses": counts}
+
+
+def count_generated_tests(generated_archive: Path) -> dict[str, Any]:
+    tests_dir = generated_archive / "junit-tests"
+    if not tests_dir.exists():
+        return {
+            "total": 0,
+            "passing": 0,
+            "failing": 0,
+            "candidate": 0,
+            "files": [],
+        }
+
+    files = []
+    total = 0
+    passing = 0
+    failing = 0
+    candidate = 0
+    for path in sorted(tests_dir.glob("*.java")):
+        count = count_junit_tests(path)
+        if count == 0:
+            continue
+        relative = rel(path)
+        files.append({"path": relative, "testMethods": count})
+        total += count
+        name = path.name
+        if name.endswith("PassingTest.java"):
+            passing += count
+        elif name.endswith("FailingTest.java"):
+            failing += count
+        else:
+            candidate += count
+
+    return {
+        "total": total,
+        "passing": passing,
+        "failing": failing,
+        "candidate": candidate,
+        "files": files,
+    }
+
+
+def count_junit_tests(path: Path) -> int:
+    text = path.read_text(errors="ignore")
+    return len(re.findall(r"(?m)^\s*@(?:org\.junit\.jupiter\.api\.)?Test\b", text))
 
 
 def reset_directory(path: Path) -> None:
