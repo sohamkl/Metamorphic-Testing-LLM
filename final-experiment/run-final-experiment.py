@@ -98,6 +98,7 @@ def execute_one(args: argparse.Namespace, manifest: dict[str, Any], run: dict[st
     run_prompt = metadata_root / f"{rid}.prompt.yaml"
     model_name = model.get("openaiModel")
     generation_profiles = ",".join(effective["generationProfiles"])
+    mvn = maven_command(REPO_ROOT / defaults["envFile"])
 
     generation_log = metadata_root / f"{rid}.generation.log"
     test_log = metadata_root / f"{rid}.test.log"
@@ -107,16 +108,16 @@ def execute_one(args: argparse.Namespace, manifest: dict[str, Any], run: dict[st
     pit_archive = pit_archive_root / rid
 
     generation_cmd = [
-        "mvn", f"-P{generation_profiles}", "-DskipTests", "compile", "exec:java",
+        mvn, f"-P{generation_profiles}", "-DskipTests", "compile", "exec:java",
         "-Dexec.mainClass=mtllm.OpenaiRunner",
         f"-Dexec.args={rel(run_prompt)}",
     ]
     test_cmd = [
-        "mvn", f"-P{generation_profiles}", f"-Dtest={effective['passingTestClass']}", "test",
+        mvn, f"-P{generation_profiles}", f"-Dtest={effective['passingTestClass']}", "test",
     ]
     pit = effective["pit"]
     pit_cmd = [
-        "mvn", f"-P{generation_profiles},{pit.get('profile')}",
+        mvn, f"-P{generation_profiles},{pit.get('profile')}",
         "process-classes", "test-compile", "org.pitest:pitest-maven:mutationCoverage",
     ] if pit.get("status") == "ready" else []
 
@@ -432,6 +433,23 @@ def resolve_java_home(java_version: int, env: dict[str, str]) -> str:
         stderr=subprocess.PIPE,
     )
     return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def maven_command(env_file: Path) -> str:
+    # Same lookup order as App.java: MAVEN_CMD from the shell, then .env. Without either, Windows needs
+    # mvn.cmd, because CreateProcess only appends .exe and a bare "mvn" therefore never launches there.
+    configured = os.environ.get("MAVEN_CMD", "").strip() or read_env_value(env_file, "MAVEN_CMD")
+    if configured:
+        return configured
+    return "mvn.cmd" if os.name == "nt" else "mvn"
+
+
+def read_env_value(path: Path, key: str) -> str:
+    for line in read_text(path).splitlines():
+        name, sep, value = line.strip().partition("=")
+        if sep and name.strip() == key:
+            return value.strip().strip("\"'")
+    return ""
 
 
 def run_command(cmd: list[str], log_path: Path, env: dict[str, str]) -> dict[str, Any]:
