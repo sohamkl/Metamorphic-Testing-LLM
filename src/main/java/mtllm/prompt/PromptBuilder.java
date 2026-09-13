@@ -81,9 +81,8 @@ public final class PromptBuilder {
         appendSutSection(prompt, config, sutContext);
         prompt.append("The following generated JUnit class already contains valid candidate tests.\n")
                 .append("Do not rewrite, remove, rename, or repeat any existing test or helper.\n")
-                .append("```java\n").append(existingCode).append("\n```\n\n")
-                .append("Metamorphic relation:\n")
-                .append(config.metamorphicRelationStatement()).append("\n\n");
+                .append("```java\n").append(existingCode).append("\n```\n\n");
+        appendMetamorphicRelation(prompt, config);
         if (!config.inputDomain().isBlank()) {
             prompt.append("Structured input domain and scenario requirements:\n")
                     .append(config.inputDomain()).append("\n\n");
@@ -155,9 +154,19 @@ public final class PromptBuilder {
         }
     }
 
-    private static void appendTaskSection(StringBuilder prompt, PromptConfig config) {
+    private static void appendMetamorphicRelation(StringBuilder prompt, PromptConfig config) {
+        // A developer-owned MR is defined by its helper code, which appendSutSection already includes. Restating
+        // MRInput/MROutput prose as well would give the model a second definition, and one that only some
+        // prompt.yaml files carry, so the prose is reserved for LLM-owned MRs.
+        if (config.mode().usesDeveloperMrHelpers()) {
+            return;
+        }
         prompt.append("Metamorphic relation:\n");
         prompt.append(config.metamorphicRelationStatement()).append("\n\n");
+    }
+
+    private static void appendTaskSection(StringBuilder prompt, PromptConfig config) {
+        appendMetamorphicRelation(prompt, config);
 
         if (!config.inputDomain().isBlank()) {
             prompt.append(config.inputDomainRequirements().isStructured()

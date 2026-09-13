@@ -63,8 +63,19 @@ public final class InputDomainInferenceService {
             prompt.append("SUT description:\n").append(config.sutDescription()).append("\n\n");
         }
         prompt.append("Target method:\n").append(config.targetFunction()).append("\n\n");
-        prompt.append("Metamorphic relation:\n")
-                .append(config.metamorphicRelationStatement()).append("\n\n");
+        if (config.mode().usesDeveloperMrHelpers()) {
+            // The developer's helper code is the MR; MRInput/MROutput prose is not part of a DEV configuration.
+            prompt.append("Developer-provided metamorphic relation (follow-up transformation ")
+                    .append(config.developerFollowUpMethod())
+                    .append(", output relation assertion ")
+                    .append(config.developerAssertMethod())
+                    .append("):\n```java\n")
+                    .append(config.developerMrSource())
+                    .append("\n```\n\n");
+        } else {
+            prompt.append("Metamorphic relation:\n")
+                    .append(config.metamorphicRelationStatement()).append("\n\n");
+        }
         if (!context.apiDescription().isBlank()) {
             prompt.append("Discovered API and construction metadata:\n")
                     .append(context.apiDescription()).append("\n\n");

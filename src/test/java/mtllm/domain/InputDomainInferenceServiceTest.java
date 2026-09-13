@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Queue;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class InputDomainInferenceServiceTest {
@@ -74,6 +75,35 @@ class InputDomainInferenceServiceTest {
     }
 
     @Test
+    void developerMrInferencePromptUsesHelperCodeInsteadOfMrProse() throws Exception {
+        Files.writeString(repoRoot.resolve("ExampleSpec.java"), """
+                public final class ExampleSpec {
+                    public static int generateFollowUp(int source) {
+                        return source + 0;
+                    }
+                }
+                """);
+        PromptConfig config = configWithoutInputDomain("""
+                MRProvider: DEV
+                MRInput: zero is added to the source
+                MROutput: the result is unchanged
+                DeveloperMrFile: ExampleSpec.java
+                DeveloperFollowUpMethod: ExampleSpec.generateFollowUp
+                DeveloperAssertMethod: ExampleSpec.assertRelation
+                """);
+        SutContext context = new SutContext(
+                config.sutClassFile(), Files.readString(config.sutClassFile()), List.of(), "");
+
+        String prompt = InputDomainInferenceService.buildPrompt(config, context);
+
+        assertTrue(prompt.contains("return source + 0;"));
+        assertTrue(prompt.contains("ExampleSpec.generateFollowUp"));
+        assertTrue(prompt.contains("ExampleSpec.assertRelation"));
+        assertFalse(prompt.contains("zero is added"));
+        assertFalse(prompt.contains("Metamorphic relation:"));
+    }
+
+    @Test
     void normalizesInferredScenarioTargetsThatExceedCount() throws Exception {
         PromptConfig config = configWithoutInputDomain();
         QueueClient client = new QueueClient("""
@@ -105,6 +135,13 @@ class InputDomainInferenceServiceTest {
     }
 
     private PromptConfig configWithoutInputDomain() throws Exception {
+        return configWithoutInputDomain("""
+                MR: Adding zero preserves the result.
+                MRProvider: LLM
+                """);
+    }
+
+    private PromptConfig configWithoutInputDomain(String mrYaml) throws Exception {
         Files.writeString(repoRoot.resolve("ExampleSut.java"), """
                 public final class ExampleSut {
                     public static int run(int source) {
@@ -116,11 +153,9 @@ class InputDomainInferenceServiceTest {
         Files.writeString(prompt, """
                 SUTClassFile: ExampleSut.java
                 TargetFunction: public static int ExampleSut.run(int source)
-                MR: Adding zero preserves the result.
                 Count: 4
                 OutputRoot: generated/example
-                MRProvider: LLM
-                """);
+                """ + mrYaml);
         return PromptConfigLoader.load(prompt, repoRoot);
     }
 
