@@ -76,7 +76,9 @@ public final class App {
 
             config = ProjectDiscovery.enrichClasspath(config, mavenCommand);
             SutContext sutContext = SutContextLoader.load(config, repoRoot);
-            LlmClient llmClient = needsApiKey ? new OpenAiClient(apiKey, model, baseUrl) : null;
+            String reasoningEffort = DotEnv.firstNonBlank(
+                    System.getenv("OPENAI_REASONING_EFFORT"), env.get("OPENAI_REASONING_EFFORT"));
+            LlmClient llmClient = needsApiKey ? new OpenAiClient(apiKey, model, baseUrl, reasoningEffort) : null;
             if (needsApiKey && config.inputDomainRequirements().isEmpty()) {
                 System.out.println("No InputDomain supplied; inferring a grounded structured domain...");
                 InputDomainInferenceService.InferenceResult inference =

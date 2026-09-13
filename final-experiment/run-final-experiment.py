@@ -121,13 +121,15 @@ def execute_one(args: argparse.Namespace, manifest: dict[str, Any], run: dict[st
         "process-classes", "test-compile", "org.pitest:pitest-maven:mutationCoverage",
     ] if pit.get("status") == "ready" else []
 
-    env = build_run_env(run["javaVersion"], model_name)
+    reasoning_effort = defaults.get("reasoningEffort") if model_name else None
+    env = build_run_env(run["javaVersion"], model_name, reasoning_effort)
 
     print(f"\n== {rid} ==")
     print(f"source prompt: {source_prompt}")
     print(f"run prompt: {rel(run_prompt)}")
     print(f"input generator: {input_generator['configValue']}")
     print(f"model: {model_name or 'not used'}")
+    print(f"reasoning effort: {reasoning_effort or 'not used'}")
     print(f"java: {env.get('JAVA_HOME', 'current')}")
 
     if args.dry_run:
@@ -178,6 +180,7 @@ def execute_one(args: argparse.Namespace, manifest: dict[str, Any], run: dict[st
         "inputGeneratorConfigValue": input_generator["configValue"],
         "model": model["id"],
         "openaiModel": model_name,
+        "reasoningEffort": reasoning_effort,
         "runNumber": run_no,
         "requestedJavaVersion": run["javaVersion"],
         "resolvedJavaHome": env.get("JAVA_HOME"),
@@ -198,6 +201,7 @@ def execute_one(args: argparse.Namespace, manifest: dict[str, Any], run: dict[st
         "frameworkMetrics": metrics,
         "generatedTestCounts": generated_test_counts,
         "pitSummary": read_pit_summary(pit_archive / "mutations.xml"),
+        "pitLineCoverage": {} if pit_result.get("skipped") else read_pit_line_coverage(pit_log),
     }
     write_json(run_json, summary)
     append_jsonl(metadata_root / "all-runs.jsonl", summary)
@@ -399,11 +403,13 @@ def run_id(run: dict[str, Any], mode: str, input_generator: dict[str, Any],
     return f"{run['sut']}__{run['mr']}__{mode}__{input_generator['id']}__{model['id']}__run{run_no:03d}"
 
 
-def build_run_env(java_version: int, model_name: str | None) -> dict[str, str]:
+def build_run_env(java_version: int, model_name: str | None, reasoning_effort: str | None = None) -> dict[str, str]:
     env = os.environ.copy()
     env["PATH"] = DEFAULT_PATH + os.pathsep + env.get("PATH", "")
     if model_name:
         env["OPENAI_MODEL"] = model_name
+    if reasoning_effort:
+        env["OPENAI_REASONING_EFFORT"] = reasoning_effort
     java_home = resolve_java_home(java_version, env)
     if java_home:
         env["JAVA_HOME"] = java_home
@@ -554,6 +560,22 @@ def read_pit_summary(mutations_xml: Path) -> dict[str, Any]:
         if mutation.attrib.get("detected") == "true":
             detected += 1
     return {"totalMutations": total, "detectedMutations": detected, "statuses": counts}
+
+
+def read_pit_line_coverage(pit_log: Path) -> dict[str, Any]:
+    # mutations.xml has no line counts, so read PIT's console statistics block, which reports e.g.
+    # ">> Line Coverage (for mutated classes only): 43/62 (69%)" for the target classes.
+    if not pit_log.exists():
+        return {}
+    matches = re.findall(r"Line Coverage[^:\n]*:\s*(\d+)/(\d+)", read_text(pit_log))
+    if not matches:
+        return {}
+    covered, total = (int(n) for n in matches[-1])
+    return {
+        "coveredLines": covered,
+        "totalLines": total,
+        "lineCoverage": round(covered / total, 4) if total else None,
+    }
 
 
 def count_generated_tests(generated_archive: Path) -> dict[str, Any]:

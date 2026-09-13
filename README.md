@@ -39,6 +39,8 @@ JUNIT_PLATFORM_CONSOLE_STANDALONE_JAR=/absolute/path/to/junit-platform-console-s
 
 `JUNIT_PLATFORM_CONSOLE_STANDALONE_JAR` is optional. If it is missing, the tool uses Maven (`mvn test`) to compile and run generated JUnit tests. `MAVEN_CMD` is optional too; set it only if Maven is not on your normal PATH.
 
+`OPENAI_REASONING_EFFORT` is optional. When set (for example `medium`), it is sent to the API as `reasoning_effort`; leave it unset for models without reasoning support, such as `gpt-4o-mini`, which reject the field. The final-experiment runner sets it from `reasoningEffort` in `final-experiment/experiment-manifest.yaml`.
+
 ## Project Layout
 
 | Path | Purpose |

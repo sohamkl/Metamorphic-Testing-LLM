@@ -21,20 +21,30 @@ public final class OpenAiClient implements LlmClient {
     private final String apiKey;
     private final String model;
     private final String baseUrl;
+    private final String reasoningEffort;
     private TokenUsage tokenUsage = TokenUsage.EMPTY;
 
     public OpenAiClient(String apiKey, String model, String baseUrl) {
+        this(apiKey, model, baseUrl, "");
+    }
+
+    /**
+     * @param reasoningEffort sent as {@code reasoning_effort} (for example "medium") when non-blank. Blank omits
+     *     the field, because non-reasoning models such as gpt-4o-mini reject it.
+     */
+    public OpenAiClient(String apiKey, String model, String baseUrl, String reasoningEffort) {
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(15))
                 .build();
         this.apiKey = apiKey;
         this.model = model;
         this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
+        this.reasoningEffort = reasoningEffort == null ? "" : reasoningEffort.trim();
     }
 
     @Override
     public String complete(String prompt) throws Exception {
-        String payload = buildPayload(model, prompt);
+        String payload = buildPayload(model, prompt, reasoningEffort);
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(baseUrl + "/chat/completions"))
@@ -68,10 +78,15 @@ public final class OpenAiClient implements LlmClient {
     }
 
     static String buildPayload(String model, String prompt) {
+        return buildPayload(model, prompt, "");
+    }
+
+    static String buildPayload(String model, String prompt, String reasoningEffort) {
         return "{"
                 + "\"model\":" + JsonUtil.quote(model) + ","
                 + "\"messages\":[{\"role\":\"user\",\"content\":" + JsonUtil.quote(prompt) + "}]"
                 + (model.startsWith("gpt-5") ? "" : ",\"temperature\":0.2")
+                + (reasoningEffort.isBlank() ? "" : ",\"reasoning_effort\":" + JsonUtil.quote(reasoningEffort))
                 + "}";
     }
 }

@@ -102,7 +102,9 @@ public final class RandoopDataGenerator {
             String model = DotEnv.firstNonBlank(System.getenv("OPENAI_MODEL"), env.get("OPENAI_MODEL"), "gpt-4o-mini");
             String baseUrl = DotEnv.firstNonBlank(
                     System.getenv("OPENAI_BASE_URL"), env.get("OPENAI_BASE_URL"), "https://api.openai.com/v1");
-            seederClient = new OpenAiClient(apiKey, model, baseUrl);
+            String reasoningEffort = DotEnv.firstNonBlank(
+                    System.getenv("OPENAI_REASONING_EFFORT"), env.get("OPENAI_REASONING_EFFORT"));
+            seederClient = new OpenAiClient(apiKey, model, baseUrl, reasoningEffort);
         }
 
         if (hasFlag(args, "--seeded-sources-only")) {

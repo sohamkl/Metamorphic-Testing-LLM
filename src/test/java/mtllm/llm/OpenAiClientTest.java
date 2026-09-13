@@ -20,4 +20,18 @@ class OpenAiClientTest {
 
         assertTrue(payload.contains("\"temperature\":0.2"));
     }
+
+    @Test
+    void sendsReasoningEffortWhenConfigured() {
+        String payload = OpenAiClient.buildPayload("gpt-5.6-sol", "Generate tests", "medium");
+
+        assertTrue(payload.contains("\"reasoning_effort\":\"medium\""));
+    }
+
+    @Test
+    void omitsReasoningEffortWhenBlank() {
+        String payload = OpenAiClient.buildPayload("gpt-4o-mini", "Generate tests", "");
+
+        assertFalse(payload.contains("reasoning_effort"));
+    }
 }
