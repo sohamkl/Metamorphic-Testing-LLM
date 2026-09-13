@@ -107,8 +107,10 @@ def execute_one(args: argparse.Namespace, manifest: dict[str, Any], run: dict[st
     generated_archive = metadata_root / f"{rid}.generated"
     pit_archive = pit_archive_root / rid
 
+    # clean first: every PIT step copies the SUT's classes into target/classes so PIT can mutate them, and a
+    # stale copy left there shadows the SUT on the next run's classpath (NoClassDefFoundError at startup).
     generation_cmd = [
-        mvn, f"-P{generation_profiles}", "-DskipTests", "compile", "exec:java",
+        mvn, f"-P{generation_profiles}", "-DskipTests", "clean", "compile", "exec:java",
         "-Dexec.mainClass=mtllm.OpenaiRunner",
         f"-Dexec.args={rel(run_prompt)}",
     ]
