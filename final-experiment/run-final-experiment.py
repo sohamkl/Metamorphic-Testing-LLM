@@ -45,7 +45,7 @@ def main() -> int:
         for input_generator in input_generators
         if mode in input_generator["modes"]
         for model in models_for_input_generator(input_generator, models)
-        for run_no in range(1, runs_per_combination + 1)
+        for run_no in range(args.start_run, runs_per_combination + 1)
     ]
 
     if args.list:
@@ -80,6 +80,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--model", dest="models", action="append", help="Restrict to a model id.")
     parser.add_argument("--runs-per-combination", type=int, help="Override defaults.runsPerCombination.")
+    parser.add_argument("--start-run", type=int, default=1,
+                        help="First repetition number to run (e.g. 2 skips run001).")
     parser.add_argument("--skip-pit", action="store_true", help="Skip PIT after generation/test.")
     parser.add_argument("--keep-generated", action="store_true", help="Do not delete generated output before a run.")
     parser.add_argument("--continue-on-error", action="store_true", help="Continue after a failed run.")

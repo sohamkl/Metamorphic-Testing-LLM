@@ -1,0 +1,495 @@
+InputDomain:
+  summary: Finite geographic RectangleImpl receivers and finite geographic Point arguments,
+    emphasizing latitude rejection, inclusive longitude and latitude boundaries, dateline
+    wrapping, degenerate ranges, world-width sentinels, and all point-specific longitude
+    branches; each follow-up rotates every longitude east by 150 degrees and wraps
+    it into [-180,180] while preserving latitude.
+  globalConstraints:
+  - Use a SpatialContext for which ctx.isGeo() is true, because the target longitude
+    logic and the metamorphic transformation are geographic and dateline-aware.
+  - Use finite longitude and latitude values for ordinary cases, with point longitudes
+    and rectangle longitudes in [-180,180] unless a scenario explicitly tests the
+    constructor's accepted non-canonical finite coordinates.
+  - Use rectangle coordinates satisfying minY <= maxY; the supplied reset method asserts
+    this relationship and does not normalize latitude.
+  - '{Construct the receiver only through one of the supplied RectangleImpl constructors=(double,double,double,double,SpatialContext),
+    (Point,Point,SpatialContext), or (Rectangle,SpatialContext).}'
+  - Supply a non-null Point argument with finite coordinates for ordinary cases; its
+    longitude and latitude are the source inputs to relate(Point).
+  - For every case, form the follow-up from the same rectangle and point longitudes
+    plus 150 degrees, wrapping each resulting longitude into [-180,180], and leave
+    both latitudes unchanged.
+  - '{Do not use NaN or infinite coordinates=although the implementation can store
+    some such values, the supplied metamorphic rotation and longitude wrapping are
+    not a defined geographic follow-up for them.}'
+  diversity:
+    contextMode:
+    - geographic
+    receiverConstruction:
+    - DIRECT_COORDINATES
+    - POINT_ENDPOINTS
+    - RECTANGLE_COPY
+    longitudeTopology:
+    - ordinary_non_wrapping
+    - dateline_wrapping
+    - full_world_width
+    - zero_width
+    latitudeTopology:
+    - positive_height
+    - zero_height
+    pointLongitudeBranch:
+    - directly_inside
+    - below_minX
+    - above_maxX
+    - outside_after_shift
+    pointLatitudeBranch:
+    - below_minY
+    - equal_minY
+    - interior
+    - equal_maxY
+    - above_maxY
+    rotationEffect:
+    - no_dateline_crossing
+    - receiver_crosses_dateline
+    - point_crosses_dateline
+    - both_cross_dateline
+    coordinateScale:
+    - canonical_geographic
+    - finite_noncanonical_receiver_longitude
+  scenarios:
+  - id: NONWRAPPING_INTERIOR_DIRECT_CONTAINS
+    category: NORMAL
+    description: A positive-area ordinary rectangle directly contains the point in
+      both dimensions without any longitude adjustment.
+    preconditions:
+    - Receiver coordinates are minX=-40, maxX=60, minY=-20, maxY=30.
+    - Point coordinates are x=10, y=5.
+    - Use the direct-coordinate constructor.
+    expectedSourceBehavior:
+    - The latitude guard is not taken.
+    - In the geo longitude logic, pX lies between minX and maxX, so the short-circuit
+      returns CONTAINS.
+    - The rotated follow-up also returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NONWRAPPING_MINIMUM_LONGITUDE_INCLUSIVE
+    category: BOUNDARY
+    description: The point lies exactly on the ordinary rectangle's minimum longitude
+      and inside its latitude interval.
+    preconditions:
+    - Receiver coordinates are minX=-40, maxX=60, minY=-20, maxY=30.
+    - Point coordinates are x=-40, y=5.
+    expectedSourceBehavior:
+    - Equality at minX does not trigger pX < minX.
+    - The direct longitude short-circuit returns CONTAINS.
+    - The follow-up preserves containment at the rotated boundary.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NONWRAPPING_MAXIMUM_LONGITUDE_INCLUSIVE
+    category: BOUNDARY
+    description: The point lies exactly on the ordinary rectangle's maximum longitude
+      and inside its latitude interval.
+    preconditions:
+    - Receiver coordinates are minX=-40, maxX=60, minY=-20, maxY=30.
+    - Point coordinates are x=60, y=5.
+    expectedSourceBehavior:
+    - Equality at maxX does not trigger pX > maxX.
+    - The direct longitude short-circuit returns CONTAINS.
+    - The follow-up preserves containment at the rotated boundary.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NONWRAPPING_LONGITUDE_BELOW_MIN_DISJOINT
+    category: EDGE
+    description: The point is west of a canonical non-wrapping rectangle and remains
+      outside after the source's +360 adjustment.
+    preconditions:
+    - Receiver coordinates are minX=-40, maxX=60, minY=-20, maxY=30.
+    - Point coordinates are x=-100, y=5.
+    expectedSourceBehavior:
+    - The latitude guard is not taken.
+    - pX < minX causes pX to be increased by 360.
+    - The adjusted pX remains greater than maxX, so the result is DISJOINT.
+    - The rotated follow-up remains DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NONWRAPPING_LONGITUDE_ABOVE_MAX_DISJOINT
+    category: EDGE
+    description: The point is east of a canonical non-wrapping rectangle and remains
+      outside after the source's -360 adjustment.
+    preconditions:
+    - Receiver coordinates are minX=-40, maxX=60, minY=-20, maxY=30.
+    - Point coordinates are x=100, y=5.
+    expectedSourceBehavior:
+    - pX > maxX causes pX to be decreased by 360.
+    - The adjusted pX remains less than minX, so the result is DISJOINT.
+    - The rotated follow-up remains DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LATITUDE_BELOW_MIN_EARLY_DISJOINT
+    category: BOUNDARY
+    description: The point is below the rectangle while its longitude is directly
+      inside.
+    preconditions:
+    - Receiver coordinates are minX=-40, maxX=60, minY=-20, maxY=30.
+    - Point coordinates are x=10, y=-20.000001.
+    expectedSourceBehavior:
+    - The first latitude condition returns DISJOINT before any longitude logic executes.
+    - The follow-up also returns DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LATITUDE_AT_MIN_INCLUSIVE
+    category: BOUNDARY
+    description: The point is exactly on minY and directly inside the longitude interval.
+    preconditions:
+    - Receiver coordinates are minX=-40, maxX=60, minY=-20, maxY=30.
+    - Point coordinates are x=10, y=-20.
+    expectedSourceBehavior:
+    - The strict y comparisons do not reject equality.
+    - Longitude short-circuit returns CONTAINS.
+    - The rotated follow-up returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LATITUDE_AT_MAX_INCLUSIVE
+    category: BOUNDARY
+    description: The point is exactly on maxY and directly inside the longitude interval.
+    preconditions:
+    - Receiver coordinates are minX=-40, maxX=60, minY=-20, maxY=30.
+    - Point coordinates are x=10, y=30.
+    expectedSourceBehavior:
+    - The strict y comparisons do not reject equality.
+    - Longitude short-circuit returns CONTAINS.
+    - The rotated follow-up returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LATITUDE_ABOVE_MAX_EARLY_DISJOINT
+    category: BOUNDARY
+    description: The point is above the rectangle while its longitude is directly
+      inside.
+    preconditions:
+    - Receiver coordinates are minX=-40, maxX=60, minY=-20, maxY=30.
+    - Point coordinates are x=10, y=30.000001.
+    expectedSourceBehavior:
+    - The first latitude condition returns DISJOINT before longitude processing.
+    - The follow-up also returns DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DATELINE_RECTANGLE_DIRECT_INTERIOR
+    category: NORMAL
+    description: A rectangle with minX greater than maxX represents a dateline-wrapping
+      interval, and the point is directly inside its unwrapped interval.
+    preconditions:
+    - Receiver coordinates are minX=170, maxX=-170, minY=-20, maxY=30.
+    - Point coordinates are x=175, y=5.
+    expectedSourceBehavior:
+    - rawWidth is negative and maxX is unwrapped to 190.
+    - The point lies directly between 170 and 190, so CONTAINS is returned by the
+      short-circuit.
+    - The follow-up remains CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DATELINE_RECTANGLE_POINT_BELOW_MIN_WRAP_CONTAINS
+    category: EDGE
+    description: A point just west of the dateline-wrapping rectangle is shifted by
+      360 into the rectangle.
+    preconditions:
+    - Receiver coordinates are minX=170, maxX=-170, minY=-20, maxY=30.
+    - Point coordinates are x=-175, y=5.
+    expectedSourceBehavior:
+    - rawWidth is negative and the effective maxX is 190.
+    - pX < minX causes pX to become 185.
+    - The adjusted point is inside, so the result is CONTAINS.
+    - The follow-up remains CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DATELINE_RECTANGLE_LONGITUDE_GAP_DISJOINT
+    category: NORMAL
+    description: A point in the ordinary longitude gap of a dateline-wrapping rectangle
+      remains outside after adjustment.
+    preconditions:
+    - Receiver coordinates are minX=170, maxX=-170, minY=-20, maxY=30.
+    - Point coordinates are x=0, y=5.
+    expectedSourceBehavior:
+    - rawWidth is negative and the effective maxX is 190.
+    - pX < minX causes pX to become 360, which is greater than the effective maxX.
+    - The result is DISJOINT and the follow-up remains DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DATELINE_RECTANGLE_POINT_ABOVE_MAX_WRAP_CONTAINS
+    category: EDGE
+    description: A dateline-wrapping rectangle with the opposite endpoint ordering
+      exercises the pX > maxX adjustment and contains the adjusted point.
+    preconditions:
+    - Receiver coordinates are minX=-170, maxX=170, minY=-20, maxY=30, interpreted
+      as an ordinary interval; use the finite noncanonical receiver variant minX=-190,
+      maxX=-170 for the adjustment-specific case.
+    - For the adjustment-specific case, point coordinates are x=175, y=5, so pX >
+      maxX and pX-360=-185 lies in [-190,-170].
+    expectedSourceBehavior:
+    - The adjustment-specific receiver takes the pX > maxX branch.
+    - The adjusted pX is inside and the result is CONTAINS.
+    - The follow-up preserves the relation.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DATELINE_ENDPOINT_MIN180
+    category: BOUNDARY
+    description: A wrapping rectangle begins at -180 and contains a point at the canonical
+      dateline endpoint.
+    preconditions:
+    - Receiver coordinates are minX=170, maxX=-180, minY=-10, maxY=10.
+    - Point coordinates are x=-180, y=0.
+    expectedSourceBehavior:
+    - The negative raw width is unwrapped for longitude comparison.
+    - The point is shifted into the effective interval and returns CONTAINS.
+    - The rotated follow-up is checked for the same relation after endpoint wrapping.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DATELINE_ENDPOINT_MAX180
+    category: BOUNDARY
+    description: A wrapping rectangle ends at +180 and contains a point at the positive
+      canonical dateline endpoint.
+    preconditions:
+    - Receiver coordinates are minX=180, maxX=-170, minY=-10, maxY=10.
+    - Point coordinates are x=180, y=0.
+    expectedSourceBehavior:
+    - The point equals minX and reaches the direct containment short-circuit.
+    - The follow-up exercises normalization of a longitude that wraps through +180.
+    - The original and follow-up relations are compared.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_WIDTH_LONGITUDE_EQUAL
+    category: EDGE
+    description: The rectangle has minX equal to maxX and the point is exactly on
+      that longitude.
+    preconditions:
+    - Receiver coordinates are minX=25, maxX=25, minY=-20, maxY=30.
+    - Point coordinates are x=25, y=5.
+    expectedSourceBehavior:
+    - rawWidth is zero, not negative.
+    - Equality reaches the direct containment short-circuit and returns CONTAINS.
+    - The follow-up returns CONTAINS for the rotated zero-width longitude.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_WIDTH_LONGITUDE_DIFFERENT
+    category: EDGE
+    description: The rectangle is a zero-width longitude line and the point is not
+      on that longitude.
+    preconditions:
+    - Receiver coordinates are minX=25, maxX=25, minY=-20, maxY=30.
+    - Point coordinates are x=26, y=5.
+    expectedSourceBehavior:
+    - pX > maxX causes a -360 adjustment.
+    - The adjusted value remains outside the zero-width interval, so DISJOINT is returned.
+    - The follow-up remains DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_HEIGHT_LATITUDE_EQUAL
+    category: EDGE
+    description: The rectangle has minY equal to maxY and the point lies on that latitude
+      and inside longitude.
+    preconditions:
+    - Receiver coordinates are minX=-40, maxX=60, minY=12, maxY=12.
+    - Point coordinates are x=10, y=12.
+    expectedSourceBehavior:
+    - The inclusive latitude comparisons permit equality.
+    - Longitude short-circuit returns CONTAINS despite the zero height.
+    - The follow-up returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_HEIGHT_LATITUDE_DIFFERENT
+    category: EDGE
+    description: The rectangle is a zero-height latitude line and the point differs
+      from that latitude.
+    preconditions:
+    - Receiver coordinates are minX=-40, maxX=60, minY=12, maxY=12.
+    - Point coordinates are x=10, y=12.000001.
+    expectedSourceBehavior:
+    - The latitude guard returns DISJOINT before longitude processing.
+    - The follow-up also returns DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FULL_WORLD_LONGITUDE_SENTINEL
+    category: EDGE
+    description: The receiver uses the conventional -180 to +180 longitude endpoints,
+      exercising a width of 360 in the point-specific method.
+    preconditions:
+    - Receiver coordinates are minX=-180, maxX=180, minY=-45, maxY=45.
+    - Point coordinates are x=0, y=0.
+    expectedSourceBehavior:
+    - rawWidth is 360 and the point lies directly in the endpoint interval.
+    - The source returns CONTAINS.
+    - The rotated follow-up is compared as the full-world sentinel case rather than
+      being treated as an ordinary narrow interval.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_CROSSES_POINT_DATELINE
+    category: NORMAL
+    description: The point crosses +180 under the 150-degree eastward follow-up while
+      the rectangle remains an ordinary interval.
+    preconditions:
+    - Receiver coordinates are minX=-20, maxX=20, minY=-30, maxY=30.
+    - Point coordinates are x=30, y=0, outside the receiver; its follow-up longitude
+      is -180.
+    expectedSourceBehavior:
+    - The original point takes the pX > maxX path and returns DISJOINT.
+    - The follow-up tests the wrapped point longitude against the rotated receiver
+      and must preserve DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_CROSSES_RECEIVER_DATELINE
+    category: NORMAL
+    description: Rotating an ordinary rectangle east by 150 degrees makes its endpoint
+      representation cross the dateline.
+    preconditions:
+    - Receiver coordinates are minX=100, maxX=160, minY=-30, maxY=30.
+    - Point coordinates are x=130, y=0.
+    expectedSourceBehavior:
+    - The original point is directly contained.
+    - The follow-up receiver has wrapped longitudes and is handled through the dateline
+      path.
+    - Both relations are CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_CROSSES_BOTH_RECEIVER_AND_POINT
+    category: NORMAL
+    description: Both the contained point and the receiver's longitude endpoints require
+      wrapping in the follow-up.
+    preconditions:
+    - Receiver coordinates are minX=150, maxX=179, minY=-30, maxY=30.
+    - Point coordinates are x=170, y=0.
+    expectedSourceBehavior:
+    - The original point is directly contained.
+    - After the eastward rotation, receiver endpoints and point longitude wrap into
+      the canonical interval.
+    - The follow-up relation remains CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATED_DATELINE_CONTAINS_BOUNDARY_POINT
+    category: BOUNDARY
+    description: A point on a dateline-wrapping rectangle boundary rotates to a wrapped
+      endpoint representation.
+    preconditions:
+    - Receiver coordinates are minX=140, maxX=-160, minY=-30, maxY=30.
+    - Point coordinates are x=-160, y=0.
+    expectedSourceBehavior:
+    - The point equals the stored maxX and is accepted by the inclusive longitude
+      comparisons.
+    - The follow-up checks equality after longitude wrapping.
+    - Both relations are CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POINT_ENDPOINT_CONSTRUCTOR_CONTAINS
+    category: NORMAL
+    description: The receiver is created through the supplied Point lower-left/upper-right
+      constructor and exercises the ordinary direct-containment path.
+    preconditions:
+    - The lower-left Point has coordinates (-30,-10) and the upper-right Point has
+      coordinates (40,20).
+    - The receiver is constructed with those two Points and the geographic context.
+    - The target Point has coordinates (0,0).
+    expectedSourceBehavior:
+    - The constructor-derived coordinates produce an ordinary non-wrapping rectangle.
+    - relate(Point) returns CONTAINS and the rotated follow-up preserves CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: RECTANGLE_COPY_CONSTRUCTOR_DATELINE
+    category: NORMAL
+    description: The receiver is created through the supplied Rectangle-copy constructor
+      from a dateline-wrapping rectangle.
+    preconditions:
+    - The source Rectangle has minX=175, maxX=-175, minY=-15, maxY=15.
+    - The receiver is constructed by copying that Rectangle with the geographic context.
+    - The target Point has coordinates x=-178, y=0.
+    expectedSourceBehavior:
+    - The copied receiver preserves minX greater than maxX.
+    - The point is shifted into the effective dateline interval and returns CONTAINS.
+    - The rotated follow-up preserves CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NONCANONICAL_RECEIVER_PLUS360_SHIFT
+    category: EDGE
+    description: A finite receiver accepted by the no-normalization constructor makes
+      the pX < minX plus-360 branch produce containment.
+    preconditions:
+    - Receiver coordinates are minX=170, maxX=190, minY=-20, maxY=20.
+    - Point coordinates are x=-175, y=0.
+    - Use the direct-coordinate constructor; do not normalize the receiver before
+      invocation.
+    expectedSourceBehavior:
+    - pX < minX causes pX to become 185.
+    - The adjusted point lies within the stored receiver interval, so CONTAINS is
+      returned.
+    - The follow-up applies the specified longitude wrapping and compares the same
+      relation.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NONCANONICAL_RECEIVER_MINUS360_SHIFT
+    category: EDGE
+    description: A finite receiver accepted by the no-normalization constructor makes
+      the pX > maxX minus-360 branch produce containment.
+    preconditions:
+    - Receiver coordinates are minX=-190, maxX=-170, minY=-20, maxY=20.
+    - Point coordinates are x=175, y=0.
+    - Use the direct-coordinate constructor without longitude normalization.
+    expectedSourceBehavior:
+    - pX > maxX causes pX to become -185.
+    - The adjusted point lies within the stored receiver interval, so CONTAINS is
+      returned.
+    - The rotated follow-up is checked under the same prescribed wrapping operation.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_PRESERVES_LATITUDE_REJECTION
+    category: BOUNDARY
+    description: Longitude rotation cannot alter a point rejected solely because its
+      latitude is above the receiver.
+    preconditions:
+    - Receiver coordinates are minX=160, maxX=-160, minY=-10, maxY=10.
+    - Point coordinates are x=170, y=10.000001.
+    expectedSourceBehavior:
+    - The latitude guard returns DISJOINT before the dateline longitude logic.
+    - Since latitude is unchanged by the follow-up, the follow-up also returns DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_PRESERVES_LATITUDE_BOUNDARY
+    category: BOUNDARY
+    description: Longitude rotation preserves containment for a point exactly on maxY
+      of a dateline-wrapping rectangle.
+    preconditions:
+    - Receiver coordinates are minX=160, maxX=-160, minY=-10, maxY=10.
+    - Point coordinates are x=-170, y=10.
+    expectedSourceBehavior:
+    - Equality at maxY is accepted.
+    - The longitude is shifted into the dateline interval and returns CONTAINS.
+    - The follow-up remains CONTAINS because latitude is unchanged.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_TO_CANONICAL_DATELINE_ENDPOINT
+    category: BOUNDARY
+    description: A 150-degree rotation maps a point longitude to exactly -180, testing
+      canonical endpoint wrapping.
+    preconditions:
+    - Receiver coordinates are minX=160, maxX=180, minY=-20, maxY=20.
+    - Point coordinates are x=30, y=0, which follow up to -180 after adding 150 and
+      wrapping.
+    expectedSourceBehavior:
+    - The original point is outside and takes the pX < minX adjustment path.
+    - The follow-up uses the wrapped -180 endpoint and must be compared with the correspondingly
+      rotated receiver.
+    - The original and follow-up SpatialRelation values are required to be equal.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_FROM_NEGATIVE_TO_POSITIVE_ENDPOINT
+    category: BOUNDARY
+    description: A point longitude near -180 wraps through the positive endpoint after
+      the fixed eastward rotation.
+    preconditions:
+    - Receiver coordinates are minX=-180, maxX=-150, minY=-20, maxY=20.
+    - Point coordinates are x=-170, y=0, which follow up to -20 after adding 150 without
+      leaving the canonical interval; use x=-10 for the endpoint-crossing variant,
+      which follows up to 140.
+    expectedSourceBehavior:
+    - The selected point exercises a longitude relation near the canonical endpoint.
+    - The follow-up applies exactly one 150-degree eastward rotation and canonical
+      wrapping.
+    - The original and follow-up relations are compared for equality.
+    targetCases: 1
+    emptyOutputAllowed: false
