@@ -1,0 +1,482 @@
+InputDomain:
+  summary: Non-null geographic RectangleImpl/Point pairs using the rectangle's SpatialContext,
+    with finite coordinates and ordered latitude bounds. The domain covers latitude
+    rejection, ordinary longitude containment/disjointness, dateline-unwrapped containment/disjointness,
+    rotation-induced topology changes, exact edges, degenerate rectangles, and normalized-longitude
+    transition boundaries.
+  globalConstraints:
+  - rectangle != null and point != null, because generateFollowUp requires both with
+    Objects.requireNonNull.
+  - rectangle.getContext().isGeo() == true; the follow-up applies DistanceUtils.normLonDEG
+    and its stated rotation rationale is geographic longitude rotation.
+  - point is created by rectangle.getContext().makePoint(pointX, pointY), so source
+    and follow-up use the same SpatialContext.
+  - All supplied rectangle and point coordinates are finite doubles; NaN and infinities
+    are excluded from NORMAL/BOUNDARY/EDGE cases.
+  - rectangle.minY <= rectangle.maxY, matching RectangleImpl.reset's asserted latitude
+    ordering.
+  - rectangle minX, maxX, and pointX are each in [-180.0, 180.0], the longitude representation
+    transformed by DistanceUtils.normLonDEG.
+  - rectangle.maxX - rectangle.minX != 360.0; this source representation is a full-world
+    longitude interval, but independently normalizing both rotated endpoints can collapse
+    it to one longitude and therefore cannot preserve the stated MR.
+  diversity:
+    contextMode:
+    - 'geo context only: rectangle.getContext().isGeo() == true'
+    latitudePosition:
+    - strictly inside
+    - exactly minY
+    - exactly maxY
+    - below minY
+    - above maxY
+    - zero-height rectangle
+    longitudeTopology:
+    - 'ordinary interval: minX <= maxX'
+    - 'dateline-wrapping interval: minX > maxX'
+    - ordinary source becoming wrapped after +150 degrees
+    - wrapped source becoming ordinary after +150 degrees
+    - wrapped source remaining wrapped after +150 degrees
+    - zero-width longitude interval
+    - equivalent dateline meridian represented by minX=180 and maxX=-180
+    longitudeOutcomePath:
+    - geo short-circuit with minX <= pX <= unwrapped maxX
+    - pX < minX, then pX += 360, yielding CONTAINS
+    - pX < minX, then pX += 360, yielding DISJOINT
+    - pX > maxX, then pX -= 360, yielding DISJOINT
+    - exact longitude boundaries
+    rotationBoundary:
+    - no normalized endpoint wrap
+    - crosses normalized +180/-180 cut
+    - endpoint rotates to -180
+    - very narrow interval straddles the rotation cut
+  scenarios:
+  - id: ORDINARY_INTERIOR_CONTAINS
+    category: NORMAL
+    description: Ordinary non-wrapping rectangle with a strictly interior point.
+    preconditions:
+    - rectangle = new RectangleImpl(-100.0, -20.0, -10.0, 10.0, geoContext)
+    - point = geoContext.makePoint(-60.0, 0.0)
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS through the geo longitude short-circuit.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_MIN_X_BOUNDARY_CONTAINS
+    category: BOUNDARY
+    description: Point is exactly on the ordinary rectangle's minimum longitude edge.
+    preconditions:
+    - rectangle = new RectangleImpl(-100.0, -20.0, -10.0, 10.0, geoContext)
+    - point = geoContext.makePoint(-100.0, 0.0)
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS because longitude equality is inclusive.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_MAX_X_BOUNDARY_CONTAINS
+    category: BOUNDARY
+    description: Point is exactly on the ordinary rectangle's maximum longitude edge.
+    preconditions:
+    - rectangle = new RectangleImpl(-100.0, -20.0, -10.0, 10.0, geoContext)
+    - point = geoContext.makePoint(-20.0, 0.0)
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS because longitude equality is inclusive.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_MIN_Y_BOUNDARY_CONTAINS
+    category: BOUNDARY
+    description: Point is exactly on minY and inside the longitude interval.
+    preconditions:
+    - rectangle = new RectangleImpl(-100.0, -20.0, -10.0, 10.0, geoContext)
+    - point = geoContext.makePoint(-60.0, -10.0)
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS because the lower latitude boundary is inclusive.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_MAX_Y_BOUNDARY_CONTAINS
+    category: BOUNDARY
+    description: Point is exactly on maxY and inside the longitude interval.
+    preconditions:
+    - rectangle = new RectangleImpl(-100.0, -20.0, -10.0, 10.0, geoContext)
+    - point = geoContext.makePoint(-60.0, 10.0)
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS because the upper latitude boundary is inclusive.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_BELOW_MIN_Y_DISJOINT
+    category: BOUNDARY
+    description: Point longitude is inside but latitude is immediately below minY.
+    preconditions:
+    - rectangle = new RectangleImpl(-100.0, -20.0, -10.0, 10.0, geoContext)
+    - point = geoContext.makePoint(-60.0, -10.001)
+    expectedSourceBehavior:
+    - relate(point) returns DISJOINT at the point.getY() < getMinY() guard.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_ABOVE_MAX_Y_DISJOINT
+    category: BOUNDARY
+    description: Point longitude is inside but latitude is immediately above maxY.
+    preconditions:
+    - rectangle = new RectangleImpl(-100.0, -20.0, -10.0, 10.0, geoContext)
+    - point = geoContext.makePoint(-60.0, 10.001)
+    expectedSourceBehavior:
+    - relate(point) returns DISJOINT at the point.getY() > getMaxY() guard.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_LEFT_LONGITUDE_DISJOINT
+    category: NORMAL
+    description: Point lies left of an ordinary interval and remains outside after
+      the geo +360 shift.
+    preconditions:
+    - rectangle = new RectangleImpl(-100.0, -20.0, -10.0, 10.0, geoContext)
+    - point = geoContext.makePoint(-110.0, 0.0)
+    expectedSourceBehavior:
+    - relate(point) returns DISJOINT after pX < minX causes pX += 360.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_RIGHT_LONGITUDE_DISJOINT
+    category: NORMAL
+    description: Point lies right of an ordinary interval and remains outside after
+      the geo -360 shift.
+    preconditions:
+    - rectangle = new RectangleImpl(-100.0, -20.0, -10.0, 10.0, geoContext)
+    - point = geoContext.makePoint(-10.0, 0.0)
+    expectedSourceBehavior:
+    - relate(point) returns DISJOINT after pX > maxX causes pX -= 360.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_CREATES_WRAPPED_RECTANGLE_INTERIOR
+    category: EDGE
+    description: Ordinary source interval crosses the normalization cut only after
+      rotation.
+    preconditions:
+    - rectangle = new RectangleImpl(-20.0, 60.0, -10.0, 10.0, geoContext)
+    - point = geoContext.makePoint(20.0, 0.0)
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS; the follow-up rectangle has minX=130.0 and maxX=-150.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_CREATES_WRAPPED_MIN_X_EDGE
+    category: BOUNDARY
+    description: Source point is on minX of an interval whose follow-up wraps at the
+      dateline.
+    preconditions:
+    - rectangle = new RectangleImpl(-20.0, 60.0, -10.0, 10.0, geoContext)
+    - point = geoContext.makePoint(-20.0, 0.0)
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS at the inclusive source minX boundary.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_CREATES_WRAPPED_MAX_X_EDGE
+    category: BOUNDARY
+    description: Source point is on maxX of an interval whose follow-up wraps at the
+      dateline.
+    preconditions:
+    - rectangle = new RectangleImpl(-20.0, 60.0, -10.0, 10.0, geoContext)
+    - point = geoContext.makePoint(60.0, 0.0)
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS at the inclusive source maxX boundary.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_CREATES_WRAPPED_LEFT_DISJOINT
+    category: EDGE
+    description: Point is just left of a source interval that becomes dateline-wrapping
+      after rotation.
+    preconditions:
+    - rectangle = new RectangleImpl(-20.0, 60.0, -10.0, 10.0, geoContext)
+    - point = geoContext.makePoint(-21.0, 0.0)
+    expectedSourceBehavior:
+    - relate(point) returns DISJOINT after the pX < minX adjustment remains outside.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_CREATES_WRAPPED_RIGHT_DISJOINT
+    category: EDGE
+    description: Point is just right of a source interval that becomes dateline-wrapping
+      after rotation.
+    preconditions:
+    - rectangle = new RectangleImpl(-20.0, 60.0, -10.0, 10.0, geoContext)
+    - point = geoContext.makePoint(61.0, 0.0)
+    expectedSourceBehavior:
+    - relate(point) returns DISJOINT after the pX > maxX adjustment remains outside.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_CREATES_WRAPPED_LATITUDE_REJECTION
+    category: EDGE
+    description: Latitude rejection occurs before longitude processing even though
+      rotation changes longitude topology.
+    preconditions:
+    - rectangle = new RectangleImpl(-20.0, 60.0, -10.0, 10.0, geoContext)
+    - point = geoContext.makePoint(20.0, 10.001)
+    expectedSourceBehavior:
+    - relate(point) returns DISJOINT at the upper-latitude guard.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WRAPPED_DIRECT_CONTAINS
+    category: NORMAL
+    description: Dateline-wrapping rectangle contains a point already between its
+      unwrapped longitude bounds.
+    preconditions:
+    - rectangle = new RectangleImpl(120.0, -120.0, -10.0, 10.0, geoContext)
+    - point = geoContext.makePoint(150.0, 0.0)
+    expectedSourceBehavior:
+    - relate(point) unwraps maxX to 240.0 and returns CONTAINS via the short-circuit.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WRAPPED_SHIFTED_CONTAINS
+    category: EDGE
+    description: Dateline-wrapping rectangle contains a negative longitude only after
+      pX += 360.
+    preconditions:
+    - rectangle = new RectangleImpl(120.0, -120.0, -10.0, 10.0, geoContext)
+    - point = geoContext.makePoint(-150.0, 0.0)
+    expectedSourceBehavior:
+    - relate(point) unwraps maxX to 240.0, shifts pX to 210.0, and returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WRAPPED_MIN_X_BOUNDARY_CONTAINS
+    category: BOUNDARY
+    description: Point is exactly on the minimum longitude of a wrapping rectangle.
+    preconditions:
+    - rectangle = new RectangleImpl(120.0, -120.0, -10.0, 10.0, geoContext)
+    - point = geoContext.makePoint(120.0, 0.0)
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS at the inclusive unwrapped minX boundary.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WRAPPED_MAX_X_BOUNDARY_CONTAINS
+    category: BOUNDARY
+    description: Point is exactly on maxX's equivalent unwrapped longitude for a wrapping
+      rectangle.
+    preconditions:
+    - rectangle = new RectangleImpl(120.0, -120.0, -10.0, 10.0, geoContext)
+    - point = geoContext.makePoint(-120.0, 0.0)
+    expectedSourceBehavior:
+    - relate(point) shifts pX from -120.0 to 240.0 and returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WRAPPED_GAP_DISJOINT
+    category: NORMAL
+    description: Point lies in the excluded longitude gap of a wrapping rectangle.
+    preconditions:
+    - rectangle = new RectangleImpl(120.0, -120.0, -10.0, 10.0, geoContext)
+    - point = geoContext.makePoint(0.0, 0.0)
+    expectedSourceBehavior:
+    - relate(point) shifts pX to 360.0 and returns DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WRAPPED_MIN_Y_BOUNDARY_CONTAINS
+    category: BOUNDARY
+    description: Wrapped longitude containment combined with exact lower latitude
+      equality.
+    preconditions:
+    - rectangle = new RectangleImpl(120.0, -120.0, -10.0, 10.0, geoContext)
+    - point = geoContext.makePoint(-150.0, -10.0)
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS after longitude shifting.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WRAPPED_MAX_Y_BOUNDARY_CONTAINS
+    category: BOUNDARY
+    description: Wrapped longitude containment combined with exact upper latitude
+      equality.
+    preconditions:
+    - rectangle = new RectangleImpl(120.0, -120.0, -10.0, 10.0, geoContext)
+    - point = geoContext.makePoint(-150.0, 10.0)
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS after longitude shifting.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WRAPPED_BELOW_LATITUDE_DISJOINT
+    category: BOUNDARY
+    description: Wrapping rectangle rejects a point below minY before its longitude
+      can be unwrapped.
+    preconditions:
+    - rectangle = new RectangleImpl(120.0, -120.0, -10.0, 10.0, geoContext)
+    - point = geoContext.makePoint(-150.0, -10.001)
+    expectedSourceBehavior:
+    - relate(point) returns DISJOINT at the lower-latitude guard.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WRAPPED_ABOVE_LATITUDE_DISJOINT
+    category: BOUNDARY
+    description: Wrapping rectangle rejects a point above maxY before its longitude
+      can be unwrapped.
+    preconditions:
+    - rectangle = new RectangleImpl(120.0, -120.0, -10.0, 10.0, geoContext)
+    - point = geoContext.makePoint(-150.0, 10.001)
+    expectedSourceBehavior:
+    - relate(point) returns DISJOINT at the upper-latitude guard.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WRAPPED_REMAINS_WRAPPED_AFTER_ROTATION
+    category: EDGE
+    description: Source and follow-up are both dateline-wrapping, rather than rotation
+      merely changing representation.
+    preconditions:
+    - rectangle = new RectangleImpl(100.0, 50.0, -10.0, 10.0, geoContext)
+    - point = geoContext.makePoint(120.0, 0.0)
+    expectedSourceBehavior:
+    - relate(point) unwraps maxX to 410.0 and returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WRAPPED_REMAINS_WRAPPED_SHIFTED_CONTAINS
+    category: EDGE
+    description: Source and follow-up wrap, and source containment requires the pX
+      += 360 path.
+    preconditions:
+    - rectangle = new RectangleImpl(100.0, 50.0, -10.0, 10.0, geoContext)
+    - point = geoContext.makePoint(0.0, 0.0)
+    expectedSourceBehavior:
+    - relate(point) shifts pX to 360.0 and returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WRAPPED_REMAINS_WRAPPED_GAP_DISJOINT
+    category: EDGE
+    description: Source and follow-up wrap while the point remains in the excluded
+      gap.
+    preconditions:
+    - rectangle = new RectangleImpl(100.0, 50.0, -10.0, 10.0, geoContext)
+    - point = geoContext.makePoint(75.0, 0.0)
+    expectedSourceBehavior:
+    - relate(point) shifts pX to 435.0 and returns DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_WIDTH_VERTICAL_LINE_CONTAINS
+    category: EDGE
+    description: Zero-width rectangle contains a point on its vertical line and within
+      its latitude range.
+    preconditions:
+    - rectangle = new RectangleImpl(20.0, 20.0, -10.0, 10.0, geoContext)
+    - point = geoContext.makePoint(20.0, 0.0)
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS because equal longitude endpoints are inclusive.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_WIDTH_VERTICAL_LINE_DISJOINT
+    category: EDGE
+    description: Zero-width rectangle rejects a neighboring longitude.
+    preconditions:
+    - rectangle = new RectangleImpl(20.0, 20.0, -10.0, 10.0, geoContext)
+    - point = geoContext.makePoint(19.0, 0.0)
+    expectedSourceBehavior:
+    - relate(point) shifts pX to 379.0 and returns DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_HEIGHT_HORIZONTAL_LINE_CONTAINS
+    category: EDGE
+    description: Zero-height rectangle contains a point exactly on its only latitude.
+    preconditions:
+    - rectangle = new RectangleImpl(-20.0, 20.0, 5.0, 5.0, geoContext)
+    - point = geoContext.makePoint(0.0, 5.0)
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS with equal minY and maxY.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_HEIGHT_HORIZONTAL_LINE_DISJOINT
+    category: EDGE
+    description: Zero-height rectangle rejects a point just below its only latitude.
+    preconditions:
+    - rectangle = new RectangleImpl(-20.0, 20.0, 5.0, 5.0, geoContext)
+    - point = geoContext.makePoint(0.0, 4.999)
+    expectedSourceBehavior:
+    - relate(point) returns DISJOINT at the lower-latitude guard.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POINT_RECTANGLE_CONTAINS
+    category: EDGE
+    description: Rectangle is degenerate in both dimensions and point exactly equals
+      it.
+    preconditions:
+    - rectangle = new RectangleImpl(30.0, 30.0, 5.0, 5.0, geoContext)
+    - point = geoContext.makePoint(30.0, 5.0)
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS; rotation normalizes the shared longitude from
+      180.0 to -180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DATELINE_VERTICAL_EQUIVALENT_POINT_CONTAINS
+    category: EDGE
+    description: A vertical line at +180 contains the equivalent -180 point through
+      longitude shifting.
+    preconditions:
+    - rectangle = new RectangleImpl(180.0, 180.0, -10.0, 10.0, geoContext)
+    - point = geoContext.makePoint(-180.0, 0.0)
+    expectedSourceBehavior:
+    - relate(point) shifts pX from -180.0 to 180.0 and returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: OPPOSITE_DATELINE_ENDPOINTS_ZERO_WIDTH
+    category: EDGE
+    description: minX=180 and maxX=-180 exercise rawWidth=-360 unwrapping to a zero-width
+      dateline line.
+    preconditions:
+    - rectangle = new RectangleImpl(180.0, -180.0, -10.0, 10.0, geoContext)
+    - point = geoContext.makePoint(180.0, 0.0)
+    expectedSourceBehavior:
+    - relate(point) unwraps maxX to 180.0 and returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NORMALIZATION_ENDPOINT_TO_MINUS_180
+    category: BOUNDARY
+    description: Rotation maps the source minX=30 endpoint exactly to normalized -180.
+    preconditions:
+    - rectangle = new RectangleImpl(30.0, 31.0, -10.0, 10.0, geoContext)
+    - point = geoContext.makePoint(30.0, 0.0)
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS at source minX; follow-up tests normalized -180
+      endpoint handling.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NORMALIZATION_CUT_AT_SOURCE_MAX_X
+    category: BOUNDARY
+    description: Rotation maps source maxX=30 exactly to -180 and makes the follow-up
+      rectangle wrap.
+    preconditions:
+    - rectangle = new RectangleImpl(29.0, 30.0, -10.0, 10.0, geoContext)
+    - point = geoContext.makePoint(30.0, 0.0)
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS at source maxX; follow-up has minX=179.0 and
+      maxX=-180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NARROW_INTERVAL_STRADDLING_ROTATION_CUT
+    category: EDGE
+    description: A very narrow ordinary interval straddles longitude 30 and becomes
+      a very narrow wrapped follow-up.
+    preconditions:
+    - rectangle = new RectangleImpl(29.999, 30.001, -10.0, 10.0, geoContext)
+    - point = geoContext.makePoint(30.0, 0.0)
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS strictly inside a width-0.002 source interval.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BROAD_ORDINARY_INTERVAL_CONTAINS
+    category: EDGE
+    description: Broad non-wrapping interval of width 340 contains its central point
+      and becomes wrapped after rotation.
+    preconditions:
+    - rectangle = new RectangleImpl(-170.0, 170.0, -10.0, 10.0, geoContext)
+    - point = geoContext.makePoint(0.0, 0.0)
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS through the ordinary geo short-circuit.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BROAD_ORDINARY_GAP_DISJOINT
+    category: EDGE
+    description: Point at the excluded dateline gap of a broad ordinary interval remains
+      disjoint.
+    preconditions:
+    - rectangle = new RectangleImpl(-170.0, 170.0, -10.0, 10.0, geoContext)
+    - point = geoContext.makePoint(180.0, 0.0)
+    expectedSourceBehavior:
+    - relate(point) shifts pX to -180.0 and returns DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BROAD_WRAPPED_INTERVAL_CONTAINS
+    category: EDGE
+    description: Broad wrapping interval of width 340 contains a longitude requiring
+      pX += 360.
+    preconditions:
+    - rectangle = new RectangleImpl(170.0, 150.0, -10.0, 10.0, geoContext)
+    - point = geoContext.makePoint(0.0, 0.0)
+    expectedSourceBehavior:
+    - relate(point) unwraps maxX to 510.0, shifts pX to 360.0, and returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false

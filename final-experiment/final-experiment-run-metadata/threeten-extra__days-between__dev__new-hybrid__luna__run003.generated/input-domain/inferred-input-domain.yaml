@@ -1,0 +1,356 @@
+InputDomain:
+  summary: Domain of non-null, mutually compatible Temporal endpoints whose ChronoUnit.DAYS
+    distance is representable as an int and whose 37-day follow-up transformation
+    remains valid, with coverage across temporal implementations, signs, zero, whole-day
+    boundaries, calendar boundaries, and int conversion limits.
+  globalConstraints:
+  - startDateInclusive and endDateExclusive are non-null because generateFollowUp
+    applies Objects.requireNonNull to both inputs.
+  - Both endpoints use the same concrete temporal family and compatible chronology,
+    so ChronoUnit.DAYS.between can evaluate the pair without an avoidable temporal-type
+    incompatibility.
+  - ChronoUnit.DAYS is supported by both endpoints and the source distance is a whole
+    number of days as interpreted by ChronoUnit.DAYS.between.
+  - startDateInclusive.plus(37, ChronoUnit.DAYS) and endDateExclusive.plus(37, ChronoUnit.DAYS)
+    must both succeed and remain representable, because the follow-up generator applies
+    exactly that transformation.
+  - The source distance must be within [-2147483648, 2147483647], because between
+    converts the long result with Math.toIntExact; cases outside that range are excluded
+    because the source output is not a Days value and the supplied relation compares
+    Days outputs.
+  - For offset- or zone-based temporals, the source and follow-up pair must have invariant
+    day-count semantics under the 37-day shift; this excludes intervals whose offset
+    transition would make ChronoUnit.DAYS.between differ after the shift, because
+    the supplied relation asserts equal getAmount() values.
+  diversity:
+    temporalImplementation:
+    - LocalDate
+    - LocalDateTime
+    - Instant
+    - OffsetDateTime
+    - ZonedDateTime
+    signedDistance:
+    - negative
+    - zero
+    - positive
+    distanceMagnitude:
+    - '0'
+    - '1'
+    - less_than_one_day_for_time_based_temporals
+    - small_multi_day
+    - Integer.MIN_VALUE
+    - Integer.MAX_VALUE
+    calendarPosition:
+    - ordinary_date
+    - month_boundary
+    - year_boundary
+    - leap_day
+    - near_temporal_range_boundary
+    timeRepresentation:
+    - date_only
+    - identical_local_time
+    - fractional_day_duration
+    - fixed_offset
+    - stable_zone_offset
+  scenarios:
+  - id: LOCAL_DATE_EQUAL_ENDPOINTS
+    category: BOUNDARY
+    description: Equal LocalDate endpoints produce the zero-day sentinel result.
+    preconditions:
+    - startDateInclusive and endDateExclusive are the same LocalDate.
+    - The date is at least 37 days from the LocalDate range limits.
+    expectedSourceBehavior:
+    - Days.between returns a non-null Days whose getAmount() is 0.
+    - The 37-day follow-up also returns getAmount() 0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_ADJACENT_FORWARD
+    category: BOUNDARY
+    description: The exclusive end is exactly one calendar day after the inclusive
+      start.
+    preconditions:
+    - Both endpoints are LocalDate.
+    - ChronoUnit.DAYS.between(startDateInclusive, endDateExclusive) equals 1.
+    - Both dates and their 37-day follow-ups are representable.
+    expectedSourceBehavior:
+    - getAmount() is 1, exercising the Days.of(1) sentinel path.
+    - The follow-up getAmount() remains 1.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_ADJACENT_REVERSE
+    category: BOUNDARY
+    description: The end date is exactly one calendar day before the start date.
+    preconditions:
+    - Both endpoints are LocalDate.
+    - ChronoUnit.DAYS.between(startDateInclusive, endDateExclusive) equals -1.
+    expectedSourceBehavior:
+    - getAmount() is -1, demonstrating the documented negative direction.
+    - The follow-up getAmount() remains -1.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_SMALL_POSITIVE_GAP
+    category: NORMAL
+    description: A positive LocalDate gap greater than one day and within an ordinary
+      month.
+    preconditions:
+    - Both endpoints are LocalDate in the same month.
+    - The end is between 2 and 30 days after the start.
+    expectedSourceBehavior:
+    - getAmount() equals the exact positive ChronoUnit.DAYS distance and is neither
+      0 nor 1.
+    - The follow-up preserves that amount.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_SMALL_NEGATIVE_GAP
+    category: NORMAL
+    description: A negative LocalDate gap of more than one day within an ordinary
+      month.
+    preconditions:
+    - Both endpoints are LocalDate in the same month.
+    - The end is between 2 and 30 days before the start.
+    expectedSourceBehavior:
+    - getAmount() equals the exact negative ChronoUnit.DAYS distance.
+    - The follow-up preserves the negative amount.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_MONTH_BOUNDARY_FORWARD
+    category: BOUNDARY
+    description: The interval crosses from the end of one month into the beginning
+      of the next.
+    preconditions:
+    - Both endpoints are LocalDate.
+    - The start is in the final three days of a month and the end is in the first
+      three days of the next month.
+    - The source distance is positive and at least 2 days.
+    expectedSourceBehavior:
+    - getAmount() equals ChronoUnit.DAYS.between, not a same-month approximation.
+    - The 37-day translation crosses the corresponding later calendar positions while
+      preserving getAmount().
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_MONTH_BOUNDARY_REVERSE
+    category: BOUNDARY
+    description: The interval crosses a month boundary in the negative direction.
+    preconditions:
+    - Both endpoints are LocalDate.
+    - The start is in the first three days of a month and the end is in the final
+      three days of the preceding month.
+    expectedSourceBehavior:
+    - getAmount() is the negative ChronoUnit.DAYS distance.
+    - The follow-up has the same negative amount.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_LEAP_DAY_CROSSING
+    category: EDGE
+    description: A LocalDate interval crosses February 29 in a leap year.
+    preconditions:
+    - Both endpoints are LocalDate in a leap year.
+    - The interval includes February 29 and has a positive or negative distance of
+      at least 2 days.
+    expectedSourceBehavior:
+    - getAmount() counts the leap day through ChronoUnit.DAYS.between.
+    - Adding 37 days to both endpoints leaves that amount unchanged.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_YEAR_BOUNDARY_FORWARD
+    category: BOUNDARY
+    description: A positive LocalDate interval crosses December 31 and January 1.
+    preconditions:
+    - Both endpoints are LocalDate.
+    - The start is in the final seven days of a year and the end is in the first seven
+      days of the next year.
+    expectedSourceBehavior:
+    - getAmount() equals the exact cross-year day count.
+    - The follow-up result has the same getAmount().
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_YEAR_BOUNDARY_REVERSE
+    category: BOUNDARY
+    description: A negative LocalDate interval crosses a year boundary in reverse
+      order.
+    preconditions:
+    - Both endpoints are LocalDate.
+    - The start is in the first seven days of a year and the end is in the final seven
+      days of the preceding year.
+    expectedSourceBehavior:
+    - getAmount() is the exact negative cross-year day count.
+    - The follow-up preserves that value.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_NEAR_MINIMUM_RANGE
+    category: EDGE
+    description: A small interval is placed near LocalDate.MIN without making the
+      37-day follow-up overflow.
+    preconditions:
+    - Both endpoints are LocalDate within 100 days of LocalDate.MIN.
+    - LocalDate.MIN.plus(37, ChronoUnit.DAYS) and both endpoint follow-ups are representable.
+    - The distance is between -10 and 10 days.
+    expectedSourceBehavior:
+    - between returns the exact small signed day distance rather than failing because
+      of proximity to the type boundary.
+    - The follow-up has the same getAmount().
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_NEAR_MAXIMUM_RANGE
+    category: EDGE
+    description: A small interval is placed near LocalDate.MAX while retaining room
+      for the 37-day follow-up.
+    preconditions:
+    - Both endpoints are LocalDate within 100 days of LocalDate.MAX.
+    - Both endpoints plus 37 days are representable.
+    - The distance is between -10 and 10 days.
+    expectedSourceBehavior:
+    - between returns the exact signed day distance.
+    - The follow-up preserves that value.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_INTEGER_MAXIMUM_DISTANCE
+    category: EDGE
+    description: The LocalDate endpoints are separated by exactly Integer.MAX_VALUE
+      days.
+    preconditions:
+    - Both endpoints are LocalDate.
+    - ChronoUnit.DAYS.between(startDateInclusive, endDateExclusive) equals 2147483647.
+    - Both endpoints and their 37-day follow-ups are representable.
+    expectedSourceBehavior:
+    - Math.toIntExact succeeds at its positive int boundary.
+    - getAmount() is 2147483647 and the follow-up has the same amount.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_INTEGER_MINIMUM_DISTANCE
+    category: EDGE
+    description: The LocalDate endpoints are separated by exactly Integer.MIN_VALUE
+      days in the negative direction.
+    preconditions:
+    - Both endpoints are LocalDate.
+    - ChronoUnit.DAYS.between(startDateInclusive, endDateExclusive) equals -2147483648.
+    - Both endpoints and their 37-day follow-ups are representable.
+    expectedSourceBehavior:
+    - Math.toIntExact succeeds at its negative int boundary.
+    - getAmount() is -2147483648 and the follow-up has the same amount.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_TIME_EQUAL_LOCAL_DATE
+    category: BOUNDARY
+    description: Equal LocalDateTime values exercise zero distance with a date-time
+      temporal.
+    preconditions:
+    - Both endpoints are LocalDateTime with identical date, time, and nanosecond.
+    - Both 37-day additions are representable.
+    expectedSourceBehavior:
+    - getAmount() is 0.
+    - The follow-up result is also 0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_TIME_IDENTICAL_TIME_ONE_DAY
+    category: NORMAL
+    description: LocalDateTime endpoints have identical time-of-day and dates exactly
+      one day apart.
+    preconditions:
+    - Both endpoints are LocalDateTime.
+    - The end date is exactly one calendar day after the start date and both times
+      are identical.
+    expectedSourceBehavior:
+    - getAmount() is 1.
+    - The 37-day shift preserves the amount.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_TIME_MULTI_DAY_REVERSE
+    category: NORMAL
+    description: LocalDateTime endpoints with identical times have a negative multi-day
+      gap.
+    preconditions:
+    - Both endpoints are LocalDateTime with identical time-of-day and nanosecond.
+    - The end date is 2 to 30 calendar days before the start date.
+    expectedSourceBehavior:
+    - getAmount() is the exact negative whole-day distance.
+    - The follow-up preserves that amount.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: INSTANT_SUBDAY_FORWARD
+    category: BOUNDARY
+    description: Instant endpoints are separated by less than one complete 24-hour
+      day.
+    preconditions:
+    - Both endpoints are Instant.
+    - The end is 1 to 86399999999999 nanoseconds after the start.
+    - Both plus-37-day operations are representable.
+    expectedSourceBehavior:
+    - ChronoUnit.DAYS.between yields 0 for the incomplete positive day.
+    - The follow-up also yields 0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: INSTANT_EXACT_MULTI_DAY
+    category: NORMAL
+    description: Instant endpoints are separated by an exact positive multiple of
+      24 hours.
+    preconditions:
+    - Both endpoints are Instant.
+    - The duration is an exact multiple of 86400 seconds and is between 2 and 30 days.
+    expectedSourceBehavior:
+    - getAmount() equals the exact positive whole-day duration.
+    - The follow-up preserves that amount.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: INSTANT_SUBDAY_REVERSE
+    category: BOUNDARY
+    description: Instant endpoints are separated by less than one complete day in
+      the negative direction.
+    preconditions:
+    - Both endpoints are Instant.
+    - The end is 1 to 86399999999999 nanoseconds before the start.
+    expectedSourceBehavior:
+    - getAmount() is 0 because no complete negative day is present under ChronoUnit.DAYS.
+    - The follow-up also yields 0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: OFFSET_DATE_TIME_FIXED_OFFSET
+    category: NORMAL
+    description: OffsetDateTime endpoints use the same fixed offset and identical
+      local times separated by several dates.
+    preconditions:
+    - Both endpoints are OffsetDateTime with the same ZoneOffset.
+    - The local times are identical and the date distance is between 2 and 30 days.
+    expectedSourceBehavior:
+    - getAmount() is the signed whole-day date distance.
+    - Adding 37 days to both endpoints keeps the fixed offset and preserves getAmount().
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: OFFSET_DATE_TIME_OFFSET_BOUNDARY
+    category: BOUNDARY
+    description: OffsetDateTime endpoints cross a month or year boundary without changing
+      their fixed offset.
+    preconditions:
+    - Both endpoints are OffsetDateTime with the same fixed ZoneOffset.
+    - The interval crosses a month or year boundary and both local times match.
+    expectedSourceBehavior:
+    - getAmount() reflects the exact ChronoUnit.DAYS distance across the boundary.
+    - The follow-up output has the same amount.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZONED_DATE_TIME_STABLE_OFFSET
+    category: NORMAL
+    description: ZonedDateTime endpoints use a zone whose offset is stable across
+      the source interval and its 37-day translation.
+    preconditions:
+    - Both endpoints are ZonedDateTime in the same zone.
+    - The zone offset does not transition between either endpoint or between either
+      corresponding follow-up endpoint.
+    - The local times match and the date distance is between 2 and 30 days.
+    expectedSourceBehavior:
+    - getAmount() is the signed whole-day distance under the stable zone offset.
+    - The follow-up preserves getAmount().
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZONED_DATE_TIME_UTC_BOUNDARY
+    category: BOUNDARY
+    description: UTC ZonedDateTime endpoints cross a leap-day or year boundary.
+    preconditions:
+    - Both endpoints are ZonedDateTime with ZoneOffset.UTC.
+    - The local times match.
+    - The interval crosses February 29 in a leap year or crosses a year boundary.
+    expectedSourceBehavior:
+    - getAmount() includes every crossed calendar day.
+    - The 37-day-shifted UTC pair has the same getAmount().
+    targetCases: 1
+    emptyOutputAllowed: false

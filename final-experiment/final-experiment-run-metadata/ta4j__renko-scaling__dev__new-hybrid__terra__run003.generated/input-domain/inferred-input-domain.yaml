@@ -1,0 +1,444 @@
+InputDomain:
+  summary: Generate a valid RenkoBarAggregator receiver and a non-null chronological
+    List<Bar>. Unless a scenario overrides it, use boxSize=1.0, reversalAmount=2,
+    and BaseBar source bars of one-minute duration with contiguous UTC intervals [T+i
+    minutes, T+(i+1) minutes]. Use one common NumFactory for all price, volume, and
+    amount values. For ordinary bars, set source open=high=low=close, volume=10, amount=100,
+    and trades=1. Close sequences below are expressed as exact integer prices beginning
+    at 100, so both the source and the MR's 2.0-scaled follow-up retain exact box
+    and reversal boundaries.
+  globalConstraints:
+  - The receiver boxSize is a non-null, finite, strictly positive Number; use integer-representable
+    positive values such as 1.0 so doubling the boxSize in the follow-up remains exact.
+  - The receiver reversalAmount is an integer greater than zero; exercise both the
+    one-argument constructor's implicit value 2 and the two-argument constructor.
+  - bars is non-null and contains no null Bar elements, because the follow-up generator
+    rejects null source bars before aggregation.
+  - Every source Bar has a non-null close price, because aggregate rejects missing
+    closes and the supplied MR does not request exception behavior.
+  - Source bars have equal TimePeriod values and contiguous, evenly spaced begin/end
+    instants in chronological order, because aggregate requires even contiguous source
+    intervals.
+  - All source numeric fields used together are created by the first bar's NumFactory;
+    this ensures the receiver-resolved box size and all compared or accumulated Num
+    values are compatible.
+  - Do not include null bars, null bar lists, uneven/non-contiguous intervals, null
+    close prices, or invalid receiver configurations; these are invalid paths and
+    the supplied positive scaling MR specifies comparison of successful aggregate
+    outputs rather than exception relations.
+  diversity:
+    receiverConfiguration:
+    - one-argument constructor with boxSize=1.0 and implicit reversalAmount=2
+    - two-argument constructor with boxSize=1.0 and reversalAmount=1
+    - two-argument constructor with boxSize=1.0 and reversalAmount=2
+    - two-argument constructor with boxSize=1.0 and reversalAmount=3
+    closeMovement:
+    - no movement
+    - movement strictly inside one box
+    - exact initial upward and downward box boundaries
+    - multiple same-direction bricks from one source bar
+    - continuation in an established direction
+    - pullback below reversal threshold
+    - exact reversal threshold
+    - reversal overshoot producing multiple bricks
+    accumulatedFields:
+    - non-null volume amount and trades
+    - null volume
+    - null amount
+    - null volume and amount
+    - zero volume amount and trades
+    - pending values accumulated across non-emitting bars
+    - zero values assigned to additional bricks emitted from one source bar
+    timing:
+    - first-bar baseline timestamp
+    - delayed emission after several source intervals
+    - multiple emitted bricks whose end times advance by sourcePeriod
+  scenarios:
+  - id: EMPTY_SOURCE_LIST
+    category: EDGE
+    description: No source bars are supplied.
+    preconditions:
+    - receiver uses boxSize=1.0 and reversalAmount=2
+    - bars is List.of()
+    expectedSourceBehavior:
+    - aggregate returns an empty mutable result list
+    - no NumFactory, close price, or interval validation is reached
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: SINGLE_BASELINE_BAR
+    category: EDGE
+    description: One valid bar establishes the initial Renko close but cannot emit
+      a brick.
+    preconditions:
+    - receiver uses boxSize=1.0 and reversalAmount=2
+    - close sequence is [100]
+    expectedSourceBehavior:
+    - aggregate returns zero bricks
+    - the first close becomes lastBrickClose and its volume, amount, and trades remain
+      pending
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: FLAT_MULTI_BAR_NO_BRICKS
+    category: NORMAL
+    description: Several contiguous bars close at the baseline price.
+    preconditions:
+    - receiver uses boxSize=1.0 and reversalAmount=2
+    - close sequence is [100, 100, 100]
+    expectedSourceBehavior:
+    - aggregate returns zero bricks
+    - neither upward nor downward threshold loop is entered
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: UPWARD_MOVE_STRICTLY_BELOW_BOX
+    category: BOUNDARY
+    description: An initial upward move is positive but smaller than one box.
+    preconditions:
+    - receiver uses boxSize=1.0 and reversalAmount=2
+    - close sequence is [100, 100.5]
+    expectedSourceBehavior:
+    - aggregate returns zero bricks
+    - the initial NONE-direction upward comparison is false
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: DOWNWARD_MOVE_STRICTLY_BELOW_BOX
+    category: BOUNDARY
+    description: An initial downward move is negative but smaller than one box.
+    preconditions:
+    - receiver uses boxSize=1.0 and reversalAmount=2
+    - close sequence is [100, 99.5]
+    expectedSourceBehavior:
+    - aggregate returns zero bricks
+    - the initial NONE-direction downward comparison is false
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: INITIAL_UP_EXACT_ONE_BOX
+    category: BOUNDARY
+    description: The first qualifying upward close equals exactly one box above the
+      baseline.
+    preconditions:
+    - receiver uses boxSize=1.0 and reversalAmount=2
+    - close sequence is [100, 101]
+    expectedSourceBehavior:
+    - aggregate returns exactly one upward brick from 100 to 101
+    - '{that brick receives the accumulated fields of both source bars=volume=20,
+      amount=200, trades=2}'
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: INITIAL_DOWN_EXACT_ONE_BOX
+    category: BOUNDARY
+    description: The first qualifying downward close equals exactly one box below
+      the baseline.
+    preconditions:
+    - receiver uses boxSize=1.0 and reversalAmount=2
+    - close sequence is [100, 99]
+    expectedSourceBehavior:
+    - aggregate returns exactly one downward brick from 100 to 99
+    - that brick receives volume=20, amount=200, and trades=2
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: INITIAL_UP_MULTI_BRICK_SINGLE_BAR
+    category: NORMAL
+    description: One source close crosses three upward box boundaries from NONE direction.
+    preconditions:
+    - receiver uses boxSize=1.0 and reversalAmount=2
+    - close sequence is [100, 103]
+    expectedSourceBehavior:
+    - '{aggregate returns three upward bricks=100->101, 101->102, and 102->103}'
+    - only the first brick has volume=20, amount=200, and trades=2; later bricks have
+      zero volume, amount, and trades
+    - successive brick end times differ by one source period
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: INITIAL_DOWN_MULTI_BRICK_SINGLE_BAR
+    category: NORMAL
+    description: One source close crosses three downward box boundaries from NONE
+      direction.
+    preconditions:
+    - receiver uses boxSize=1.0 and reversalAmount=2
+    - close sequence is [100, 97]
+    expectedSourceBehavior:
+    - '{aggregate returns three downward bricks=100->99, 99->98, and 98->97}'
+    - only the first brick receives the accumulated source fields and the additional
+      bricks receive zero fields
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PENDING_FIELDS_ACROSS_NON_EMITTING_BARS
+    category: NORMAL
+    description: Several bars accumulate fields before a later bar reaches the initial
+      upward threshold.
+    preconditions:
+    - receiver uses boxSize=1.0 and reversalAmount=2
+    - close sequence is [100, 100.25, 100.5, 101]
+    expectedSourceBehavior:
+    - aggregate returns exactly one upward brick from 100 to 101
+    - its volume=40, amount=400, and trades=4 include all source bars since no earlier
+      brick was emitted
+    - the emitted brick end time is the final source bar end time because it is later
+      than the initial nextBrickEndTime
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UP_CONTINUATION_EXACT_ONE_BOX
+    category: NORMAL
+    description: An established UP direction continues by exactly one box on a later
+      source bar.
+    preconditions:
+    - receiver uses boxSize=1.0 and reversalAmount=2
+    - close sequence is [100, 101, 102]
+    expectedSourceBehavior:
+    - aggregate returns two upward bricks
+    - the first brick has volume=20, amount=200, trades=2 and the continuation brick
+      has volume=10, amount=100, trades=1
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UP_CONTINUATION_MULTI_BRICK
+    category: NORMAL
+    description: An established UP direction continues through multiple boxes in one
+      later source bar.
+    preconditions:
+    - receiver uses boxSize=1.0 and reversalAmount=2
+    - close sequence is [100, 101, 104]
+    expectedSourceBehavior:
+    - aggregate returns four upward bricks ending at 101, 102, 103, and 104
+    - of the three bricks emitted from the final source bar, only the first has that
+      bar's volume=10, amount=100, and trades=1
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UP_PULLBACK_ONE_BOX_NO_REVERSAL
+    category: BOUNDARY
+    description: A one-box pullback occurs while UP but does not meet the two-box
+      reversal distance.
+    preconditions:
+    - receiver uses boxSize=1.0 and reversalAmount=2
+    - close sequence is [100, 101, 100]
+    expectedSourceBehavior:
+    - aggregate returns only the initial upward brick
+    - the final close does not emit a downward brick because it is one box below lastBrickClose,
+      less than the required two-box reversal distance
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UP_PULLBACK_STRICTLY_BELOW_REVERSAL_DISTANCE
+    category: BOUNDARY
+    description: An UP pullback is between one and two boxes but remains short of
+      reversal.
+    preconditions:
+    - receiver uses boxSize=1.0 and reversalAmount=2
+    - close sequence is [100, 101, 99.5]
+    expectedSourceBehavior:
+    - aggregate returns only the initial upward brick
+    - the UP reversal guard remains false at a pullback of 1.5 boxes
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UP_EXACT_TWO_BOX_REVERSAL
+    category: BOUNDARY
+    description: An established UP direction reverses at exactly the required two-box
+      distance.
+    preconditions:
+    - receiver uses boxSize=1.0 and reversalAmount=2
+    - close sequence is [100, 101, 99]
+    expectedSourceBehavior:
+    - aggregate returns three bricks in direction order UP, DOWN, DOWN
+    - the two downward bricks are emitted by the final source bar, with its fields
+      attached only to the first of those two bricks
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UP_REVERSAL_OVERSHOOT
+    category: NORMAL
+    description: An established UP direction reverses beyond the threshold and emits
+      more than the minimum reversal bricks.
+    preconditions:
+    - receiver uses boxSize=1.0 and reversalAmount=2
+    - close sequence is [100, 102, 98]
+    expectedSourceBehavior:
+    - '{aggregate returns six bricks=two UP bricks followed by four DOWN bricks}'
+    - only the first downward brick emitted from the final source bar carries that
+      bar's accumulated fields
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DOWN_CONTINUATION_EXACT_ONE_BOX
+    category: NORMAL
+    description: An established DOWN direction continues by one exact box.
+    preconditions:
+    - receiver uses boxSize=1.0 and reversalAmount=2
+    - close sequence is [100, 99, 98]
+    expectedSourceBehavior:
+    - aggregate returns two downward bricks
+    - the second brick receives only the final source bar's volume=10, amount=100,
+      and trades=1
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DOWN_REBOUND_ONE_BOX_NO_REVERSAL
+    category: BOUNDARY
+    description: A one-box upward rebound occurs while DOWN but cannot reverse a two-box
+      configuration.
+    preconditions:
+    - receiver uses boxSize=1.0 and reversalAmount=2
+    - close sequence is [100, 99, 100]
+    expectedSourceBehavior:
+    - aggregate returns only the initial downward brick
+    - the DOWN reversal guard remains false because the rebound is smaller than two
+      boxes
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DOWN_REBOUND_STRICTLY_BELOW_REVERSAL_DISTANCE
+    category: BOUNDARY
+    description: A DOWN rebound is greater than one box but smaller than the two-box
+      reversal distance.
+    preconditions:
+    - receiver uses boxSize=1.0 and reversalAmount=2
+    - close sequence is [100, 99, 100.5]
+    expectedSourceBehavior:
+    - aggregate returns only the initial downward brick
+    - no upward reversal loop is entered
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DOWN_EXACT_TWO_BOX_REVERSAL
+    category: BOUNDARY
+    description: An established DOWN direction reverses at exactly two boxes upward.
+    preconditions:
+    - receiver uses boxSize=1.0 and reversalAmount=2
+    - close sequence is [100, 99, 101]
+    expectedSourceBehavior:
+    - aggregate returns three bricks in direction order DOWN, UP, UP
+    - the final source bar's fields appear on the first upward reversal brick only
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DOWN_REVERSAL_OVERSHOOT
+    category: NORMAL
+    description: An established DOWN direction reverses beyond its threshold and emits
+      multiple upward bricks.
+    preconditions:
+    - receiver uses boxSize=1.0 and reversalAmount=2
+    - close sequence is [100, 98, 102]
+    expectedSourceBehavior:
+    - '{aggregate returns six bricks=two DOWN bricks followed by four UP bricks}'
+    - all bricks after the first emitted from the final bar have zero volume, amount,
+      and trades
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: REVERSAL_AMOUNT_ONE_UP_TO_DOWN
+    category: BOUNDARY
+    description: A one-box reversal configuration reverses an UP direction after exactly
+      one opposite box.
+    preconditions:
+    - receiver uses boxSize=1.0 and reversalAmount=1
+    - close sequence is [100, 101, 100]
+    expectedSourceBehavior:
+    - aggregate returns two bricks in direction order UP, DOWN
+    - the final close meets the one-box reversal threshold exactly
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: REVERSAL_AMOUNT_ONE_DOWN_TO_UP
+    category: BOUNDARY
+    description: A one-box reversal configuration reverses a DOWN direction after
+      exactly one opposite box.
+    preconditions:
+    - receiver uses boxSize=1.0 and reversalAmount=1
+    - close sequence is [100, 99, 100]
+    expectedSourceBehavior:
+    - aggregate returns two bricks in direction order DOWN, UP
+    - the final close meets the one-box upward reversal threshold exactly
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: REVERSAL_AMOUNT_THREE_SHORT_OF_THRESHOLD
+    category: BOUNDARY
+    description: A two-box pullback is insufficient when three boxes are required
+      to reverse.
+    preconditions:
+    - receiver uses boxSize=1.0 and reversalAmount=3
+    - close sequence is [100, 101, 99]
+    expectedSourceBehavior:
+    - aggregate returns only the initial upward brick
+    - no reversal occurs because the pullback is two boxes and reversalDistance is
+      three boxes
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: REVERSAL_AMOUNT_THREE_EXACT_THRESHOLD
+    category: BOUNDARY
+    description: A three-box pullback reverses an UP direction exactly at the configured
+      threshold.
+    preconditions:
+    - receiver uses boxSize=1.0 and reversalAmount=3
+    - close sequence is [100, 101, 98]
+    expectedSourceBehavior:
+    - aggregate returns four bricks in direction order UP, DOWN, DOWN, DOWN
+    - the reversal loop emits three exact one-box downward bricks
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DEFAULT_CONSTRUCTOR_TWO_BOX_REVERSAL
+    category: NORMAL
+    description: The one-argument constructor's documented implicit two-brick reversal
+      is used.
+    preconditions:
+    - receiver is constructed as new RenkoBarAggregator(1.0)
+    - close sequence is [100, 99, 101]
+    expectedSourceBehavior:
+    - aggregate returns three bricks in direction order DOWN, UP, UP
+    - behavior matches a two-argument receiver configured with reversalAmount=2
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NULL_VOLUME_ACCUMULATION
+    category: EDGE
+    description: Source bars omit volume while retaining non-null close and amount
+      values.
+    preconditions:
+    - receiver uses boxSize=1.0 and reversalAmount=2
+    - close sequence is [100, 101]
+    - both source bars have volume=null, amount=100, and trades=1
+    expectedSourceBehavior:
+    - aggregate returns one upward brick
+    - the brick volume is numeric zero, amount is 200, and trades is 2
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NULL_AMOUNT_ACCUMULATION
+    category: EDGE
+    description: Source bars omit amount while retaining non-null close and volume
+      values.
+    preconditions:
+    - receiver uses boxSize=1.0 and reversalAmount=2
+    - close sequence is [100, 101]
+    - both source bars have volume=10, amount=null, and trades=1
+    expectedSourceBehavior:
+    - aggregate returns one upward brick
+    - the brick volume is 20, amount is numeric zero, and trades is 2
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NULL_VOLUME_AND_AMOUNT_MULTI_BRICK
+    category: EDGE
+    description: A multi-brick source bar has neither volume nor amount.
+    preconditions:
+    - receiver uses boxSize=1.0 and reversalAmount=2
+    - close sequence is [100, 102]
+    - both source bars have volume=null, amount=null, and trades=1
+    expectedSourceBehavior:
+    - aggregate returns two upward bricks
+    - both bricks have numeric zero volume and amount
+    - the first brick has trades=2 and the additional brick has trades=0
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_FIELDS_ON_EMITTING_BARS
+    category: EDGE
+    description: Explicit zero volume, amount, and trades are accumulated through
+      an exact threshold.
+    preconditions:
+    - receiver uses boxSize=1.0 and reversalAmount=2
+    - close sequence is [100, 101]
+    - both source bars have volume=0, amount=0, and trades=0
+    expectedSourceBehavior:
+    - aggregate returns one upward brick
+    - the brick has numeric zero volume, numeric zero amount, and zero trades
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DELAYED_BRICK_TIME_AFTER_IDLE_INTERVALS
+    category: NORMAL
+    description: A brick is emitted after idle bars, requiring resolveBrickEndTime
+      to select the later source end time.
+    preconditions:
+    - receiver uses boxSize=1.0 and reversalAmount=2
+    - close sequence is [100, 100, 100, 101]
+    - bars use contiguous one-minute intervals beginning at T
+    expectedSourceBehavior:
+    - aggregate returns one upward brick
+    - its end time equals the fourth source bar end time, T+4 minutes
+    - its begin time is one source period before its end time
+    targetCases: 1
+    emptyOutputAllowed: false

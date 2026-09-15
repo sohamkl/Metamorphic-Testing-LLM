@@ -1,0 +1,317 @@
+InputDomain:
+  summary: Pairs of non-null, same-kind Java temporals for which ChronoUnit.DAYS.between
+    succeeds, both temporals can be shifted forward by 37 days, and the resulting
+    whole-day count fits in an int.
+  globalConstraints:
+  - startDateInclusive and endDateExclusive are non-null because generateFollowUp
+    explicitly applies Objects.requireNonNull to both inputs.
+  - Both inputs support plus(37, ChronoUnit.DAYS), because generateFollowUp applies
+    that operation to each endpoint.
+  - ChronoUnit.DAYS.between(startDateInclusive, endDateExclusive) succeeds, because
+    Days.between delegates directly to it.
+  - The whole-day difference is within Integer.MIN_VALUE through Integer.MAX_VALUE,
+    because Days.between applies Math.toIntExact before constructing the Days result.
+  - The follow-up endpoints remain representable and their whole-day difference also
+    fits in the int range, so both source and follow-up calls return Days values that
+    assertRelation can compare.
+  - Each pair uses temporals with compatible chronology and temporal support for DAYS;
+    temporals such as YearMonth or unsupported temporal implementations are excluded
+    because either the target calculation or the required 37-day follow-up cannot
+    be executed.
+  - No scenario relies on object identity, because the observable result is compared
+    through Days.getAmount().
+  diversity:
+    temporalKind:
+    - LocalDate
+    - LocalDateTime
+    - Instant
+    - OffsetDateTime
+    - ZonedDateTime
+    - JapaneseDate
+    - HijrahDate
+    ordering:
+    - same_endpoint
+    - end_after_start
+    - end_before_start
+    resultClass:
+    - zero
+    - positive_one
+    - negative_one
+    - positive_multiple
+    - negative_multiple
+    - int_maximum
+    - int_minimum
+    calendarBoundary:
+    - ordinary_day
+    - month_boundary
+    - year_boundary
+    - leap_day
+    - non_leap_february
+    - DST_spring_transition
+    - DST_autumn_transition
+    timeGranularity:
+    - date_only
+    - exact_whole_days
+    - fractional_day
+    offsetOrZone:
+    - none
+    - fixed_offset_same
+    - fixed_offset_different
+    - zone_without_transition
+    - zone_with_transition
+  scenarios:
+  - id: SAME_LOCAL_DATE_ZERO
+    category: NORMAL
+    description: The two endpoints are the same LocalDate.
+    preconditions:
+    - Use a LocalDate d whose plus(37, DAYS) is valid.
+    - startDateInclusive == d and endDateExclusive == d.
+    expectedSourceBehavior:
+    - Days.between returns a Days whose getAmount() is 0.
+    - The follow-up also has getAmount() 0, satisfying the shift-invariance relation.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ADJACENT_LOCAL_DATE_FORWARD_AND_REVERSE
+    category: BOUNDARY
+    description: The endpoints are adjacent LocalDate values, tested in both directions.
+    preconditions:
+    - Use two adjacent LocalDate values d and d.plus(1, DAYS), away from the representational
+      limits.
+    - Include both (d, d.plus(1, DAYS)) and (d.plus(1, DAYS), d).
+    expectedSourceBehavior:
+    - The forward case returns getAmount() 1.
+    - The reverse case returns getAmount() -1.
+    - Shifting both endpoints by 37 days preserves each signed amount.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: MULTI_DAY_LOCAL_DATE_FORWARD_AND_REVERSE
+    category: NORMAL
+    description: The endpoints differ by a non-boundary positive or negative number
+      of whole LocalDate days.
+    preconditions:
+    - Use a LocalDate d and an integer n with 2 <= n <= 1000.
+    - Include both (d, d.plus(n, DAYS)) and (d.plus(n, DAYS), d), with all 37-day
+      follow-ups valid.
+    expectedSourceBehavior:
+    - The forward case returns getAmount() n.
+    - The reverse case returns getAmount() -n.
+    - The signed multi-day result is unchanged after the common 37-day shift.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_MONTH_BOUNDARY
+    category: BOUNDARY
+    description: The interval crosses the end of a month, including different month
+      lengths.
+    preconditions:
+    - Use LocalDate pairs such as January 31 to February 1 and April 30 to May 1.
+    - The endpoints and their 37-day follow-ups must all be valid.
+    expectedSourceBehavior:
+    - The result counts elapsed whole calendar days across the month boundary rather
+      than comparing day-of-month fields.
+    - The follow-up result has the same getAmount() as the source result.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_YEAR_BOUNDARY
+    category: BOUNDARY
+    description: The interval crosses December 31 to January 1.
+    preconditions:
+    - Use LocalDate pairs whose start and end span an ISO year boundary, including
+      both forward and reverse ordering.
+    - Keep the intervals short enough that both 37-day shifts are valid.
+    expectedSourceBehavior:
+    - The result is the signed whole-day distance across the year boundary.
+    - The common 37-day shift leaves getAmount() unchanged.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_LEAP_DAY
+    category: EDGE
+    description: The interval includes February 29 in a leap year.
+    preconditions:
+    - Use a leap-year LocalDate interval such as February 28 to March 1 in a leap
+      year.
+    - Use endpoints whose 37-day follow-ups remain valid.
+    expectedSourceBehavior:
+    - The result includes the leap day in the whole-day count.
+    - The shifted interval has the same getAmount().
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_NON_LEAP_FEBRUARY
+    category: EDGE
+    description: The corresponding February interval occurs in a non-leap year.
+    preconditions:
+    - Use a non-leap-year LocalDate interval such as February 28 to March 1.
+    - Use both endpoint orderings or two non-leap years, with valid 37-day follow-ups.
+    expectedSourceBehavior:
+    - The result differs appropriately from the leap-year case because the source
+      dates determine the day count.
+    - The common shift preserves the source amount.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_INT_RESULT_LIMITS
+    category: BOUNDARY
+    description: The LocalDate difference is exactly at each int conversion limit.
+    preconditions:
+    - Use LocalDate.ofEpochDay(0) and LocalDate.ofEpochDay(2147483647) for the positive-limit
+      case.
+    - Use LocalDate.ofEpochDay(0) and LocalDate.ofEpochDay(-2147483648) for the negative-limit
+      case.
+    - Ensure adding 37 days to every endpoint remains within LocalDate's supported
+      range.
+    expectedSourceBehavior:
+    - The positive case returns getAmount() Integer.MAX_VALUE.
+    - The negative case returns getAmount() Integer.MIN_VALUE.
+    - Neither result is changed by the common 37-day shift.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LOCAL_DATETIME_EXACT_WHOLE_DAYS
+    category: NORMAL
+    description: LocalDateTime endpoints have matching times and differ by exact whole
+      days.
+    preconditions:
+    - Use LocalDateTime values with the same time-of-day and a positive or negative
+      difference of 2 through 1000 whole days.
+    - Both endpoint shifts by 37 DAYS must be valid.
+    expectedSourceBehavior:
+    - getAmount() equals the signed number of complete 24-hour day units between the
+      endpoints.
+    - The shifted pair returns the same amount.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LOCAL_DATETIME_FRACTIONAL_DAY_TRUNCATION
+    category: EDGE
+    description: LocalDateTime endpoints differ by more than one day but include a
+      partial final day.
+    preconditions:
+    - Use pairs such as 2024-01-01T10:00 to 2024-01-03T09:00 and its reverse.
+    - The elapsed duration is not an exact multiple of 24 hours, and both 37-day shifts
+      are valid.
+    expectedSourceBehavior:
+    - The result is the whole-day count produced by ChronoUnit.DAYS.between, excluding
+      the incomplete final day.
+    - The reverse ordering produces the corresponding negative whole-day count.
+    - The common shift preserves each result.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LOCAL_DATETIME_SUBDAY_ZERO
+    category: BOUNDARY
+    description: Distinct LocalDateTime endpoints are less than one whole day apart.
+    preconditions:
+    - Use endpoints whose elapsed time is between 1 second and less than 24 hours,
+      in both forward and reverse order.
+    - The endpoints and their 37-day follow-ups are valid.
+    expectedSourceBehavior:
+    - The source result has getAmount() 0 for the forward sub-day interval.
+    - The reverse sub-day interval also produces the signed whole-day result of 0.
+    - The follow-up preserves that result.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: INSTANT_EXACT_AND_FRACTIONAL_DAYS
+    category: EDGE
+    description: Instant endpoints exercise whole-day calculation with UTC-based timestamps,
+      including fractional-day durations.
+    preconditions:
+    - Use Instant pairs with exact 24-hour multiples in one case and a duration containing
+      a fractional day in another.
+    - Keep both endpoints and their 37-day additions within Instant's supported range.
+    expectedSourceBehavior:
+    - Days.between returns the signed whole-day amount calculated from the Instants.
+    - The common 37-day shift leaves getAmount() unchanged.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: OFFSET_DATETIME_SAME_OFFSET
+    category: NORMAL
+    description: OffsetDateTime endpoints use the same fixed offset and span multiple
+      whole days.
+    preconditions:
+    - Use OffsetDateTime values with the same ZoneOffset and a nonzero positive or
+      negative day difference.
+    - Both 37-day additions must be valid.
+    expectedSourceBehavior:
+    - The source result is a successful signed whole-day count.
+    - The follow-up with the same offset and shifted local date-times has the identical
+      getAmount().
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: OFFSET_DATETIME_DIFFERENT_OFFSETS
+    category: EDGE
+    description: OffsetDateTime endpoints have different fixed offsets, so elapsed-day
+      calculation is not based only on local date fields.
+    preconditions:
+    - Use two OffsetDateTime values with different valid ZoneOffset values and a nonzero
+      interval.
+    - Both endpoints support plus(37, DAYS) without overflow.
+    expectedSourceBehavior:
+    - Days.between returns the signed whole-day result accepted by ChronoUnit.DAYS
+      for the two offset temporals.
+    - Applying the same 37-day shift to both endpoints preserves that result.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ZONED_DATETIME_ORDINARY_ZONE
+    category: NORMAL
+    description: ZonedDateTime endpoints use the same zone away from a daylight-saving
+      transition.
+    preconditions:
+    - Use a zone-aware pair spanning multiple days but not crossing a zone transition.
+    - Both endpoints and their 37-day follow-ups must be valid in the same zone.
+    expectedSourceBehavior:
+    - The source produces a nonzero signed whole-day result.
+    - The common 37-day shift in the same zone leaves getAmount() unchanged.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ZONED_DATETIME_SPRING_TRANSITION
+    category: EDGE
+    description: ZonedDateTime endpoints span a spring daylight-saving transition.
+    preconditions:
+    - Use a zone with a spring transition and endpoints on opposite sides of that
+      transition.
+    - Choose times that are valid ZonedDateTime values and whose 37-day follow-ups
+      remain valid.
+    expectedSourceBehavior:
+    - The result reflects ChronoUnit.DAYS.between for the zone-aware temporals rather
+      than an assumed fixed-duration rule.
+    - The follow-up result has exactly the same getAmount().
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ZONED_DATETIME_AUTUMN_TRANSITION
+    category: EDGE
+    description: ZonedDateTime endpoints span an autumn daylight-saving transition.
+    preconditions:
+    - Use a zone with an autumn transition and endpoints on opposite sides of that
+      transition.
+    - Use unambiguous or explicitly resolved ZonedDateTime values, with valid 37-day
+      follow-ups.
+    expectedSourceBehavior:
+    - The source returns the whole-day amount determined by ChronoUnit.DAYS.
+    - The common forward shift preserves getAmount(), including across the transition-sensitive
+      interval.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: JAPANESE_DATE_SUPPORTED_CHRONOLOGY
+    category: NORMAL
+    description: JapaneseDate endpoints use a non-ISO chronology that supports DAYS
+      arithmetic.
+    preconditions:
+    - Use JapaneseDate values in the same chronology with a positive and a negative
+      multi-day interval.
+    - Both endpoints must support plus(37, ChronoUnit.DAYS).
+    expectedSourceBehavior:
+    - Days.between returns the signed whole-day difference supported by the JapaneseDate
+      temporal implementation.
+    - The follow-up pair has the same getAmount().
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: HIJRAH_DATE_SUPPORTED_CHRONOLOGY
+    category: EDGE
+    description: HijrahDate endpoints use a non-ISO chronology with variable month
+      lengths.
+    preconditions:
+    - Use HijrahDate values in the same chronology, including an interval crossing
+      a Hijrah month boundary.
+    - The dates and their 37-day follow-ups must be within the chronology's supported
+      range.
+    expectedSourceBehavior:
+    - The result is the signed whole-day difference returned by ChronoUnit.DAYS for
+      the HijrahDate pair.
+    - The common 37-day shift preserves the result.
+    targetCases: 2
+    emptyOutputAllowed: false

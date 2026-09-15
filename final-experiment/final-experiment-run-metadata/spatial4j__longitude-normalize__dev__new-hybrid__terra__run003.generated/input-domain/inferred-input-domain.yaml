@@ -1,0 +1,231 @@
+InputDomain:
+  summary: All IEEE-754 double longitude values are admissible source inputs. Cases
+    partition the fast in-range return, each remainder-path return branch, antimeridian
+    handling, adjacent floating-point boundaries, precision-loss magnitudes, and non-finite
+    values.
+  globalConstraints:
+  - Use a single Java double source argument lon_deg; the supplied API declares no
+    finite-only or geographic-range precondition, so finite values, +0.0, -0.0, NaN,
+    +Infinity, and -Infinity are included.
+  - Generate each follow-up only as lon_deg + 360.0, using Java double arithmetic
+    exactly as LongitudeNormalizeMetamorphicSpec.generateFollowUp does.
+  diversity:
+    normalizationPath:
+    - '4'
+    - Distinct source execution outcomes in normLonDEG
+    - in-range return; off < 0 return; off == 0 with positive source return; final
+      -180 + off return
+    ieee754Class:
+    - '5'
+    - Distinct representable-double classes
+    - signed zero; finite ordinary values; endpoint-adjacent values; large finite
+      precision-loss values; NaN/infinities
+    boundaryPosition:
+    - '6'
+    - Position relative to -180, 180, and 360-degree congruence boundaries
+    - exact endpoints; immediately inside endpoints; immediately outside endpoints;
+      positive congruent antimeridian; negative congruent antimeridian; exact full
+      revolutions
+  scenarios:
+  - id: SIGNED_ZERO
+    category: EDGE
+    description: Both representable zeros are already in the documented range.
+    preconditions:
+    - lon_deg is +0.0 or -0.0.
+    expectedSourceBehavior:
+    - The inclusive in-range condition is true and the method returns lon_deg directly,
+      without modulo arithmetic.
+    - The follow-up is 360.0 for either signed zero and reaches the remainder path.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: SMALLEST_SUBNORMAL_MAGNITUDES
+    category: EDGE
+    description: Tiny nonzero finite values exercise direct return while their 360-degree
+      follow-up can discard the tiny magnitude during floating-point addition.
+    preconditions:
+    - lon_deg is Double.MIN_VALUE or -Double.MIN_VALUE.
+    expectedSourceBehavior:
+    - The source satisfies -180 <= lon_deg <= 180 and is returned unchanged.
+    - The source output is finite and has magnitude Double.MIN_VALUE.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ORDINARY_INTERIOR_FRACTION
+    category: NORMAL
+    description: A finite non-boundary interior longitude has no endpoint or signed-zero
+      special case.
+    preconditions:
+    - lon_deg is 45.25.
+    expectedSourceBehavior:
+    - The source takes the in-range fast return and returns 45.25 exactly.
+    - The follow-up 405.25 takes the modulo path with a nonzero nonnegative off value.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_ANTIMERIDIAN_ENDPOINT
+    category: BOUNDARY
+    description: The inclusive lower endpoint is returned unchanged, while its follow-up
+      is the other antimeridian representation.
+    preconditions:
+    - lon_deg is exactly -180.0.
+    expectedSourceBehavior:
+    - The source takes the in-range fast return and returns -180.0.
+    - The follow-up is exactly 180.0 and also takes the in-range fast return.
+    - Both outputs meet the relation's antimeridian predicate.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_ANTIMERIDIAN_ENDPOINT
+    category: BOUNDARY
+    description: The inclusive upper endpoint is returned unchanged; adding one revolution
+      reaches the positive exact-multiple remainder branch.
+    preconditions:
+    - lon_deg is exactly 180.0.
+    expectedSourceBehavior:
+    - The source takes the in-range fast return and returns 180.0.
+    - The follow-up is 540.0; its off value is 0.0 and, because the follow-up is positive,
+      it returns 180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: JUST_INSIDE_ENDPOINTS
+    category: BOUNDARY
+    description: The closest representable in-range values below the upper endpoint
+      and above the lower endpoint retain their exact source representations.
+    preconditions:
+    - lon_deg is Math.nextUp(-180.0) or Math.nextDown(180.0).
+    expectedSourceBehavior:
+    - Each source satisfies the inclusive in-range condition and is returned directly.
+    - Each follow-up is greater than 180.0 and therefore uses the modulo path.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: JUST_OUTSIDE_ENDPOINTS
+    category: BOUNDARY
+    description: The closest representable values outside the documented range enter
+      the modulo logic immediately.
+    preconditions:
+    - lon_deg is Math.nextDown(-180.0) or Math.nextUp(180.0).
+    expectedSourceBehavior:
+    - Neither source satisfies the inclusive in-range condition.
+    - The negative source has a negative off value and returns 180 + off.
+    - The positive source has a nonnegative off value and returns -180 + off unless
+      floating-point addition makes off exactly zero.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: POSITIVE_OUT_OF_RANGE_NONZERO_REMAINDER
+    category: NORMAL
+    description: A positive longitude just beyond 180 produces a positive nonzero
+      modulo remainder.
+    preconditions:
+    - lon_deg is 181.0.
+    expectedSourceBehavior:
+    - The source bypasses the fast return.
+    - off is 1.0, so the final branch returns -179.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_OUT_OF_RANGE_NEGATIVE_REMAINDER
+    category: NORMAL
+    description: A negative longitude just below -180 produces a negative Java remainder.
+    preconditions:
+    - lon_deg is -181.0.
+    expectedSourceBehavior:
+    - The source bypasses the fast return.
+    - off is -1.0, so the off < 0 branch returns 179.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_EXACT_MODULO_ZERO
+    category: BOUNDARY
+    description: A positive out-of-range longitude congruent to 180 triggers the explicit
+      positive-zero-remainder branch.
+    preconditions:
+    - lon_deg is 540.0.
+    expectedSourceBehavior:
+    - The source bypasses the fast return.
+    - off is exactly 0.0 and lon_deg > 0 is true, so the method returns 180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_EXACT_MODULO_ZERO
+    category: BOUNDARY
+    description: A negative out-of-range longitude congruent to -180 has zero remainder
+      but cannot take the positive-source special branch.
+    preconditions:
+    - lon_deg is -540.0.
+    expectedSourceBehavior:
+    - The source bypasses the fast return.
+    - off compares equal to zero, lon_deg > 0 is false, and the final branch returns
+      -180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EXACT_FULL_REVOLUTIONS
+    category: BOUNDARY
+    description: Exact positive and negative full revolutions normalize at the central
+      meridian through opposite-sign remainder behavior.
+    preconditions:
+    - lon_deg is 360.0 or -360.0.
+    expectedSourceBehavior:
+    - Both sources bypass the in-range fast return.
+    - For 360.0, off is 180.0 and the final branch returns 0.0.
+    - For -360.0, off is -180.0 and the off < 0 branch returns 0.0.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: MULTIPLE_REVOLUTIONS_WITH_FRACTIONAL_RESIDUE
+    category: EDGE
+    description: Large-but-ordinary multi-revolution values retain a nonzero fractional
+      residue through modulo normalization.
+    preconditions:
+    - lon_deg is 1081.25 or -1081.25.
+    expectedSourceBehavior:
+    - Both sources bypass the in-range fast return.
+    - The positive source uses a nonnegative off path and the negative source uses
+      an off < 0 path.
+    - Each finite source result is produced from the source's Java remainder expression
+      rather than direct return.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ADDITION_QUANTIZED_AT_LARGE_MAGNITUDE
+    category: EDGE
+    description: At a magnitude whose double ulp exceeds 360 degrees, adding 360.0
+      does not change the representable follow-up input.
+    preconditions:
+    - lon_deg is Math.scalb(1.0, 62) or -Math.scalb(1.0, 62).
+    expectedSourceBehavior:
+    - Each source is outside the in-range interval and uses modulo normalization.
+    - In Java double arithmetic, lon_deg + 360.0 equals lon_deg for each selected
+      magnitude.
+    - Source and follow-up invoke normLonDEG with identical double inputs.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: MAXIMUM_FINITE_MAGNITUDES
+    category: EDGE
+    description: The largest finite positive and negative doubles exercise remainder
+      normalization without entering the non-finite NaN path.
+    preconditions:
+    - lon_deg is Double.MAX_VALUE or -Double.MAX_VALUE.
+    expectedSourceBehavior:
+    - Each source fails the in-range test and evaluates the modulo expression.
+    - Each source remains finite before modulo evaluation; its normalized result is
+      selected from the finite remainder branches.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: NAN_INPUT
+    category: EDGE
+    description: NaN is accepted by the double signature and causes all ordered range
+      and remainder comparisons to be false.
+    preconditions:
+    - lon_deg is Double.NaN.
+    expectedSourceBehavior:
+    - The in-range condition is false, off is NaN, and the final branch returns NaN.
+    - The follow-up is NaN and also returns NaN.
+    - The supplied relation's computed difference is NaN, so its difference > 1e-9
+      check does not throw.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: INFINITE_INPUTS
+    category: EDGE
+    description: Both infinities are outside the range; adding 360 preserves infinity,
+      while modulo produces NaN.
+    preconditions:
+    - lon_deg is Double.POSITIVE_INFINITY or Double.NEGATIVE_INFINITY.
+    expectedSourceBehavior:
+    - The in-range condition is false for both source values.
+    - For each infinity, off is NaN and the final branch returns NaN.
+    - Each follow-up remains the same infinity and also returns NaN; the supplied
+      relation's numeric difference is NaN.
+    targetCases: 2
+    emptyOutputAllowed: false

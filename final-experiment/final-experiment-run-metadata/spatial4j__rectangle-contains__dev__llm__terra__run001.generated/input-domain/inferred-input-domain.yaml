@@ -1,0 +1,440 @@
+InputDomain:
+  summary: Finite canonical geographic rectangles and points sharing one geo SpatialContext,
+    covering latitude rejection, inclusive edges, ordinary longitude checks, dateline
+    unwrap/shift behavior, degenerate dimensions, pole limits, and the full-world
+    longitude representation affected by follow-up normalization.
+  globalConstraints:
+  - '{The rectangle context is geo=rectangle.getContext().isGeo() is true, because
+    the follow-up uses DistanceUtils.normLonDEG and the stated MR is an eastward globe
+    rotation.}'
+  - The source point is created in the same SpatialContext instance as the rectangle,
+    so both source and follow-up use the same geographic coordinate model.
+  - All source coordinates are finite doubles; NaN and infinities are excluded because
+    RectangleImpl accepts raw doubles without defining geometric relation semantics
+    for them, while isEmpty() uses NaN as an empty sentinel.
+  - Source point longitude and rectangle minX/maxX are in [-180.0, 180.0], and source
+    point latitude and rectangle minY/maxY are in [-90.0, 90.0], so normLonDEG represents
+    a longitude rotation rather than normalization of arbitrary raw constructor values.
+  - Rectangle minY <= maxY; RectangleImpl.reset asserts this ordering for non-NaN
+    latitude bounds.
+  - Dateline-wrapping rectangles are included only through minX > maxX; this is explicitly
+    supported by RectangleImpl and is not an invalid rectangle.
+  - Non-geo contexts are excluded because the follow-up normalizes longitude into
+    [-180,180] rather than applying an unrestricted planar translation, so the supplied
+    MR does not specify a preservation claim for ctx.isGeo() == false.
+  diversity:
+    longitudeTopology:
+    - ordinary minX < maxX rectangles
+    - dateline-wrapping minX > maxX rectangles
+    - zero-width minX == maxX rectangles
+    - full-world raw width of 360 degrees
+    - longitude bounds at -180 and +180
+    latitudePosition:
+    - strict interior
+    - minY and maxY boundaries
+    - below and above rejection
+    - degenerate minY == maxY
+    - pole boundaries at -90 and +90
+    longitudeDecisionPath:
+    - direct geo short-circuit containment
+    - pX < minX followed by +360 shift
+    - pX > maxX followed by -360 shift
+    - unwrap of a dateline-crossing rectangle
+    - shifted containment after dateline unwrap
+    - shifted disjointness in the non-covered longitude gap
+    followUpTopology:
+    - ordinary source becoming dateline-wrapping after +150 degrees
+    - dateline-wrapping source becoming ordinary after +150 degrees
+    - longitude boundary normalization at +180 to -180
+    - full-world source whose normalized endpoints coincide in the follow-up
+  scenarios:
+  - id: ORDINARY_INTERIOR_ROTATES_TO_DATELINE_WRAP
+    category: NORMAL
+    description: Ordinary rectangle whose rotated minX becomes greater than rotated
+      maxX, with a strictly interior point.
+    preconditions:
+    - rectangle is RectangleImpl(20.0, 40.0, -10.0, 10.0, geoContext)
+    - point is geoContext.makePoint(30.0, 0.0)
+    - source follow-up rectangle endpoints normalize from 170.0 and 190.0 to 170.0
+      and -170.0.
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS through the geo direct-containment short-circuit.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_MIN_X_BOUNDARY_ROTATES_TO_WRAP
+    category: BOUNDARY
+    description: Point lies exactly on minX of an ordinary rectangle that wraps after
+      rotation.
+    preconditions:
+    - rectangle is RectangleImpl(20.0, 40.0, -10.0, 10.0, geoContext)
+    - point is geoContext.makePoint(20.0, 0.0).
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS because x equality with minX is inclusive.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_MAX_X_BOUNDARY_ROTATES_TO_WRAP
+    category: BOUNDARY
+    description: Point lies exactly on maxX of an ordinary rectangle that wraps after
+      rotation.
+    preconditions:
+    - rectangle is RectangleImpl(20.0, 40.0, -10.0, 10.0, geoContext)
+    - point is geoContext.makePoint(40.0, 0.0).
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS because x equality with maxX is inclusive.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_MIN_Y_BOUNDARY
+    category: BOUNDARY
+    description: Point lies on the southern latitude edge while its longitude is strictly
+      inside.
+    preconditions:
+    - rectangle is RectangleImpl(-40.0, -20.0, -10.0, 10.0, geoContext)
+    - point is geoContext.makePoint(-30.0, -10.0).
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS because y equality with minY is not rejected.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_MAX_Y_BOUNDARY
+    category: BOUNDARY
+    description: Point lies on the northern latitude edge while its longitude is strictly
+      inside.
+    preconditions:
+    - rectangle is RectangleImpl(-40.0, -20.0, -10.0, 10.0, geoContext)
+    - point is geoContext.makePoint(-30.0, 10.0).
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS because y equality with maxY is not rejected.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LATITUDE_BELOW_MINIMUM
+    category: BOUNDARY
+    description: Point is immediately below minY, exercising the first latitude-rejection
+      condition.
+    preconditions:
+    - rectangle is RectangleImpl(-40.0, -20.0, -10.0, 10.0, geoContext)
+    - point is geoContext.makePoint(-30.0, -10.000001).
+    expectedSourceBehavior:
+    - relate(point) returns DISJOINT before longitude logic executes.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LATITUDE_ABOVE_MAXIMUM
+    category: BOUNDARY
+    description: Point is immediately above maxY, exercising the second latitude-rejection
+      condition.
+    preconditions:
+    - rectangle is RectangleImpl(-40.0, -20.0, -10.0, 10.0, geoContext)
+    - point is geoContext.makePoint(-30.0, 10.000001).
+    expectedSourceBehavior:
+    - relate(point) returns DISJOINT before longitude logic executes.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_WESTERN_LONGITUDE_SHIFT_DISJOINT
+    category: EDGE
+    description: Point longitude is less than minX, causing geo logic to add 360 degrees
+      without reaching the rectangle.
+    preconditions:
+    - rectangle is RectangleImpl(20.0, 40.0, -10.0, 10.0, geoContext)
+    - point is geoContext.makePoint(-170.0, 0.0)
+    - point.getX() < rectangle.getMinX().
+    expectedSourceBehavior:
+    - relate(point) returns DISJOINT after pX is shifted from -170.0 to 190.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_EASTERN_LONGITUDE_SHIFT_DISJOINT
+    category: EDGE
+    description: Point longitude is greater than maxX, causing geo logic to subtract
+      360 degrees without reaching the rectangle.
+    preconditions:
+    - rectangle is RectangleImpl(-40.0, -20.0, -10.0, 10.0, geoContext)
+    - point is geoContext.makePoint(170.0, 0.0)
+    - point.getX() > rectangle.getMaxX().
+    expectedSourceBehavior:
+    - relate(point) returns DISJOINT after pX is shifted from 170.0 to -190.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_LONGITUDE_OUTSIDE_WITHOUT_LATITUDE_FAILURE
+    category: NORMAL
+    description: Point has an in-range latitude but a longitude separated from an
+      ordinary rectangle.
+    preconditions:
+    - rectangle is RectangleImpl(-100.0, -80.0, -20.0, 20.0, geoContext)
+    - point is geoContext.makePoint(-60.0, 0.0).
+    expectedSourceBehavior:
+    - relate(point) returns DISJOINT through longitude comparison rather than latitude
+      rejection.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DATELINE_WRAP_EASTERN_LOBE_INTERIOR
+    category: NORMAL
+    description: Dateline-wrapping rectangle contains a point in its positive-longitude
+      lobe.
+    preconditions:
+    - rectangle is RectangleImpl(170.0, -170.0, -10.0, 10.0, geoContext)
+    - point is geoContext.makePoint(175.0, 0.0)
+    - rectangle.getMinX() > rectangle.getMaxX().
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS after maxX is unwrapped from -170.0 to 190.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DATELINE_WRAP_WESTERN_LOBE_SHIFTED_CONTAINMENT
+    category: EDGE
+    description: Dateline-wrapping rectangle contains a negative-longitude point after
+      the point is shifted east by 360 degrees.
+    preconditions:
+    - rectangle is RectangleImpl(170.0, -170.0, -10.0, 10.0, geoContext)
+    - point is geoContext.makePoint(-175.0, 0.0)
+    - point.getX() < rectangle.getMinX().
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS after unwrapping maxX to 190.0 and shifting pX
+      to 185.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DATELINE_WRAP_MIN_X_BOUNDARY
+    category: BOUNDARY
+    description: Point equals the positive minX boundary of a dateline-wrapping rectangle.
+    preconditions:
+    - rectangle is RectangleImpl(170.0, -170.0, -10.0, 10.0, geoContext)
+    - point is geoContext.makePoint(170.0, 0.0).
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS at the unwrapped lower x boundary.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DATELINE_WRAP_MAX_X_BOUNDARY
+    category: BOUNDARY
+    description: Point equals the negative maxX boundary and must be shifted into
+      the unwrapped interval.
+    preconditions:
+    - rectangle is RectangleImpl(170.0, -170.0, -10.0, 10.0, geoContext)
+    - point is geoContext.makePoint(-170.0, 0.0).
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS after pX shifts to the unwrapped maxX value 190.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DATELINE_WRAP_CENTRAL_GAP_DISJOINT
+    category: EDGE
+    description: Point is in the central longitude gap excluded by a dateline-wrapping
+      rectangle.
+    preconditions:
+    - rectangle is RectangleImpl(170.0, -170.0, -10.0, 10.0, geoContext)
+    - point is geoContext.makePoint(0.0, 0.0).
+    expectedSourceBehavior:
+    - relate(point) returns DISJOINT after pX shifts to 360.0, beyond unwrapped maxX
+      190.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DATELINE_WRAP_ROTATES_TO_ORDINARY
+    category: NORMAL
+    description: A source dateline-wrapping rectangle becomes an ordinary non-wrapping
+      rectangle after the 150-degree rotation.
+    preconditions:
+    - rectangle is RectangleImpl(170.0, -170.0, -20.0, 20.0, geoContext)
+    - point is geoContext.makePoint(-175.0, 5.0)
+    - follow-up rectangle endpoints normalize to -40.0 and -20.0.
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS through dateline unwrapping and point shifting.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_WIDTH_VERTICAL_LINE_CONTAINS
+    category: BOUNDARY
+    description: Rectangle has minX == maxX and the point lies on that vertical line.
+    preconditions:
+    - rectangle is RectangleImpl(25.0, 25.0, -10.0, 10.0, geoContext)
+    - point is geoContext.makePoint(25.0, 0.0).
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS because both longitude bounds are inclusive.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_WIDTH_VERTICAL_LINE_DISJOINT
+    category: BOUNDARY
+    description: Rectangle has minX == maxX but the point has a different in-range
+      latitude longitude.
+    preconditions:
+    - rectangle is RectangleImpl(25.0, 25.0, -10.0, 10.0, geoContext)
+    - point is geoContext.makePoint(25.000001, 0.0).
+    expectedSourceBehavior:
+    - relate(point) returns DISJOINT after longitude comparison.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_HEIGHT_HORIZONTAL_LINE_CONTAINS
+    category: BOUNDARY
+    description: Rectangle has minY == maxY and the point lies on its horizontal line
+      with contained longitude.
+    preconditions:
+    - rectangle is RectangleImpl(-20.0, 20.0, 5.0, 5.0, geoContext)
+    - point is geoContext.makePoint(0.0, 5.0).
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS because equal latitude bounds are inclusive.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_HEIGHT_HORIZONTAL_LINE_DISJOINT
+    category: BOUNDARY
+    description: Rectangle has minY == maxY and the point differs slightly in latitude.
+    preconditions:
+    - rectangle is RectangleImpl(-20.0, 20.0, 5.0, 5.0, geoContext)
+    - point is geoContext.makePoint(0.0, 5.000001).
+    expectedSourceBehavior:
+    - relate(point) returns DISJOINT through the early y > maxY check.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POINT_RECTANGLE_DEGENERATE_CONTAINS
+    category: EDGE
+    description: Both rectangle dimensions are degenerate and the point exactly equals
+      the sole represented coordinate.
+    preconditions:
+    - rectangle is RectangleImpl(-30.0, -30.0, 12.0, 12.0, geoContext)
+    - point is geoContext.makePoint(-30.0, 12.0).
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS at all four inclusive boundaries.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POINT_RECTANGLE_DEGENERATE_DISJOINT
+    category: EDGE
+    description: Both rectangle dimensions are degenerate but the probe differs only
+      in longitude.
+    preconditions:
+    - rectangle is RectangleImpl(-30.0, -30.0, 12.0, 12.0, geoContext)
+    - point is geoContext.makePoint(-29.999999, 12.0).
+    expectedSourceBehavior:
+    - relate(point) returns DISJOINT after passing latitude equality.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SOUTH_POLE_LATITUDE_BOUNDARY
+    category: BOUNDARY
+    description: Rectangle reaches the south pole and the point is exactly at minY
+      -90 degrees.
+    preconditions:
+    - rectangle is RectangleImpl(-30.0, 30.0, -90.0, -70.0, geoContext)
+    - point is geoContext.makePoint(0.0, -90.0).
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS at the geographic lower latitude limit.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NORTH_POLE_LATITUDE_BOUNDARY
+    category: BOUNDARY
+    description: Rectangle reaches the north pole and the point is exactly at maxY
+      90 degrees.
+    preconditions:
+    - rectangle is RectangleImpl(-30.0, 30.0, 70.0, 90.0, geoContext)
+    - point is geoContext.makePoint(0.0, 90.0).
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS at the geographic upper latitude limit.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FULL_WORLD_LONGITUDE_INTERIOR
+    category: EDGE
+    description: Rectangle uses the explicit full-world longitude representation minX=-180
+      and maxX=180 with an interior latitude point.
+    preconditions:
+    - rectangle is RectangleImpl(-180.0, 180.0, -10.0, 10.0, geoContext)
+    - point is geoContext.makePoint(0.0, 0.0)
+    - rectangle.getMaxX() - rectangle.getMinX() == 360.0.
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS through the geo direct-containment short-circuit.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FULL_WORLD_LONGITUDE_LATITUDE_REJECTION
+    category: EDGE
+    description: Full-world longitude rectangle is still disjoint when the point lies
+      above its latitude range.
+    preconditions:
+    - rectangle is RectangleImpl(-180.0, 180.0, -10.0, 10.0, geoContext)
+    - point is geoContext.makePoint(0.0, 10.000001).
+    expectedSourceBehavior:
+    - relate(point) returns DISJOINT before its full longitude span can contain the
+      point.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_DATELINE_BOUNDARY_MINUS_180
+    category: BOUNDARY
+    description: Ordinary rectangle includes -180 as its minX and the point is exactly
+      at that longitude.
+    preconditions:
+    - rectangle is RectangleImpl(-180.0, -170.0, -10.0, 10.0, geoContext)
+    - point is geoContext.makePoint(-180.0, 0.0).
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS at the -180 longitude boundary.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_DATELINE_BOUNDARY_PLUS_180
+    category: BOUNDARY
+    description: Ordinary rectangle includes +180 as maxX and the point is exactly
+      at that longitude, exercising follow-up normalization of +180.
+    preconditions:
+    - rectangle is RectangleImpl(170.0, 180.0, -10.0, 10.0, geoContext)
+    - point is geoContext.makePoint(180.0, 0.0).
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS at the +180 longitude boundary.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_MIN_ENDPOINT_NORMALIZES_TO_MINUS_180
+    category: EDGE
+    description: Source minX plus 150 equals +180, which normLonDEG converts to -180
+      in the follow-up and makes the follow-up rectangle wrap.
+    preconditions:
+    - rectangle is RectangleImpl(30.0, 31.0, -5.0, 5.0, geoContext)
+    - point is geoContext.makePoint(30.5, 0.0)
+    - rectangle.getMinX() + 150.0 == 180.0.
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS with strictly interior source longitude.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_MAX_ENDPOINT_NORMALIZES_TO_MINUS_180
+    category: EDGE
+    description: Source maxX plus 150 equals +180, which makes the follow-up max endpoint
+      normalize to -180.
+    preconditions:
+    - rectangle is RectangleImpl(29.0, 30.0, -5.0, 5.0, geoContext)
+    - point is geoContext.makePoint(29.5, 0.0)
+    - rectangle.getMaxX() + 150.0 == 180.0.
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS with strictly interior source longitude.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NARROW_DATELINE_WRAP_CONTAINS
+    category: EDGE
+    description: A narrow two-degree dateline-wrapping rectangle contains a point
+      in its wrapped interval.
+    preconditions:
+    - rectangle is RectangleImpl(179.0, -179.0, -1.0, 1.0, geoContext)
+    - point is geoContext.makePoint(-180.0, 0.0)
+    - rectangle.getMinX() > rectangle.getMaxX().
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS after shifting -180.0 to 180.0 in the unwrapped
+      [179.0,181.0] interval.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NARROW_DATELINE_WRAP_NEARBY_GAP_DISJOINT
+    category: EDGE
+    description: A point just outside a narrow dateline-wrapping interval remains
+      in-range in latitude but is longitude-disjoint.
+    preconditions:
+    - rectangle is RectangleImpl(179.0, -179.0, -1.0, 1.0, geoContext)
+    - point is geoContext.makePoint(-178.999999, 0.0).
+    expectedSourceBehavior:
+    - relate(point) returns DISJOINT after shifting the point to slightly above unwrapped
+      maxX 181.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WIDE_NONWRAPPING_RECTANGLE_CONTAINS
+    category: NORMAL
+    description: A wide but non-full-world ordinary rectangle contains a point near
+      its positive longitude edge.
+    preconditions:
+    - rectangle is RectangleImpl(-170.0, 170.0, -45.0, 45.0, geoContext)
+    - point is geoContext.makePoint(169.999999, 0.0)
+    - rectangle.getMaxX() - rectangle.getMinX() == 340.0.
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS through direct longitude containment.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WIDE_NONWRAPPING_GAP_DISJOINT
+    category: EDGE
+    description: A wide non-wrapping rectangle excludes a point in its narrow omitted
+      dateline-side gap.
+    preconditions:
+    - rectangle is RectangleImpl(-170.0, 170.0, -45.0, 45.0, geoContext)
+    - point is geoContext.makePoint(180.0, 0.0).
+    expectedSourceBehavior:
+    - relate(point) returns DISJOINT after geo logic shifts +180.0 to -180.0, below
+      minX.
+    targetCases: 1
+    emptyOutputAllowed: false

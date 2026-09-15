@@ -1,0 +1,495 @@
+InputDomain:
+  summary: Finite IEEE-754 double-precision longitude values, emphasizing the inclusive
+    -180..180 fast path, modulo wrapping, positive and negative antimeridian sentinels,
+    exact revolution boundaries, floating-point precision limits, and the generated
+    follow-up longitude input +360.0.
+  globalConstraints:
+  - 'The source input is a finite double: -Double.MAX_VALUE <= longitudeDeg <= Double.MAX_VALUE;
+    NaN and positive or negative infinity are excluded because they are not finite
+    longitude values and would make the metamorphic comparison non-observable (the
+    assertion can be bypassed by NaN arithmetic).'
+  - The follow-up input is generated exactly as longitudeDeg + 360.0, and the relation
+    is evaluated with tolerance 1e-9 except that outputs within 1e-9 of either -180.0
+    or +180.0 are treated as the same antimeridian.
+  - 'No canonicalization assumption is made for the antimeridian: normLonDEG may return
+    -180.0 or +180.0 depending on the source value and modulo branch.'
+  - Each source case is a single double argument to the public static method DistanceUtils.normLonDEG(double);
+    no object construction is required.
+  diversity:
+    inputRegion:
+    - (-180.0, 180.0)
+    - '-180.0'
+    - '180.0'
+    - (-infinity, -180.0)
+    - (180.0, +infinity)
+    moduloSign:
+    - off < 0.0
+    - off == 0.0 with longitudeDeg > 0.0
+    - off == 0.0 with longitudeDeg < 0.0
+    - off > 0.0
+    revolutionCount:
+    - 0 revolutions
+    - one revolution
+    - two revolutions
+    - at least three revolutions
+    - very large finite magnitude
+    followUpPath:
+    - source and follow-up both in the fast path
+    - source in fast path and follow-up wrapped
+    - source wrapped and follow-up in a different modulo interval
+    - source and follow-up reach antimeridian sentinels
+    precisionClass:
+    - signed zero
+    - smallest positive and negative subnormal
+    - ordinary fractional values
+    - values adjacent to +/-180.0
+    - values near 2^53
+    - values near Double.MAX_VALUE
+  scenarios:
+  - id: ZERO_FAST_PATH
+    category: NORMAL
+    description: Zero longitude remains zero before and after adding one full revolution.
+    preconditions:
+    - longitudeDeg == 0.0
+    expectedSourceBehavior:
+    - The inclusive range condition is true, so normLonDEG returns the source value
+      unchanged, exactly 0.0.
+    - The follow-up is 360.0 and exercises modulo wrapping back to 0.0; the relation
+      difference is at most 1e-9.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_ZERO_FAST_PATH
+    category: EDGE
+    description: Negative zero exercises the inclusive fast path without assuming
+      that its sign is discarded.
+    preconditions:
+    - longitudeDeg is the IEEE-754 value -0.0.
+    expectedSourceBehavior:
+    - Both comparisons in the inclusive range check are true, so the returned value
+      preserves the source double, including its negative-zero representation.
+    - The follow-up is 360.0 and normalizes to 0.0; numeric relation comparison remains
+      satisfied.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_INTERIOR_FAST_PATH
+    category: NORMAL
+    description: A positive ordinary longitude inside the documented range is returned
+      without modulo arithmetic.
+    preconditions:
+    - longitudeDeg == 45.25, which satisfies -180.0 < longitudeDeg < 180.0.
+    expectedSourceBehavior:
+    - The source output is exactly 45.25.
+    - The follow-up 405.25 wraps to the same normalized longitude.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_INTERIOR_FAST_PATH
+    category: NORMAL
+    description: A negative ordinary longitude inside the documented range is returned
+      without modulo arithmetic.
+    preconditions:
+    - longitudeDeg == -45.25, which satisfies -180.0 < longitudeDeg < 180.0.
+    expectedSourceBehavior:
+    - The source output is exactly -45.25.
+    - The follow-up 314.75 wraps to the same normalized longitude.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: JUST_INSIDE_POSITIVE_BOUNDARY
+    category: BOUNDARY
+    description: The greatest representable double immediately below +180.0 remains
+      on the fast path.
+    preconditions:
+    - longitudeDeg == Math.nextDown(180.0).
+    expectedSourceBehavior:
+    - The inclusive range condition is true and the source output equals Math.nextDown(180.0)
+      without precision shifting.
+    - The follow-up is outside the documented range and must wrap to the same location
+      within the relation tolerance.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: JUST_INSIDE_NEGATIVE_BOUNDARY
+    category: BOUNDARY
+    description: The least representable double immediately above -180.0 remains on
+      the fast path.
+    preconditions:
+    - longitudeDeg == Math.nextUp(-180.0).
+    expectedSourceBehavior:
+    - The inclusive range condition is true and the source output equals Math.nextUp(-180.0)
+      exactly.
+    - The follow-up wraps to the same normalized longitude within 1e-9.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_ANTIMERIDIAN_FAST_PATH
+    category: BOUNDARY
+    description: The exact positive antimeridian endpoint is returned unchanged.
+    preconditions:
+    - longitudeDeg == 180.0.
+    expectedSourceBehavior:
+    - The inclusive range condition returns +180.0 directly.
+    - The follow-up is 540.0 and reaches the positive antimeridian sentinel; the relation
+      explicitly accepts either antimeridian sign.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_ANTIMERIDIAN_FAST_PATH
+    category: BOUNDARY
+    description: The exact negative antimeridian endpoint is returned unchanged.
+    preconditions:
+    - longitudeDeg == -180.0.
+    expectedSourceBehavior:
+    - The inclusive range condition returns -180.0 directly.
+    - The follow-up is 180.0; both outputs are antimeridian values and are accepted
+      as equivalent by the relation.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: JUST_OUTSIDE_POSITIVE_BOUNDARY
+    category: BOUNDARY
+    description: The least representable double above +180.0 takes the modulo path
+      and returns just below -180.0.
+    preconditions:
+    - longitudeDeg == Math.nextUp(180.0).
+    expectedSourceBehavior:
+    - The fast-path condition is false.
+    - The computed off is positive and nonzero, so the result is -180.0 + off, near
+      -180.0 rather than the unchanged source value.
+    - The follow-up normalizes to the same point within the relation tolerance.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: JUST_OUTSIDE_NEGATIVE_BOUNDARY
+    category: BOUNDARY
+    description: The greatest representable double below -180.0 takes the negative-off
+      modulo branch and returns just below +180.0.
+    preconditions:
+    - longitudeDeg == Math.nextDown(-180.0).
+    expectedSourceBehavior:
+    - The fast-path condition is false.
+    - The computed off is negative, so the result is 180.0 + off, near +180.0.
+    - The follow-up normalizes to the same point within the relation tolerance.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_ONE_DEGREE_OVER
+    category: NORMAL
+    description: A positive value one degree beyond the upper bound exercises positive
+      modulo wrapping.
+    preconditions:
+    - longitudeDeg == 181.0.
+    expectedSourceBehavior:
+    - The modulo result is positive and nonzero, producing -179.0.
+    - The follow-up 541.0 produces the same normalized longitude.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_ONE_DEGREE_OVER
+    category: NORMAL
+    description: A negative value one degree beyond the lower bound exercises the
+      off < 0 branch.
+    preconditions:
+    - longitudeDeg == -181.0.
+    expectedSourceBehavior:
+    - The modulo result is negative, producing 179.0 through the 180.0 + off branch.
+    - The follow-up 179.0 is already in range and matches the normalized source output.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_ONE_REVOLUTION
+    category: BOUNDARY
+    description: One positive full revolution exercises a positive nonzero modulo
+      result at off == 180.0.
+    preconditions:
+    - longitudeDeg == 360.0.
+    expectedSourceBehavior:
+    - The modulo path returns 0.0.
+    - The follow-up 720.0 also returns 0.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_ONE_REVOLUTION
+    category: BOUNDARY
+    description: One negative full revolution exercises a negative modulo result at
+      off == -180.0.
+    preconditions:
+    - longitudeDeg == -360.0.
+    expectedSourceBehavior:
+    - The modulo path returns 0.0.
+    - The follow-up 0.0 uses the fast path and matches exactly.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_MULTIPLE_SENTINEL
+    category: BOUNDARY
+    description: A positive multiple of 360 reaches the off == 0 and longitudeDeg
+      > 0 sentinel.
+    preconditions:
+    - longitudeDeg == 540.0.
+    expectedSourceBehavior:
+    - off == 0.0 and longitudeDeg > 0.0, so the method returns +180.0 rather than
+      -180.0.
+    - The follow-up 900.0 reaches the same positive antimeridian sentinel.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_MULTIPLE_SENTINEL
+    category: BOUNDARY
+    description: A negative multiple of 360 reaches the final else path and returns
+      the negative antimeridian sentinel.
+    preconditions:
+    - longitudeDeg == -540.0.
+    expectedSourceBehavior:
+    - off == 0.0 but longitudeDeg > 0.0 is false, so the final expression returns
+      -180.0.
+    - The follow-up -180.0 uses the fast path; both outputs are accepted as antimeridian
+      equivalents.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_TWO_REVOLUTIONS
+    category: NORMAL
+    description: A positive value at two full revolutions exercises repeated positive
+      wrapping.
+    preconditions:
+    - longitudeDeg == 720.0.
+    expectedSourceBehavior:
+    - The modulo path returns 0.0.
+    - The follow-up 1080.0 also returns 0.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_TWO_REVOLUTIONS
+    category: NORMAL
+    description: A negative value at two full revolutions exercises repeated negative
+      wrapping.
+    preconditions:
+    - longitudeDeg == -720.0.
+    expectedSourceBehavior:
+    - The modulo path returns 0.0.
+    - The follow-up -360.0 also returns 0.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_FRACTIONAL_WRAP
+    category: NORMAL
+    description: A fractional positive value just beyond the upper boundary preserves
+      its fractional offset while wrapping.
+    preconditions:
+    - longitudeDeg == 180.5.
+    expectedSourceBehavior:
+    - The positive nonzero off branch returns -179.5.
+    - The follow-up 540.5 returns the same normalized value within tolerance.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_FRACTIONAL_WRAP
+    category: NORMAL
+    description: A fractional negative value just beyond the lower boundary preserves
+      its fractional offset while wrapping.
+    preconditions:
+    - longitudeDeg == -180.5.
+    expectedSourceBehavior:
+    - The negative-off branch returns 179.5.
+    - The follow-up 179.5 uses the fast path and matches.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_NEAR_REVOLUTION
+    category: EDGE
+    description: A positive fractional value just below one revolution exercises a
+      result near -0.5.
+    preconditions:
+    - longitudeDeg == 359.5.
+    expectedSourceBehavior:
+    - The modulo path returns -0.5.
+    - The follow-up 719.5 returns -0.5 within the relation tolerance.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_NEAR_REVOLUTION
+    category: EDGE
+    description: A negative fractional value just above negative one revolution exercises
+      a result near +0.5.
+    preconditions:
+    - longitudeDeg == -359.5.
+    expectedSourceBehavior:
+    - The negative-off branch returns 0.5.
+    - The follow-up 0.5 uses the fast path and matches.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_FRACTIONAL_SENTINEL_OFFSET
+    category: EDGE
+    description: A positive value one half degree beyond the positive sentinel tests
+      modulo behavior around a repeated antimeridian.
+    preconditions:
+    - longitudeDeg == 540.5.
+    expectedSourceBehavior:
+    - The positive nonzero off branch returns -179.5, not +180.0.
+    - The follow-up 900.5 returns the same normalized value.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_FRACTIONAL_SENTINEL_OFFSET
+    category: EDGE
+    description: A negative value one half degree beyond the negative sentinel tests
+      the negative-off branch around a repeated antimeridian.
+    preconditions:
+    - longitudeDeg == -540.5.
+    expectedSourceBehavior:
+    - The negative-off branch returns 179.5, not -180.0.
+    - The follow-up -180.5 returns 179.5 within the relation tolerance.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_BOUNDARY_CROSSING_FOLLOW_UP
+    category: BOUNDARY
+    description: The source is in range near +180 while its generated follow-up is
+      outside the range.
+    preconditions:
+    - longitudeDeg == 179.0.
+    expectedSourceBehavior:
+    - The source output is exactly 179.0 through the fast path.
+    - The follow-up 539.0 wraps through the modulo path to 179.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_BOUNDARY_CROSSING_FOLLOW_UP
+    category: BOUNDARY
+    description: The source is in range near -180 while its generated follow-up crosses
+      above +180.
+    preconditions:
+    - longitudeDeg == -179.0.
+    expectedSourceBehavior:
+    - The source output is exactly -179.0 through the fast path.
+    - The follow-up 181.0 wraps to -179.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_ANTIMERIDIAN_FOLLOW_UP
+    category: EDGE
+    description: Adding 360 to +180 produces a positive multiple whose output is the
+      same antimeridian sentinel.
+    preconditions:
+    - longitudeDeg == 180.0 and longitudeDeg + 360.0 == 540.0.
+    expectedSourceBehavior:
+    - The source output is +180.0 from the fast path.
+    - The follow-up output is +180.0 from the off == 0 and positive-input sentinel
+      branch.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_ANTIMERIDIAN_FOLLOW_UP
+    category: EDGE
+    description: Adding 360 to -180 produces +180, demonstrating the relation's explicit
+      antimeridian equivalence.
+    preconditions:
+    - longitudeDeg == -180.0 and longitudeDeg + 360.0 == 180.0.
+    expectedSourceBehavior:
+    - The source output is -180.0 from the fast path.
+    - The follow-up output is +180.0 from the fast path; the relation must use its
+      antimeridian exception.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SMALL_POSITIVE_EXACT_FAST_PATH
+    category: EDGE
+    description: A small positive nonzero value tests that the fast path avoids modulo
+      precision shifting.
+    preconditions:
+    - longitudeDeg == 1e-12.
+    expectedSourceBehavior:
+    - The source output is exactly 1e-12 because it lies inclusively in the documented
+      range.
+    - The follow-up wraps to the same value within 1e-9.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SMALL_NEGATIVE_EXACT_FAST_PATH
+    category: EDGE
+    description: A small negative nonzero value tests the negative side of the precision-preserving
+      fast path.
+    preconditions:
+    - longitudeDeg == -1e-12.
+    expectedSourceBehavior:
+    - The source output is exactly -1e-12.
+    - The follow-up 359.999999999999 must normalize to the same value within the relation
+      tolerance.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_SUBNORMAL_FAST_PATH
+    category: EDGE
+    description: The smallest positive subnormal finite double remains unchanged in
+      the inclusive range.
+    preconditions:
+    - longitudeDeg == Double.MIN_VALUE.
+    expectedSourceBehavior:
+    - The source output equals Double.MIN_VALUE exactly.
+    - The follow-up is 360.0 after double addition and normalizes to 0.0; the numeric
+      difference is below 1e-9.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_SUBNORMAL_FAST_PATH
+    category: EDGE
+    description: The smallest negative subnormal finite double remains unchanged in
+      the inclusive range.
+    preconditions:
+    - longitudeDeg == -Double.MIN_VALUE.
+    expectedSourceBehavior:
+    - The source output equals -Double.MIN_VALUE exactly.
+    - The follow-up rounds to 360.0 and normalizes to 0.0; the relation tolerance
+      accepts the tiny difference.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LARGE_POSITIVE_FINITE
+    category: EDGE
+    description: A large positive finite longitude exercises modulo arithmetic far
+      outside the usual geographic range.
+    preconditions:
+    - longitudeDeg == 1.0e15, which is finite and greater than 180.0.
+    expectedSourceBehavior:
+    - The fast path is bypassed and the result is produced from (longitudeDeg + 180.0)
+      % 360.0, remaining in the documented output interval.
+    - The follow-up is independently normalized and must satisfy the supplied relation
+      within tolerance or via the antimeridian exception.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LARGE_NEGATIVE_FINITE
+    category: EDGE
+    description: A large negative finite longitude exercises the negative remainder
+      branch far outside the usual geographic range.
+    preconditions:
+    - longitudeDeg == -1.0e15, which is finite and less than -180.0.
+    expectedSourceBehavior:
+    - The negative modulo result is handled by the 180.0 + off branch, producing a
+      value in the documented output interval.
+    - The follow-up normalization is checked by the supplied metamorphic relation.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_TWO_TO_53
+    category: EDGE
+    description: The positive 2^53 boundary tests large finite arithmetic where integer-degree
+      precision is limited.
+    preconditions:
+    - longitudeDeg == 9007199254740992.0, equal to 2^53 and finite.
+    expectedSourceBehavior:
+    - The source takes the modulo path and returns a bounded finite result determined
+      by Java double remainder arithmetic.
+    - The follow-up is generated using double addition, and the relation is evaluated
+      with its specified tolerance and antimeridian rule.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_TWO_TO_53
+    category: EDGE
+    description: The negative 2^53 boundary tests large finite arithmetic and the
+      sign-sensitive remainder branch.
+    preconditions:
+    - longitudeDeg == -9007199254740992.0, equal to -2^53 and finite.
+    expectedSourceBehavior:
+    - The source takes the modulo path and handles the sign of the remainder without
+      using the fast path.
+    - The generated follow-up is checked against the same normalized location under
+      the supplied relation.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MAX_FINITE_POSITIVE
+    category: EDGE
+    description: The maximum finite positive double tests the farthest reachable positive
+      finite source input.
+    preconditions:
+    - longitudeDeg == Double.MAX_VALUE.
+    expectedSourceBehavior:
+    - The fast path is bypassed; the result is obtained from Java double addition
+      and remainder operations and is expected to be a bounded finite normalization
+      result.
+    - The follow-up uses the actual double result of longitudeDeg + 360.0, not mathematical
+      real-number addition, and is checked by the supplied relation.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MAX_FINITE_NEGATIVE
+    category: EDGE
+    description: The negative maximum-magnitude finite double tests the farthest reachable
+      negative source input.
+    preconditions:
+    - longitudeDeg == -Double.MAX_VALUE.
+    expectedSourceBehavior:
+    - The fast path is bypassed and the negative remainder handling is exercised.
+    - The follow-up is generated by Java double addition and checked using the relation's
+      tolerance and antimeridian equivalence.
+    targetCases: 1
+    emptyOutputAllowed: false

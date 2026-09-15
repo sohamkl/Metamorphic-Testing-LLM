@@ -1,0 +1,427 @@
+InputDomain:
+  summary: Geographic RectangleImpl receivers and finite geographic Point probes that
+    exercise latitude rejection, ordinary longitude containment, dateline unwrapping,
+    equality boundaries, degenerate rectangles, world-width behavior, and the explicitly
+    supported empty-rectangle sentinel under the shared eastward 150-degree rotation
+    MR.
+  globalConstraints:
+  - The receiver and probe use the same geographic SpatialContext, so ctx.isGeo()
+    is true and the follow-up can use context.makePoint and DistanceUtils.normLonDEG
+    as supplied.
+  - Ordinary longitude coordinates are finite and in the geographic range [-180.0,
+    180.0]; ordinary latitude coordinates are finite and in [-90.0, 90.0].
+  - For non-empty ordinary rectangles, minY <= maxY, and the rectangle is constructed
+    through one of the supplied RectangleImpl constructors; minX <= maxX denotes an
+    ordinary interval and minX > maxX denotes a dateline-wrapping interval.
+  - The probe is a non-null Point created by the SpatialContext, with finite geographic
+    coordinates; null is excluded because generateFollowUp rejects null inputs.
+  - The source and follow-up use the same latitude values; source cases therefore
+    distinguish latitude behavior before longitude behavior, as required by relate(Point).
+  - NaN is excluded from ordinary coordinate cases, but the explicitly supported minX-is-NaN
+    empty sentinel is included in its own scenario because RectangleImpl.isEmpty()
+    defines that reachable state and relate(Point) has a distinct direct-call behavior
+    for it.
+  - Each case is evaluated with the supplied follow-up rotation of exactly 150.0 degrees
+    east and the supplied identity assertion on SpatialRelation.
+  diversity:
+    longitudeTopology:
+    - ordinary_non_wrapping_minX_le_maxX
+    - dateline_wrapping_minX_gt_maxX
+    - zero_width_minX_equal_maxX
+    - full_world_width_maxX_minus_minX_equal_360
+    latitudePosition:
+    - strictly_below_minY
+    - exactly_minY
+    - strictly_inside
+    - exactly_maxY
+    - strictly_above_maxY
+    longitudeDecisionPath:
+    - latitude_rejection
+    - direct_interval_contains
+    - pX_less_than_minX_shift
+    - pX_greater_than_maxX_shift
+    - final_disjoint_check
+    boundaryKind:
+    - interior
+    - minX_boundary
+    - maxX_boundary
+    - dateline_boundary
+    - pole_boundary
+    - degenerate_axis
+    constructionPath:
+    - scalar_double_constructor
+    - lowerLeft_upperRight_point_constructor
+    - rectangle_copy_constructor
+    sentinelState:
+    - ordinary_finite
+    - empty_minX_NaN
+  scenarios:
+  - id: LATITUDE_BELOW_REJECTS_BEFORE_LONGITUDE
+    category: NORMAL
+    description: A finite probe is below an otherwise ordinary non-wrapping rectangle,
+      so the first latitude guard returns DISJOINT without entering longitude logic.
+    preconditions:
+    - Rectangle longitude interval is -40.0 <= minX <= maxX <= 40.0.
+    - Rectangle latitude interval is 10.0 <= minY <= maxY <= 30.0.
+    - point.y < minY and point.x is any finite longitude, including one inside the
+      rectangle's longitude interval.
+    expectedSourceBehavior:
+    - relate(Point) returns SpatialRelation.DISJOINT from point.getY() < getMinY().
+    - The follow-up preserves point.y and rectangle minY/maxY, so its latitude guard
+      also returns DISJOINT.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LATITUDE_ABOVE_REJECTS_BEFORE_LONGITUDE
+    category: NORMAL
+    description: A finite probe is above an otherwise ordinary non-wrapping rectangle,
+      exercising the symmetric latitude rejection branch.
+    preconditions:
+    - Rectangle longitude interval is -40.0 <= minX <= maxX <= 40.0.
+    - Rectangle latitude interval is -30.0 <= minY <= maxY <= 10.0.
+    - point.y > maxY and point.x is any finite longitude, including one inside the
+      rectangle's longitude interval.
+    expectedSourceBehavior:
+    - relate(Point) returns SpatialRelation.DISJOINT from point.getY() > getMaxY().
+    - The follow-up has the same latitude values and remains DISJOINT.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ORDINARY_INTERIOR_DIRECT_CONTAINS
+    category: NORMAL
+    description: A probe lies strictly inside both latitude and longitude ranges of
+      an ordinary rectangle, taking the geo direct-containment short circuit.
+    preconditions:
+    - Rectangle is non-wrapping with -100.0 < minX < maxX < 100.0 and -60.0 < minY
+      < maxY < 60.0.
+    - minX < point.x < maxX and minY < point.y < maxY.
+    expectedSourceBehavior:
+    - Latitude checks pass.
+    - Since point.x lies between minX and maxX, relate(Point) returns CONTAINS before
+      the final longitude comparisons.
+    - The rotated point remains inside the equivalently rotated longitude interval,
+      so the follow-up is expected to return CONTAINS.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: ORDINARY_MINX_BOUNDARY_CONTAINS
+    category: BOUNDARY
+    description: The probe is exactly on the ordinary rectangle's minimum longitude
+      boundary while strictly inside its latitude range.
+    preconditions:
+    - Rectangle is non-wrapping with -120.0 <= minX < maxX <= 120.0.
+    - minY < point.y < maxY and point.x == minX.
+    expectedSourceBehavior:
+    - The pX < minX test is false and the pX > maxX test is false, so the geo short
+      circuit returns CONTAINS.
+    - Rotation preserves the corresponding boundary relationship and is expected to
+      preserve CONTAINS.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ORDINARY_MAXX_BOUNDARY_CONTAINS
+    category: BOUNDARY
+    description: The probe is exactly on the ordinary rectangle's maximum longitude
+      boundary while strictly inside its latitude range.
+    preconditions:
+    - Rectangle is non-wrapping with -120.0 <= minX < maxX <= 120.0.
+    - minY < point.y < maxY and point.x == maxX.
+    expectedSourceBehavior:
+    - The geo short circuit returns CONTAINS because equality is not greater than
+      maxX.
+    - The follow-up is expected to return the same CONTAINS relation.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ORDINARY_LONGITUDE_DISJOINT_LEFT
+    category: NORMAL
+    description: A probe is west of an ordinary rectangle and remains disjoint after
+      the source code attempts its +360 longitude shift.
+    preconditions:
+    - Rectangle is non-wrapping with -170.0 <= minX < maxX <= 170.0.
+    - minY < point.y < maxY and point.x < minX.
+    - point.x + 360.0 is still outside the rectangle's unwrapped interval [minX,maxX].
+    expectedSourceBehavior:
+    - The pX < minX branch adds 360.0.
+    - The final pX < minX or pX > maxX check returns DISJOINT.
+    - The follow-up is expected to remain DISJOINT.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ORDINARY_LONGITUDE_DISJOINT_RIGHT
+    category: NORMAL
+    description: A probe is east of an ordinary rectangle and remains disjoint after
+      the source code attempts its -360 longitude shift.
+    preconditions:
+    - Rectangle is non-wrapping with -170.0 <= minX < maxX <= 170.0.
+    - minY < point.y < maxY and point.x > maxX.
+    - point.x - 360.0 is still outside the rectangle's unwrapped interval [minX,maxX].
+    expectedSourceBehavior:
+    - The pX > maxX branch subtracts 360.0.
+    - The final longitude check returns DISJOINT.
+    - The follow-up is expected to preserve DISJOINT.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: DATELINE_INTERIOR_DIRECT_CONTAINS
+    category: NORMAL
+    description: A probe lies in the eastern portion of a rectangle whose minX is
+      greater than maxX, exercising raw-width dateline unwrapping followed by direct
+      containment.
+    preconditions:
+    - Rectangle has 150.0 <= minX <= 179.0 and -179.0 <= maxX <= -150.0.
+    - minY < point.y < maxY and minX <= point.x <= 180.0.
+    expectedSourceBehavior:
+    - rawWidth is negative and maxX is replaced by minX + rawWidth + 360.0.
+    - The probe is inside the resulting unwrapped interval, so relate(Point) returns
+      CONTAINS.
+    - The follow-up is expected to return CONTAINS through the corresponding rotated
+      dateline interval.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: DATELINE_SHIFTED_WEST_CONTAINS
+    category: BOUNDARY
+    description: A probe in the western wrapped segment is numerically below minX,
+      so the source adds 360.0 and then contains it.
+    preconditions:
+    - Rectangle has 150.0 <= minX <= 179.0 and -179.0 <= maxX <= -150.0.
+    - minY < point.y < maxY and maxX <= point.x < minX.
+    - point.x + 360.0 lies between minX and minX + (maxX - minX + 360.0).
+    expectedSourceBehavior:
+    - The raw negative width is unwrapped.
+    - The pX < minX branch adds 360.0.
+    - The shifted longitude is inside the unwrapped interval and relate(Point) returns
+      CONTAINS.
+    - The follow-up is expected to preserve CONTAINS.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: DATELINE_SHIFTED_EAST_DISJOINT
+    category: NORMAL
+    description: A probe is numerically greater than the wrapped rectangle's maxX
+      but does not belong to its wrapped interval, exercising the -360 branch and
+      final disjoint result.
+    preconditions:
+    - Rectangle has 150.0 <= minX <= 179.0 and -179.0 <= maxX <= -150.0.
+    - minY < point.y < maxY and maxX < point.x < minX.
+    - point.x - 360.0 is less than the unwrapped minX.
+    expectedSourceBehavior:
+    - The pX > maxX branch subtracts 360.0.
+    - The final longitude check returns DISJOINT.
+    - The follow-up is expected to preserve DISJOINT.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: DATELINE_ENDPOINT_CONTAINS
+    category: BOUNDARY
+    description: Probes at both canonical longitude endpoints of a dateline-wrapping
+      rectangle test equality and the wrapped interval representation.
+    preconditions:
+    - Rectangle has minX == 180.0 and maxX == -180.0, or minX == 179.0 and maxX ==
+      -179.0.
+    - minY < point.y < maxY.
+    - point.x is exactly minX or exactly maxX.
+    expectedSourceBehavior:
+    - relate(Point) handles endpoint equality through the geo containment path and
+      returns CONTAINS for a point on the represented boundary.
+    - The follow-up uses normalized longitudes and is expected to preserve the relation.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LATITUDE_MIN_BOUNDARY_CONTAINS
+    category: BOUNDARY
+    description: The probe is exactly on minY while its longitude is strictly inside
+      an ordinary rectangle.
+    preconditions:
+    - Rectangle is non-wrapping with -100.0 < minX < maxX < 100.0.
+    - minY < maxY and point.y == minY.
+    - minX < point.x < maxX.
+    expectedSourceBehavior:
+    - Neither latitude rejection comparison is true.
+    - Longitude direct containment returns CONTAINS.
+    - The follow-up keeps the latitude equality and is expected to return CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LATITUDE_MAX_BOUNDARY_CONTAINS
+    category: BOUNDARY
+    description: The probe is exactly on maxY while its longitude is strictly inside
+      an ordinary rectangle.
+    preconditions:
+    - Rectangle is non-wrapping with -100.0 < minX < maxX < 100.0.
+    - minY < maxY and point.y == maxY.
+    - minX < point.x < maxX.
+    expectedSourceBehavior:
+    - Neither latitude rejection comparison is true.
+    - relate(Point) returns CONTAINS.
+    - The follow-up is expected to return CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SOUTH_POLE_LATITUDE_BOUNDARY
+    category: EDGE
+    description: A probe at latitude -90.0 tests the inclusive geographic latitude
+      boundary without invoking a latitude rejection.
+    preconditions:
+    - Rectangle has -90.0 == minY < maxY <= -60.0.
+    - point.y == -90.0 and minX < point.x < maxX for a non-wrapping interval.
+    expectedSourceBehavior:
+    - Latitude equality passes and the result is determined by longitude, yielding
+      CONTAINS for the stated interior longitude.
+    - The follow-up leaves latitude at -90.0 and is expected to preserve CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NORTH_POLE_LATITUDE_BOUNDARY
+    category: EDGE
+    description: A probe at latitude 90.0 tests the inclusive geographic latitude
+      boundary.
+    preconditions:
+    - Rectangle has -60.0 <= minY < maxY == 90.0.
+    - point.y == 90.0 and minX < point.x < maxX for a non-wrapping interval.
+    expectedSourceBehavior:
+    - Latitude equality passes and an interior longitude produces CONTAINS.
+    - The follow-up retains latitude 90.0 and is expected to preserve CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_WIDTH_VERTICAL_LINE_CONTAINS
+    category: EDGE
+    description: A zero-width ordinary rectangle tests the minX == maxX path, where
+      only a probe at exactly that longitude is contained.
+    preconditions:
+    - minX == maxX and both are finite geographic longitudes.
+    - minY < maxY and minY < point.y < maxY.
+    - point.x == minX for the contained case.
+    expectedSourceBehavior:
+    - The equality point takes the geo short circuit and returns CONTAINS.
+    - A separately generated companion case with point.x != minX would reach the final
+      check and return DISJOINT.
+    - The equality case is expected to retain CONTAINS after rotation.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ZERO_WIDTH_VERTICAL_LINE_DISJOINT
+    category: EDGE
+    description: A probe misses a zero-width ordinary rectangle, exercising the shift
+      and final comparison rather than area semantics.
+    preconditions:
+    - minX == maxX and both are finite geographic longitudes.
+    - minY < point.y < maxY and point.x != minX.
+    - If point.x < minX, point.x + 360.0 is not equal to minX; if point.x > maxX,
+      point.x - 360.0 is not equal to minX.
+    expectedSourceBehavior:
+    - relate(Point) returns DISJOINT after the longitude adjustment and final comparison.
+    - The follow-up is expected to return DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_HEIGHT_LATITUDE_LINE_CONTAINS
+    category: EDGE
+    description: A zero-height rectangle tests inclusive latitude equality while longitude
+      is strictly inside.
+    preconditions:
+    - minY == maxY and both are finite geographic latitudes.
+    - point.y == minY and minX < point.x < maxX for a non-wrapping rectangle.
+    expectedSourceBehavior:
+    - Latitude comparisons are inclusive, so longitude determines the result and relate(Point)
+      returns CONTAINS.
+    - The follow-up keeps the zero-height latitude and is expected to return CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_CROSSES_DATELINE
+    category: NORMAL
+    description: A non-wrapping rectangle and an interior point rotate by 150 degrees
+      into a minX > maxX representation, explicitly forcing follow-up dateline unwrapping.
+    preconditions:
+    - Rectangle is non-wrapping with 20.0 <= minX < maxX <= 80.0 and -40.0 < minY
+      < maxY < 40.0.
+    - minX < point.x < maxX and minY < point.y < maxY.
+    - normLonDEG(minX + 150.0) > normLonDEG(maxX + 150.0), so the follow-up receiver
+      crosses the dateline.
+    expectedSourceBehavior:
+    - Source relate(Point) returns CONTAINS through ordinary direct containment.
+    - Follow-up relate(Point) must exercise rawWidth < 0 and is expected to return
+      the same CONTAINS relation.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ROTATION_REMAINS_NON_WRAPPING
+    category: NORMAL
+    description: A rectangle near the western side rotates without reversing normalized
+      endpoint order, covering the follow-up's ordinary longitude path.
+    preconditions:
+    - Rectangle is non-wrapping with -170.0 <= minX < maxX <= -100.0 and -40.0 < minY
+      < maxY < 40.0.
+    - minX < point.x < maxX and minY < point.y < maxY.
+    - normLonDEG(minX + 150.0) <= normLonDEG(maxX + 150.0).
+    expectedSourceBehavior:
+    - Source and follow-up both use ordinary non-wrapping longitude intervals and
+      return CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FULL_WORLD_WIDTH_CONTAINS
+    category: EDGE
+    description: A width-360 rectangle exercises the source point method's lack of
+      the relateXRange world-wrap short circuit and exposes normalization of both
+      follow-up endpoints to the same longitude.
+    preconditions:
+    - Rectangle has minX == -180.0 and maxX == 180.0, with -90.0 <= minY < maxY <=
+      90.0.
+    - minY <= point.y <= maxY.
+    - point.x is any finite longitude in [-180.0,180.0].
+    expectedSourceBehavior:
+    - Source relate(Point) returns CONTAINS for every longitude passing the latitude
+      check because the source interval includes [-180,180].
+    - The MR expects relation preservation, but the follow-up may collapse both normalized
+      rectangle endpoints to -30.0; this case is retained as a valid metamorphic falsification
+      target rather than excluded.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: EMPTY_MINX_NAN_SENTINEL
+    category: EDGE
+    description: The receiver uses the source-supported empty sentinel minX == NaN
+      while retaining finite latitude bounds, exercising relate(Point) directly rather
+      than the relate(Shape) empty check.
+    preconditions:
+    - Rectangle is constructed with minX == Double.NaN, finite maxX, and finite minY
+      <= maxY.
+    - point has finite coordinates and minY <= point.y <= maxY.
+    - The receiver therefore satisfies isEmpty() because isEmpty() tests Double.isNaN(minX).
+    expectedSourceBehavior:
+    - relate(Point) does not call isEmpty(); with an in-range latitude, NaN longitude
+      comparisons and the geo branches fall through to the final return of CONTAINS.
+    - The follow-up retains NaN as the normalized minX and is expected to be checked
+      for the same relation, making this a sentinel-path metamorphic test.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EMPTY_MINX_NAN_LATITUDE_REJECTION
+    category: EDGE
+    description: The empty minX-is-NaN sentinel is paired with a probe outside the
+      finite latitude interval, so the latitude guard still dominates the sentinel
+      longitude behavior.
+    preconditions:
+    - Rectangle is constructed with minX == Double.NaN, finite maxX, and finite minY
+      <= maxY.
+    - point.y < minY or point.y > maxY.
+    expectedSourceBehavior:
+    - relate(Point) returns DISJOINT from the latitude guard even though the receiver
+      isEmpty() sentinel.
+    - The follow-up preserves the latitude mismatch and is expected to return DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POINT_PAIR_CONSTRUCTOR_INTERIOR
+    category: NORMAL
+    description: A lower-left and upper-right Point constructor creates an ordinary
+      rectangle and probes its interior, covering the supplied convenience construction
+      path.
+    preconditions:
+    - Lower-left point has x == -30.0 and y == -20.0; upper-right point has x == 30.0
+      and y == 20.0.
+    - Probe has -30.0 < point.x < 30.0 and -20.0 < point.y < 20.0.
+    - The two constructor points and probe use the same geographic SpatialContext.
+    expectedSourceBehavior:
+    - Constructor coordinates produce a non-wrapping rectangle and relate(Point) returns
+      CONTAINS.
+    - The follow-up is expected to preserve CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: RECTANGLE_COPY_CONSTRUCTOR_DATELINE
+    category: NORMAL
+    description: A dateline-wrapping RectangleImpl is copied through the supplied
+      Rectangle copy constructor before probing its wrapped interior.
+    preconditions:
+    - The source rectangle has minX == 170.0, maxX == -170.0, minY == -20.0, and maxY
+      == 20.0.
+    - The copied receiver uses the same geographic SpatialContext.
+    - Probe has point.x == -175.0 and -20.0 < point.y < 20.0.
+    expectedSourceBehavior:
+    - The copy preserves minX > maxX and relate(Point) uses the wrapped interval;
+      the probe is CONTAINS after the +360 shift.
+    - The follow-up is expected to preserve CONTAINS while exercising rotated dateline
+      handling.
+    targetCases: 1
+    emptyOutputAllowed: false
