@@ -1,0 +1,457 @@
+InputDomain:
+  summary: Finite IEEE-754 binary64 longitudes for which adding 360.0 exactly realizes
+    one full turn, covering the pass-through interval, both normalization directions,
+    endpoint sentinels, wrap discontinuities, repeated turns, and precision limits.
+  globalConstraints:
+  - The source input lon_deg is an IEEE-754 binary64 value accepted directly by the
+    static method normLonDEG(double).
+  - 'lon_deg must be finite: Double.isNaN(lon_deg) is false and Double.isInfinite(lon_deg)
+    is false. NaN and infinities do not denote spots on the globe, so the stated metamorphic
+    relation is undefined for them.'
+  - Let follow = lon_deg + 360.0 using Java double addition. The exact real sum of
+    the binary64 source value and 360 must itself be representable as a finite binary64
+    value, and follow must equal that exact sum. This excludes rounding, absorption,
+    and overflow cases where the generated follow-up is not exactly one full turn
+    from the source.
+  - Invoke normLonDEG independently on source and follow; no DistanceUtils instance
+    is constructed because the supplied method is static.
+  - Each returned value must be finite and numerically within the documented closed
+    interval [-180.0, 180.0].
+  - The metamorphic comparison treats the results as the same longitude when sourceResult
+    == followResult, including either sign of zero, or when Math.abs(sourceResult)
+    == 180.0 and Math.abs(followResult) == 180.0 because -180 and +180 denote the
+    same spot.
+  diversity:
+    sourceRegion:
+    - closed_pass_through_interval
+    - first_negative_wrap
+    - first_positive_wrap
+    - repeated_negative_wraps
+    - repeated_positive_wraps
+    sourceBranch:
+    - inclusive_common_case
+    - negative_off_branch
+    - positive_zero_sentinel
+    - nonnegative_remainder_branch
+    normalizedLocation:
+    - negative_interior
+    - signed_zero
+    - positive_interior
+    - negative_180_endpoint
+    - positive_180_endpoint
+    boundaryRelation:
+    - exact_boundary
+    - just_inside_by_exact_power_of_two
+    - just_outside_by_exact_power_of_two
+    - endpoint_neighborhood
+    turnCountScale:
+    - zero_turn
+    - one_turn
+    - few_turns
+    - moderate_1024_to_2_pow_20
+    - large_at_least_2_pow_20
+    - exact_transform_extremum
+    sign:
+    - negative
+    - negative_zero
+    - positive_zero
+    - positive
+  scenarios:
+  - id: LOWER_ENDPOINT_PASS_THROUGH
+    category: BOUNDARY
+    description: The source is exactly the inclusive lower endpoint, while the follow-up
+      is exactly the inclusive upper endpoint.
+    preconditions:
+    - lon_deg == -180.0
+    expectedSourceBehavior:
+    - The inclusive common-case condition is true and the method returns -180.0 unchanged.
+    - This case requires endpoint-equivalence rather than raw equality because the
+      follow-up source is +180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UPPER_ENDPOINT_PASS_THROUGH
+    category: BOUNDARY
+    description: The source is exactly the inclusive upper endpoint.
+    preconditions:
+    - lon_deg == 180.0
+    expectedSourceBehavior:
+    - The inclusive common-case condition is true and the method returns 180.0 unchanged.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_ZERO_PASS_THROUGH
+    category: EDGE
+    description: The source is positive zero.
+    preconditions:
+    - Double.doubleToRawLongBits(lon_deg) == Double.doubleToRawLongBits(0.0)
+    expectedSourceBehavior:
+    - The common-case branch returns the source zero without normalization arithmetic.
+    - The follow-up 360.0 reaches the modulo path and normalizes numerically to zero,
+      avoiding a test that only repeats the same branch.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_ZERO_PASS_THROUGH
+    category: EDGE
+    description: The source is IEEE-754 negative zero.
+    preconditions:
+    - Double.doubleToRawLongBits(lon_deg) == Double.doubleToRawLongBits(-0.0)
+    expectedSourceBehavior:
+    - The common-case branch returns negative zero as-is.
+    - Numerical equality, rather than raw-bit equality, is used for the metamorphic
+      comparison.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LOWER_INTERIOR_EXACT_NEIGHBORHOOD
+    category: BOUNDARY
+    description: The source is a representable point immediately inside the lower
+      boundary at the selected exact scale.
+    preconditions:
+    - lon_deg == -180.0 + Math.scalb(1.0, -40)
+    expectedSourceBehavior:
+    - The source remains in the common-case branch and is returned unchanged.
+    - The result is strictly greater than -180.0 and less than 0.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UPPER_INTERIOR_EXACT_NEIGHBORHOOD
+    category: BOUNDARY
+    description: The source is a representable point immediately inside the upper
+      boundary at the selected exact scale.
+    preconditions:
+    - lon_deg == 180.0 - Math.scalb(1.0, -40)
+    expectedSourceBehavior:
+    - The source remains in the common-case branch and is returned unchanged.
+    - The result is strictly less than 180.0 and greater than 0.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_INTERIOR_COMMON_CASE
+    category: NORMAL
+    description: An ordinary negative longitude already lies strictly inside the documented
+      interval.
+    preconditions:
+    - -180.0 < lon_deg && lon_deg < 0.0
+    - Exclude the dedicated lower-boundary-neighborhood value.
+    expectedSourceBehavior:
+    - The method returns lon_deg exactly through the common-case branch.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: POSITIVE_INTERIOR_COMMON_CASE
+    category: NORMAL
+    description: An ordinary positive longitude already lies strictly inside the documented
+      interval.
+    preconditions:
+    - 0.0 < lon_deg && lon_deg < 180.0
+    - Exclude the dedicated upper-boundary-neighborhood value.
+    expectedSourceBehavior:
+    - The method returns lon_deg exactly through the common-case branch.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: JUST_BELOW_LOWER_BOUNDARY
+    category: BOUNDARY
+    description: The source is just outside -180 at an exactly transformable power-of-two
+      offset.
+    preconditions:
+    - lon_deg == -180.0 - Math.scalb(1.0, -40)
+    expectedSourceBehavior:
+    - The common-case condition is false.
+    - The computed off value is negative, so the method returns 180.0 + off, a value
+      just below +180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: JUST_ABOVE_UPPER_BOUNDARY
+    category: BOUNDARY
+    description: The source is just outside +180 at an exactly transformable power-of-two
+      offset.
+    preconditions:
+    - lon_deg == 180.0 + Math.scalb(1.0, -40)
+    expectedSourceBehavior:
+    - The common-case condition is false.
+    - The computed off value is positive, so the final branch returns a value just
+      above -180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_FULL_TURN_ZERO
+    category: EDGE
+    description: One negative full turn normalizes to the zero meridian through the
+      negative-off branch.
+    preconditions:
+    - lon_deg == -360.0
+    expectedSourceBehavior:
+    - off == -180.0, which satisfies off < 0.
+    - The method returns 0.0 from 180.0 + off.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_FULL_TURN_ZERO
+    category: EDGE
+    description: One positive full turn normalizes to the zero meridian through the
+      nonnegative-remainder branch.
+    preconditions:
+    - lon_deg == 360.0
+    expectedSourceBehavior:
+    - off == 180.0, so neither off < 0 nor off == 0 is selected.
+    - The method returns 0.0 from -180.0 + off.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_ONE_AND_HALF_TURNS
+    category: EDGE
+    description: The negative endpoint congruence is reached from below with a signed-zero
+      remainder.
+    preconditions:
+    - lon_deg == -540.0
+    expectedSourceBehavior:
+    - The modulo expression produces a value numerically equal to zero.
+    - Because lon_deg is not positive, the positive zero-remainder sentinel is skipped
+      and the method returns -180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_ONE_AND_HALF_TURNS
+    category: EDGE
+    description: The positive endpoint sentinel is reached at 540 degrees.
+    preconditions:
+    - lon_deg == 540.0
+    expectedSourceBehavior:
+    - off == 0.0 and lon_deg > 0.0.
+    - The dedicated zero-remainder sentinel returns +180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FIRST_NEGATIVE_WRAP_GENERIC
+    category: NORMAL
+    description: A non-endpoint source in the first negative wrap interval is folded
+      through the negative-off branch.
+    preconditions:
+    - -540.0 < lon_deg && lon_deg < -180.0
+    - (lon_deg + 180.0) % 360.0 < 0.0
+    - lon_deg is not -360.0.
+    expectedSourceBehavior:
+    - The method returns 180.0 + ((lon_deg + 180.0) % 360.0).
+    - The returned value lies within [-180.0, 180.0].
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: FIRST_POSITIVE_WRAP_GENERIC
+    category: NORMAL
+    description: A non-endpoint source in the first positive wrap interval is folded
+      through the final branch.
+    preconditions:
+    - 180.0 < lon_deg && lon_deg < 540.0
+    - (lon_deg + 180.0) % 360.0 != 0.0
+    - lon_deg is not 360.0.
+    expectedSourceBehavior:
+    - The method returns -180.0 + ((lon_deg + 180.0) % 360.0).
+    - The returned value lies within [-180.0, 180.0].
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: FEW_TURN_NEGATIVE_GENERIC
+    category: NORMAL
+    description: A negative source several turns below the normal range exercises
+      repeated-wrap modulo arithmetic.
+    preconditions:
+    - -1024.0 < lon_deg && lon_deg < -540.0
+    - (lon_deg + 180.0) % 360.0 < 0.0
+    - (lon_deg + 180.0) % 360.0 != 0.0
+    expectedSourceBehavior:
+    - The negative-off branch returns 180.0 + off.
+    - The result is determined by the remainder rather than by the number of completed
+      turns.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: FEW_TURN_NEGATIVE_ENDPOINT_SENTINEL
+    category: EDGE
+    description: A negative endpoint-congruent source several turns below the range
+      produces a zero remainder.
+    preconditions:
+    - lon_deg == -180.0 - 360.0 * n for an integer n >= 2
+    - -1024.0 < lon_deg
+    expectedSourceBehavior:
+    - off is numerically zero.
+    - The lon_deg > 0 condition is false, so the final branch returns -180.0.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: FEW_TURN_POSITIVE_ENDPOINT_SENTINEL
+    category: EDGE
+    description: A positive endpoint-congruent source several turns above the range
+      reaches the explicit positive sentinel.
+    preconditions:
+    - lon_deg == 180.0 + 360.0 * n for an integer n >= 2
+    - lon_deg < 1024.0
+    expectedSourceBehavior:
+    - off == 0.0 and lon_deg > 0.0.
+    - The method returns +180.0 from the dedicated sentinel branch.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: FEW_TURN_POSITIVE_GENERIC
+    category: NORMAL
+    description: A positive source several turns above the normal range exercises
+      repeated-wrap modulo arithmetic.
+    preconditions:
+    - 540.0 < lon_deg && lon_deg < 1024.0
+    - (lon_deg + 180.0) % 360.0 != 0.0
+    expectedSourceBehavior:
+    - The method reaches the final branch and returns -180.0 + off.
+    - The result is determined by the remainder rather than by the number of completed
+      turns.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: NEGATIVE_ENDPOINT_APPROACH_FROM_BELOW
+    category: BOUNDARY
+    description: A negative repeated-wrap endpoint is approached from the more-negative
+      side.
+    preconditions:
+    - There is an integer n >= 2 such that lon_deg < -180.0 - 360.0 * n.
+    - lon_deg is the greatest exactly-transformable binary64 value below -180.0 -
+      360.0 * n.
+    expectedSourceBehavior:
+    - off is negative and close to zero.
+    - The negative-off branch returns a value close to but below +180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_ENDPOINT_APPROACH_FROM_ABOVE
+    category: BOUNDARY
+    description: A negative repeated-wrap endpoint is approached from the less-negative
+      side.
+    preconditions:
+    - There is an integer n >= 2 such that lon_deg > -180.0 - 360.0 * n.
+    - lon_deg is the least exactly-transformable binary64 value above -180.0 - 360.0
+      * n.
+    expectedSourceBehavior:
+    - The negative remainder is close to -360.0.
+    - The negative-off branch returns a value close to but above -180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_ENDPOINT_APPROACH_FROM_BELOW
+    category: BOUNDARY
+    description: A positive repeated-wrap endpoint is approached from below.
+    preconditions:
+    - There is an integer n >= 2 such that lon_deg < 180.0 + 360.0 * n.
+    - lon_deg is the greatest exactly-transformable binary64 value below 180.0 + 360.0
+      * n.
+    expectedSourceBehavior:
+    - off is positive and close to 360.0.
+    - The final branch returns a value close to but below +180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_ENDPOINT_APPROACH_FROM_ABOVE
+    category: BOUNDARY
+    description: A positive repeated-wrap endpoint is approached from above.
+    preconditions:
+    - There is an integer n >= 2 such that lon_deg > 180.0 + 360.0 * n.
+    - lon_deg is the least exactly-transformable binary64 value above 180.0 + 360.0
+      * n.
+    expectedSourceBehavior:
+    - off is positive and close to zero.
+    - The final branch returns a value close to but above -180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EXACT_BINARY_FRACTION_INTERIOR
+    category: EDGE
+    description: Small nonzero binary fractions test preservation of fractional longitude
+      without using inexact decimal construction.
+    preconditions:
+    - lon_deg is selected from {-0.5, 0.5}.
+    expectedSourceBehavior:
+    - The common-case branch returns the exact binary fraction unchanged.
+    - The source result is nonzero and strictly internal to the documented range.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: MODERATE_POSITIVE_GENERIC
+    category: NORMAL
+    description: A moderate positive magnitude with thousands to millions of turns
+      tests modulo reduction beyond small examples.
+    preconditions:
+    - Math.scalb(1.0, 10) <= lon_deg && lon_deg < Math.scalb(1.0, 20)
+    - (lon_deg + 180.0) % 360.0 != 0.0
+    expectedSourceBehavior:
+    - The source bypasses the common case and the positive zero-remainder sentinel.
+    - The final branch returns -180.0 + off.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: MODERATE_NEGATIVE_GENERIC
+    category: NORMAL
+    description: A moderate negative magnitude with many completed turns tests negative
+      Java remainder handling.
+    preconditions:
+    - -Math.scalb(1.0, 20) < lon_deg && lon_deg <= -Math.scalb(1.0, 10)
+    - (lon_deg + 180.0) % 360.0 < 0.0
+    expectedSourceBehavior:
+    - The negative-off branch returns 180.0 + off.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LARGE_POSITIVE_GENERIC
+    category: EDGE
+    description: A large exactly-transformable positive source tests modulo reduction
+      where binary64 spacing is material.
+    preconditions:
+    - lon_deg >= Math.scalb(1.0, 20)
+    - (lon_deg + 180.0) % 360.0 != 0.0
+    - lon_deg is not the greatest source satisfying the global exact-turn constraint.
+    expectedSourceBehavior:
+    - The method reaches the final branch and returns -180.0 + off.
+    - The source output remains finite and within the documented range despite the
+      large quotient.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LARGE_NEGATIVE_GENERIC
+    category: EDGE
+    description: A large exactly-transformable negative source tests negative modulo
+      reduction where binary64 spacing is material.
+    preconditions:
+    - lon_deg <= -Math.scalb(1.0, 20)
+    - (lon_deg + 180.0) % 360.0 < 0.0
+    - lon_deg is not the least source satisfying the global exact-turn constraint.
+    expectedSourceBehavior:
+    - The method reaches the negative-off branch and returns 180.0 + off.
+    - The source output remains finite and within the documented range despite the
+      large quotient.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LARGE_POSITIVE_ENDPOINT_SENTINEL
+    category: EDGE
+    description: A large positive endpoint-congruent source exercises the explicit
+      off-equals-zero sentinel at high magnitude.
+    preconditions:
+    - lon_deg >= Math.scalb(1.0, 20)
+    - lon_deg == 180.0 + 360.0 * n for an exactly representable integer n
+    - (lon_deg + 180.0) % 360.0 == 0.0
+    expectedSourceBehavior:
+    - off == 0.0 and lon_deg > 0.0.
+    - The method returns +180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LARGE_NEGATIVE_ENDPOINT_SENTINEL
+    category: EDGE
+    description: A large negative endpoint-congruent source exercises the zero-remainder
+      path without the positive sentinel.
+    preconditions:
+    - lon_deg <= -Math.scalb(1.0, 20)
+    - lon_deg == -180.0 - 360.0 * n for an exactly representable integer n
+    - (lon_deg + 180.0) % 360.0 == 0.0
+    expectedSourceBehavior:
+    - off is numerically zero but lon_deg > 0.0 is false.
+    - The final branch returns -180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: GREATEST_EXACT_TURN_SOURCE
+    category: BOUNDARY
+    description: The greatest positive binary64 source for which Java addition still
+      represents the exact mathematical source-plus-360 value.
+    preconditions:
+    - lon_deg is the greatest finite binary64 value satisfying the global exact-turn
+      constraint.
+    expectedSourceBehavior:
+    - The source takes one of the supplied modulo branches and returns a finite value
+      in [-180.0, 180.0].
+    - This case measures the positive precision boundary of the metamorphic input
+      domain.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LEAST_EXACT_TURN_SOURCE
+    category: BOUNDARY
+    description: The most negative binary64 source for which Java addition still represents
+      the exact mathematical source-plus-360 value.
+    preconditions:
+    - lon_deg is the least finite binary64 value satisfying the global exact-turn
+      constraint.
+    expectedSourceBehavior:
+    - The source takes one of the supplied modulo branches and returns a finite value
+      in [-180.0, 180.0].
+    - This case measures the negative precision boundary of the metamorphic input
+      domain.
+    targetCases: 1
+    emptyOutputAllowed: false

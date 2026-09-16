@@ -1,0 +1,654 @@
+InputDomain:
+  summary: Finite, non-empty Cartesian circles and axis-aligned rectangles, including
+    positive and zero radii, degenerate rectangles, containment boundaries, tangencies,
+    bounding-box shortcuts, and all phase-2 axis-position branches; each admissible
+    translation preserves every relative coordinate.
+  globalConstraints:
+  - Use one non-geodetic, flat SpatialContext for the source and follow-up; no antimeridian,
+    pole, or world-wrap behavior is admissible.
+  - The receiver is a non-null CircleImpl constructed with a non-null, non-empty Point,
+    a finite radius rho >= 0, and the same SpatialContext used by the rectangle.
+  - The rectangle argument is non-null and non-empty, with finite bounds L = getMinX(),
+    R = getMaxX(), B = getMinY(), T = getMaxY(), L <= R, and B <= T; zero width or
+    zero height is permitted.
+  - Let (cx,cy) be the circle center. All source and follow-up center and rectangle
+    coordinates must remain accepted by the configured Cartesian context and must
+    not trigger coordinate wrapping or clipping.
+  - The follow-up uses finite offsets (dx,dy), translates the center to (cx+dx,cy+dy),
+    and translates the rectangle bounds to (L+dx,R+dx,B+dy,T+dy), while leaving rho
+    unchanged.
+  - 'The selected offsets must preserve the rectangle dimensions exactly: (R+dx)-(L+dx)
+    = R-L and (T+dy)-(B+dy) = T-B.'
+  - 'The selected offsets must preserve all relative coordinates exactly: (L+dx)-(cx+dx)=L-cx,
+    (R+dx)-(cx+dx)=R-cx, (B+dy)-(cy+dy)=B-cy, and (T+dy)-(cy+dy)=T-cy.'
+  - Use at least one nonzero offset component so the follow-up is an actual slide
+    rather than an identical invocation.
+  - Empty circles and empty rectangles are excluded because an empty circle has NaN
+    radius state in this constructor and an empty rectangle has no finite width, height,
+    or position to slide as required by the metamorphic relation.
+  - Null inputs and negative or non-finite radii are excluded because the requested
+    relation concerns valid translated shapes and supplies no invalid-input metamorphic
+    requirement.
+  - For squared-distance preconditions, use Cartesian distance D2(x,y) = (x-cx)^2
+    + (y-cy)^2; strict inequalities must have enough numerical margin that source
+    and translated computations retain the stated side of rho^2.
+  diversity:
+    radiusClass:
+    - rho > 0
+    - rho = 0
+    rectangleDimensionClass:
+    - positive width and height
+    - zero width
+    - zero height
+    - point rectangle
+    boundingBoxPhase:
+    - DISJOINT shortcut
+    - WITHIN shortcut
+    - equal-box identity sentinel
+    - INTERSECTS phase 2
+    - CONTAINS phase 2
+    centerVsRectangleX:
+    - cx < L
+    - L <= cx <= R
+    - cx > R
+    centerVsRectangleY:
+    - cy < B
+    - B <= cy <= T
+    - cy > T
+    sourceRelation:
+    - DISJOINT
+    - WITHIN
+    - INTERSECTS
+    - CONTAINS
+    contactClass:
+    - strict gap
+    - strict overlap
+    - axis tangency
+    - corner tangency
+    - exact bounding-box equality
+  scenarios:
+  - id: BBOX_DISJOINT_RIGHT
+    category: NORMAL
+    description: A positive-radius circle and rectangle have a strict horizontal gap
+      between their bounding boxes.
+    preconditions:
+    - rho > 0, L > cx + rho, and [B,T] overlaps [cy-rho,cy+rho].
+    expectedSourceBehavior:
+    - enclosingBox.relate(rectangle) is DISJOINT, so relate(Rectangle) returns DISJOINT
+      without phase 2.
+    - The translated invocation also returns DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BBOX_DISJOINT_ABOVE
+    category: NORMAL
+    description: A positive-radius circle and rectangle have a strict vertical gap
+      between their bounding boxes.
+    preconditions:
+    - rho > 0, B > cy + rho, and [L,R] overlaps [cx-rho,cx+rho].
+    expectedSourceBehavior:
+    - The bounding-box shortcut returns DISJOINT.
+    - The translated invocation also returns DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BBOX_DISJOINT_DIAGONAL
+    category: NORMAL
+    description: The rectangle lies strictly beyond both the right and upper sides
+      of the circle bounding box.
+    preconditions:
+    - rho > 0, L > cx + rho, and B > cy + rho.
+    expectedSourceBehavior:
+    - The bounding boxes are DISJOINT and the source result is DISJOINT.
+    - The translated invocation also returns DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CIRCLE_BBOX_STRICTLY_WITHIN_RECTANGLE
+    category: NORMAL
+    description: The rectangle strictly surrounds the circle's entire Cartesian bounding
+      box.
+    preconditions:
+    - rho > 0, L < cx-rho, R > cx+rho, B < cy-rho, and T > cy+rho.
+    expectedSourceBehavior:
+    - enclosingBox.relate(rectangle) is WITHIN, so the circle result is WITHIN.
+    - The translated invocation also returns WITHIN.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: RECTANGLE_EQUALS_CIRCLE_BOUNDING_BOX
+    category: EDGE
+    description: The rectangle exactly equals the calculated bounding box of a positive-radius
+      circle.
+    preconditions:
+    - rho > 0, L = cx-rho, R = cx+rho, B = cy-rho, and T = cy+rho.
+    expectedSourceBehavior:
+    - The enclosing-box equality sentinel returns WITHIN even though enclosingBox.relate(rectangle)
+      reports CONTAINS.
+    - The translated invocation also returns WITHIN.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PHASE2_DIAGONAL_GAP_UPPER_RIGHT
+    category: NORMAL
+    description: The rectangle overlaps the circle bounding box at its upper-right
+      corner but its nearest corner is outside the circle.
+    preconditions:
+    - rho > 0, cx < L < cx+rho, cy < B < cy+rho, R > L, T > B, and D2(L,B) > rho^2.
+    expectedSourceBehavior:
+    - Phase 2 selects (L,B) as the closest corner and returns DISJOINT because contains(L,B)
+      is false.
+    - The translated invocation also returns DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PHASE2_DIAGONAL_GAP_LOWER_LEFT
+    category: NORMAL
+    description: The rectangle overlaps the lower-left bounding-box corner but its
+      nearest corner is outside the circle.
+    preconditions:
+    - rho > 0, cx-rho < R < cx, cy-rho < T < cy, L < R, B < T, and D2(R,T) > rho^2.
+    expectedSourceBehavior:
+    - Phase 2 takes the cx > R and cy > T branches and returns DISJOINT at the nearest-corner
+      test.
+    - The translated invocation also returns DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PHASE2_DIAGONAL_GAP_UPPER_LEFT
+    category: NORMAL
+    description: The rectangle occupies the upper-left bounding-box corner but misses
+      the circle itself.
+    preconditions:
+    - rho > 0, cx-rho < R < cx, cy < B < cy+rho, L < R, T > B, and D2(R,B) > rho^2.
+    expectedSourceBehavior:
+    - Phase 2 takes the cx > R and cy < B branches and returns DISJOINT.
+    - The translated invocation also returns DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PHASE2_DIAGONAL_STRICT_INTERSECTION
+    category: NORMAL
+    description: A nearest rectangle corner is strictly inside the circle while the
+      rectangle extends outside the bounding box.
+    preconditions:
+    - rho > 0, cx < L < cx+rho, cy < B < cy+rho, D2(L,B) < rho^2, R > cx+rho, and
+      T > cy+rho.
+    expectedSourceBehavior:
+    - The nearest-corner test rules out DISJOINT, and bboxSect is not CONTAINS, so
+      the result is INTERSECTS.
+    - The translated invocation also returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PHASE2_DIAGONAL_EXTERNAL_TANGENCY
+    category: BOUNDARY
+    description: The rectangle's nearest corner is exactly on the circle and the rest
+      of the rectangle extends outward.
+    preconditions:
+    - rho > 0, cx < L < cx+rho, cy < B < cy+rho, D2(L,B) = rho^2, R > L, and T > B.
+    expectedSourceBehavior:
+    - contains(L,B) accepts the boundary point, preventing DISJOINT; the result is
+      INTERSECTS.
+    - The translated invocation also returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: RIGHT_SIDE_AXIS_OVERLAP
+    category: NORMAL
+    description: The rectangle lies to the right of the center but spans the circle's
+      horizontal axis.
+    preconditions:
+    - rho > 0, cx < L < cx+rho, R > cx+rho, and B < cy < T.
+    expectedSourceBehavior:
+    - Only the X axis is outside the rectangle, so the diagonal disjoint test is skipped
+      and the result is INTERSECTS.
+    - The translated invocation also returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UPPER_SIDE_AXIS_OVERLAP
+    category: NORMAL
+    description: The rectangle lies above the center but spans the circle's vertical
+      axis.
+    preconditions:
+    - rho > 0, cy < B < cy+rho, T > cy+rho, and L < cx < R.
+    expectedSourceBehavior:
+    - Only the Y axis is outside the rectangle, so phase 2 returns INTERSECTS rather
+      than DISJOINT.
+    - The translated invocation also returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CENTER_INSIDE_RECTANGLE_WITH_PARTIAL_BBOX_OVERLAP
+    category: NORMAL
+    description: The rectangle contains the circle center but extends beyond one side
+      of the circle bounding box without containing the full box.
+    preconditions:
+    - rho > 0, L < cx < R, B < cy < T, L < cx-rho, R < cx+rho, and cy-rho < B < T
+      < cy+rho.
+    expectedSourceBehavior:
+    - Both axes cross the rectangle; bboxSect is INTERSECTS and phase 2 returns INTERSECTS.
+    - The translated invocation also returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SMALL_ASYMMETRIC_RECTANGLE_CONTAINED
+    category: NORMAL
+    description: A positive-area asymmetric rectangle surrounding the center has every
+      corner strictly inside the circle.
+    preconditions:
+    - rho > 0, L < cx < R, B < cy < T, and D2(x,y) < rho^2 for all four rectangle
+      corners.
+    expectedSourceBehavior:
+    - bboxSect is CONTAINS and the selected farthest corner is contained, so the result
+      is CONTAINS.
+    - The translated invocation also returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CENTERED_RECTANGLE_STRICTLY_CONTAINED
+    category: NORMAL
+    description: A rectangle centered on the circle has all four corners strictly
+      inside the circle.
+    preconditions:
+    - rho > 0, cx-L = R-cx > 0, cy-B = T-cy > 0, and D2(R,T) < rho^2.
+    expectedSourceBehavior:
+    - The farthest-side tie branches are exercised and the result is CONTAINS.
+    - The translated invocation also returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CONTAINED_RECTANGLE_RIGHT_OF_CENTER
+    category: NORMAL
+    description: The rectangle is wholly right of the center and all its corners are
+      inside the circle.
+    preconditions:
+    - rho > 0, cx < L <= R < cx+rho, B < cy < T, and D2(x,y) < rho^2 for all four
+      corners.
+    expectedSourceBehavior:
+    - Phase 2 takes cx < L, chooses R as farthest X, and returns CONTAINS.
+    - The translated invocation also returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CONTAINED_RECTANGLE_LEFT_OF_CENTER
+    category: NORMAL
+    description: The rectangle is wholly left of the center and all its corners are
+      inside the circle.
+    preconditions:
+    - rho > 0, cx-rho < L <= R < cx, B < cy < T, and D2(x,y) < rho^2 for all four
+      corners.
+    expectedSourceBehavior:
+    - Phase 2 takes cx > R, chooses L as farthest X, and returns CONTAINS.
+    - The translated invocation also returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CONTAINED_RECTANGLE_ABOVE_CENTER
+    category: NORMAL
+    description: The rectangle is wholly above the center and all its corners are
+      inside the circle.
+    preconditions:
+    - rho > 0, cy < B <= T < cy+rho, L < cx < R, and D2(x,y) < rho^2 for all four
+      corners.
+    expectedSourceBehavior:
+    - Phase 2 takes cy < B, chooses T as farthest Y, and returns CONTAINS.
+    - The translated invocation also returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CONTAINED_RECTANGLE_BELOW_CENTER
+    category: NORMAL
+    description: The rectangle is wholly below the center and all its corners are
+      inside the circle.
+    preconditions:
+    - rho > 0, cy-rho < B <= T < cy, L < cx < R, and D2(x,y) < rho^2 for all four
+      corners.
+    expectedSourceBehavior:
+    - Phase 2 takes cy > T, chooses B as farthest Y, and returns CONTAINS.
+    - The translated invocation also returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CONTAINED_RECTANGLE_DIAGONAL_FROM_CENTER
+    category: NORMAL
+    description: A rectangle lies wholly in the upper-right quadrant and is strictly
+      contained by the circle.
+    preconditions:
+    - rho > 0, cx < L <= R, cy < B <= T, and D2(R,T) < rho^2.
+    expectedSourceBehavior:
+    - The closest and farthest selections both use the cx < L and cy < B branches;
+      the result is CONTAINS.
+    - The translated invocation also returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CENTERED_RECTANGLE_CORNERS_OUTSIDE
+    category: NORMAL
+    description: A centered rectangle lies inside the circle bounding box, but its
+      corners lie outside the circle.
+    preconditions:
+    - rho > 0, cx-L = R-cx > 0, cy-B = T-cy > 0, R < cx+rho, T < cy+rho, and D2(R,T)
+      > rho^2.
+    expectedSourceBehavior:
+    - bboxSect is CONTAINS, but the selected farthest corner is not contained, so
+      the result is INTERSECTS.
+    - The translated invocation also returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: RIGHT_OF_CENTER_FAR_CORNER_OUTSIDE
+    category: NORMAL
+    description: A rectangle right of the center has near points inside but its selected
+      farthest corner outside the circle.
+    preconditions:
+    - rho > 0, cx < L < R <= cx+rho, B < cy < T, D2(L,cy) < rho^2, and max(D2(R,B),D2(R,T))
+      > rho^2.
+    expectedSourceBehavior:
+    - The shapes are not disjoint, but the farthest-corner test returns INTERSECTS.
+    - The translated invocation also returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LEFT_OF_CENTER_FAR_CORNER_OUTSIDE
+    category: NORMAL
+    description: A rectangle left of the center has near points inside but a far corner
+      outside the circle.
+    preconditions:
+    - rho > 0, cx-rho <= L < R < cx, B < cy < T, D2(R,cy) < rho^2, and max(D2(L,B),D2(L,T))
+      > rho^2.
+    expectedSourceBehavior:
+    - Phase 2 takes cx > R and returns INTERSECTS after the farthest-corner containment
+      failure.
+    - The translated invocation also returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ABOVE_CENTER_FAR_CORNER_OUTSIDE
+    category: NORMAL
+    description: A rectangle above the center reaches the circle but has a far upper
+      corner outside.
+    preconditions:
+    - rho > 0, cy < B < T <= cy+rho, L < cx < R, D2(cx,B) < rho^2, and max(D2(L,T),D2(R,T))
+      > rho^2.
+    expectedSourceBehavior:
+    - Phase 2 takes cy < B and returns INTERSECTS at the farthest-corner test.
+    - The translated invocation also returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BELOW_CENTER_FAR_CORNER_OUTSIDE
+    category: NORMAL
+    description: A rectangle below the center reaches the circle but has a far lower
+      corner outside.
+    preconditions:
+    - rho > 0, cy-rho <= B < T < cy, L < cx < R, D2(cx,T) < rho^2, and max(D2(L,B),D2(R,B))
+      > rho^2.
+    expectedSourceBehavior:
+    - Phase 2 takes cy > T and returns INTERSECTS at the farthest-corner test.
+    - The translated invocation also returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DIAGONAL_NEAR_INSIDE_FAR_OUTSIDE
+    category: NORMAL
+    description: A rectangle in one quadrant has its nearest corner inside the circle
+      and its farthest corner outside.
+    preconditions:
+    - rho > 0, cx < L < R <= cx+rho, cy < B < T <= cy+rho, D2(L,B) < rho^2, and D2(R,T)
+      > rho^2.
+    expectedSourceBehavior:
+    - The nearest-corner test prevents DISJOINT, while the farthest-corner test yields
+      INTERSECTS.
+    - The translated invocation also returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POINT_RECTANGLE_AT_CENTER
+    category: EDGE
+    description: A positive-radius circle is related to a point rectangle at its center.
+    preconditions:
+    - rho > 0 and L = R = cx and B = T = cy.
+    expectedSourceBehavior:
+    - The degenerate rectangle is contained by the circle, so the result is CONTAINS.
+    - The translated invocation also returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POINT_RECTANGLE_STRICTLY_INSIDE
+    category: EDGE
+    description: A point rectangle is strictly inside the positive-radius circle but
+      not at its center.
+    preconditions:
+    - rho > 0, L = R, B = T, 0 < D2(L,B) < rho^2.
+    expectedSourceBehavior:
+    - The sole rectangle point passes the farthest-point containment test and the
+      result is CONTAINS.
+    - The translated invocation also returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POINT_RECTANGLE_ON_CIRCLE
+    category: BOUNDARY
+    description: A point rectangle lies exactly on the circle boundary.
+    preconditions:
+    - rho > 0, L = R, B = T, and D2(L,B) = rho^2.
+    expectedSourceBehavior:
+    - contains accepts the boundary point, so the circle CONTAINS the point rectangle.
+    - The translated invocation also returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POINT_RECTANGLE_IN_BBOX_CORNER_GAP
+    category: EDGE
+    description: A point rectangle lies inside the circle bounding box but outside
+      the circle.
+    preconditions:
+    - rho > 0, cx-rho < L = R < cx+rho, cy-rho < B = T < cy+rho, and D2(L,B) > rho^2.
+    expectedSourceBehavior:
+    - Phase 2's closest-point test returns DISJOINT.
+    - The translated invocation also returns DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: VERTICAL_SEGMENT_CONTAINED
+    category: EDGE
+    description: A zero-width rectangle is a vertical segment wholly inside the circle.
+    preconditions:
+    - rho > 0, L = R, B < T, and D2(L,B) < rho^2 and D2(L,T) < rho^2.
+    expectedSourceBehavior:
+    - The farthest endpoint is contained, so the result is CONTAINS.
+    - The translated invocation also returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: HORIZONTAL_SEGMENT_CONTAINED
+    category: EDGE
+    description: A zero-height rectangle is a horizontal segment wholly inside the
+      circle.
+    preconditions:
+    - rho > 0, B = T, L < R, and D2(L,B) < rho^2 and D2(R,B) < rho^2.
+    expectedSourceBehavior:
+    - The farthest endpoint is contained, so the result is CONTAINS.
+    - The translated invocation also returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: VERTICAL_SEGMENT_CROSSES_CIRCLE
+    category: EDGE
+    description: A vertical segment passes through the circle and extends beyond both
+      vertical bounding-box sides.
+    preconditions:
+    - rho > 0, L = R = cx, B < cy-rho, and T > cy+rho.
+    expectedSourceBehavior:
+    - The segment intersects the circle, but is not contained and does not contain
+      the circle bounding box; the result is INTERSECTS.
+    - The translated invocation also returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: HORIZONTAL_SEGMENT_CROSSES_CIRCLE
+    category: EDGE
+    description: A horizontal segment passes through the circle and extends beyond
+      both horizontal bounding-box sides.
+    preconditions:
+    - rho > 0, B = T = cy, L < cx-rho, and R > cx+rho.
+    expectedSourceBehavior:
+    - The segment intersects the circle and the result is INTERSECTS.
+    - The translated invocation also returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: VERTICAL_SEGMENT_TANGENT
+    category: BOUNDARY
+    description: A vertical segment lies on the circle's rightmost tangent line and
+      includes the tangency point.
+    preconditions:
+    - rho > 0, L = R = cx+rho, and B < cy < T.
+    expectedSourceBehavior:
+    - The segment and circle meet at (cx+rho,cy), so the result is INTERSECTS.
+    - The translated invocation also returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DEGENERATE_SEGMENT_OUTSIDE_BBOX
+    category: EDGE
+    description: A zero-width segment is strictly outside the circle bounding box.
+    preconditions:
+    - rho > 0, L = R > cx+rho, and B <= T.
+    expectedSourceBehavior:
+    - The bounding-box shortcut returns DISJOINT.
+    - The translated invocation also returns DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_RADIUS_RECTANGLE_STRICTLY_SURROUNDS_CENTER
+    category: EDGE
+    description: A zero-radius circle is a point strictly inside a positive-area rectangle.
+    preconditions:
+    - rho = 0, L < cx < R, and B < cy < T.
+    expectedSourceBehavior:
+    - The point bounding box is WITHIN the rectangle, so the circle result is WITHIN.
+    - The translated invocation also returns WITHIN.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_RADIUS_EQUALS_POINT_RECTANGLE
+    category: EDGE
+    description: A zero-radius circle and point rectangle have identical coordinates.
+    preconditions:
+    - rho = 0, L = R = cx, and B = T = cy.
+    expectedSourceBehavior:
+    - The enclosing-box equality sentinel returns WITHIN.
+    - The translated invocation also returns WITHIN.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_RADIUS_DISJOINT_RECTANGLE
+    category: EDGE
+    description: A zero-radius circle point lies strictly outside the rectangle.
+    preconditions:
+    - rho = 0 and either cx < L or cx > R or cy < B or cy > T, with a strict nonzero
+      gap.
+    expectedSourceBehavior:
+    - The point bounding box and rectangle are DISJOINT, so the result is DISJOINT.
+    - The translated invocation also returns DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_AREA_RECTANGLE_FAR_CORNER_TANGENT
+    category: BOUNDARY
+    description: A positive-area rectangle is inside the bounding box and its selected
+      farthest corner lies exactly on the circle.
+    preconditions:
+    - rho > 0, L <= cx <= R, B <= cy <= T, D2(R,T) = rho^2, and every other corner
+      has squared distance <= rho^2.
+    expectedSourceBehavior:
+    - The boundary farthest corner is contained, so the result is CONTAINS.
+    - The translated invocation also returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LOWER_RIGHT_EXTERNAL_CORNER_TANGENCY
+    category: BOUNDARY
+    description: A rectangle outside the center in both axes has its nearest lower-right-oriented
+      corner exactly tangent to the circle.
+    preconditions:
+    - rho > 0, cx < L < cx+rho, cy-rho < T < cy, D2(L,T) = rho^2, R > L, and B < T.
+    expectedSourceBehavior:
+    - The closest-corner containment succeeds exactly at the boundary, and the result
+      is INTERSECTS.
+    - The translated invocation also returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SYMMETRIC_FARTHEST_Y_TIE_CONTAINED
+    category: BOUNDARY
+    description: A rectangle spans the horizontal axis with equal upper and lower
+      distances, and all corners are contained.
+    preconditions:
+    - rho > 0, B < cy < T, T-cy = cy-B, L < R, and D2(x,y) <= rho^2 for all four corners.
+    expectedSourceBehavior:
+    - The strict greater-than selection resolves the farthest-Y tie to B, and the
+      result is CONTAINS.
+    - The translated invocation also returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SYMMETRIC_FARTHEST_X_TIE_INTERSECTS
+    category: BOUNDARY
+    description: A rectangle spans the vertical axis with equal left and right distances,
+      but its corners extend outside the circle.
+    preconditions:
+    - rho > 0, L < cx < R, R-cx = cx-L, B < cy < T, at least one interior point has
+      D2 < rho^2, and every farthest corner selected by the ties has D2 > rho^2.
+    expectedSourceBehavior:
+    - The strict greater-than selection resolves the farthest-X tie to L, and the
+      failed farthest-corner test returns INTERSECTS.
+    - The translated invocation also returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CIRCLE_BBOX_WITHIN_RECTANGLE_SHARED_SINGLE_SIDE
+    category: BOUNDARY
+    description: The rectangle contains the complete circle bounding box and shares
+      exactly one of its four sides.
+    preconditions:
+    - rho > 0 and exactly one of L=cx-rho, R=cx+rho, B=cy-rho, or T=cy+rho holds,
+      while the other three rectangle bounds strictly extend beyond the corresponding
+      bounding-box bounds.
+    expectedSourceBehavior:
+    - The enclosing-box relation is WITHIN and the method returns WITHIN.
+    - The translated invocation also returns WITHIN.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CIRCLE_BBOX_WITHIN_RECTANGLE_SHARED_X_EXTENT
+    category: BOUNDARY
+    description: The rectangle has exactly the circle bounding box's horizontal extent
+      and strictly larger vertical extent.
+    preconditions:
+    - rho > 0, L = cx-rho, R = cx+rho, B < cy-rho, and T > cy+rho.
+    expectedSourceBehavior:
+    - The bounding-box WITHIN shortcut returns WITHIN; the equality sentinel does
+      not apply because the heights differ.
+    - The translated invocation also returns WITHIN.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: AXIS_TANGENT_POINT_WITH_OUTWARD_RECTANGLE
+    category: BOUNDARY
+    description: The rectangle starts at the circle's rightmost point, spans the horizontal
+      axis, and extends outward.
+    preconditions:
+    - rho > 0, L = cx+rho, R > L, and B < cy < T.
+    expectedSourceBehavior:
+    - Bounding boxes touch, the rectangle spans the Y axis, and the circle-rectangle
+      result is INTERSECTS.
+    - The translated invocation also returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: RECTANGLE_TOUCHES_BBOX_BUT_MISSES_CIRCLE
+    category: BOUNDARY
+    description: The rectangle touches a bounding-box corner whose Cartesian distance
+      from the center exceeds the radius.
+    preconditions:
+    - rho > 0, L = cx+rho, B = cy+rho, R >= L, and T >= B.
+    expectedSourceBehavior:
+    - The bounding boxes are not separated, but phase 2 tests the corner (L,B), finds
+      D2(L,B) = 2*rho^2 > rho^2, and returns DISJOINT.
+    - The translated invocation also returns DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: RECTANGLE_SHARES_BBOX_EDGE_AND_CUTS_CIRCLE
+    category: BOUNDARY
+    description: A positive-area rectangle shares part of a circle bounding-box edge
+      and extends inward enough to cut the circle.
+    preconditions:
+    - rho > 0, R = cx+rho, cx < L < R, B < cy < T, and at least one of D2(L,B) or
+      D2(L,T) is < rho^2.
+    expectedSourceBehavior:
+    - The rectangle is neither disjoint nor contained by the circle, and the circle
+      is not within it; the result is INTERSECTS.
+    - The translated invocation also returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: THIN_POSITIVE_AREA_RECTANGLE_CONTAINED
+    category: BOUNDARY
+    description: A rectangle has positive but arbitrarily small width and height and
+      lies strictly inside the circle.
+    preconditions:
+    - rho > 0, 0 < R-L < rho, 0 < T-B < rho, and D2(x,y) < rho^2 for all four corners.
+    expectedSourceBehavior:
+    - Despite dimensions near the degenerate boundary, the result is CONTAINS.
+    - The translated invocation also returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: THIN_POSITIVE_AREA_RECTANGLE_STRADDLES_BOUNDARY
+    category: BOUNDARY
+    description: A rectangle with positive but arbitrarily small dimensions has points
+      on both sides of the circle boundary.
+    preconditions:
+    - rho > 0, R > L, T > B, at least one rectangle point has D2 < rho^2, and at least
+      one corner has D2 > rho^2.
+    expectedSourceBehavior:
+    - The source result is INTERSECTS, not CONTAINS or DISJOINT.
+    - The translated invocation also returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false

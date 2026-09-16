@@ -1,0 +1,386 @@
+InputDomain:
+  summary: Geo-context rectangles and points with finite normalized longitude coordinates,
+    ordered latitude bounds, and both ordinary and dateline-wrapping longitude intervals.
+    Source cases cover latitude rejection, direct longitude containment, longitude
+    shifting across the dateline, inclusive edges, zero-area rectangles, and near-world
+    widths.
+  globalConstraints:
+  - Use a SpatialContext for which ctx.isGeo() is true; the target's longitude unwrapping
+    and the stated -180..180 rotation are only used by relate(Point) in geo contexts.
+  - Construct each receiver with RectangleImpl(double minX, double maxX, double minY,
+    double maxY, SpatialContext) or an equivalent discovered RectangleImpl constructor,
+    and supply a Point whose getX() and getY() return the stated coordinates.
+  - All minX, maxX, minY, maxY, pointX, and pointY values are finite non-NaN doubles.
+  - Source longitudes minX, maxX, and pointX are each within -180.0 <= value <= 180.0,
+    because the follow-up explicitly wraps longitudes into that range; unnormalized
+    source longitudes would not represent the same coordinate convention as the follow-up.
+  - Source latitudes satisfy -90.0 <= minY <= maxY <= 90.0 and -90.0 <= pointY <=
+    90.0.
+  - Exclude rectangles with maxX - minX == 360.0, specifically the normalized full-world
+    representation minX=-180.0 and maxX=180.0, because independently wrapping its
+    two rotated endpoints collapses them to the same longitude and therefore does
+    not preserve the full-world interval under the stated follow-up transformation.
+  diversity:
+    longitudeIntervalForm:
+    - distinct
+    - measurable
+    - ordinary minX<maxX; dateline-wrapping minX>maxX; zero-width minX==maxX; near-world
+      width 359 degrees; dateline-equivalent -180/+180 endpoints
+    latitudePosition:
+    - distinct
+    - measurable
+    - strictly inside; exactly minY; exactly maxY; below minY; above maxY; zero-height
+      minY==maxY
+    pointLongitudePath:
+    - distinct
+    - measurable
+    - directly between normalized/unwrap bounds; pX<minX then +360 shift; pX>maxX
+      then -360 shift; shifted containment; shifted disjointness
+    rotationTopology:
+    - distinct
+    - measurable
+    - source ordinary and follow-up ordinary; source ordinary becoming wrapped after
+      +150 rotation; source wrapped becoming ordinary after +150 rotation; endpoint
+      normalization at +/-180
+  scenarios:
+  - id: ORDINARY_STRICT_INTERIOR
+    category: NORMAL
+    description: Ordinary non-wrapping rectangle with a point strictly inside both
+      coordinate ranges.
+    preconditions:
+    - minX=10.0, maxX=20.0, minY=-10.0, maxY=10.0.
+    - pointX=15.0 and pointY=0.0.
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS through the geo direct-longitude short-circuit.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_MIN_X_INCLUSIVE
+    category: BOUNDARY
+    description: Point lies exactly on the ordinary rectangle's minimum longitude
+      edge.
+    preconditions:
+    - minX=10.0, maxX=20.0, minY=-10.0, maxY=10.0.
+    - pointX=10.0 and pointY=0.0.
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS because longitude comparisons are inclusive.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_MAX_X_INCLUSIVE
+    category: BOUNDARY
+    description: Point lies exactly on the ordinary rectangle's maximum longitude
+      edge.
+    preconditions:
+    - minX=10.0, maxX=20.0, minY=-10.0, maxY=10.0.
+    - pointX=20.0 and pointY=0.0.
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS because longitude comparisons are inclusive.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_MIN_Y_INCLUSIVE
+    category: BOUNDARY
+    description: Point lies exactly on the minimum latitude edge while its longitude
+      is interior.
+    preconditions:
+    - minX=10.0, maxX=20.0, minY=-10.0, maxY=10.0.
+    - pointX=15.0 and pointY=-10.0.
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS; the latitude rejection uses strict comparisons.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_MAX_Y_INCLUSIVE
+    category: BOUNDARY
+    description: Point lies exactly on the maximum latitude edge while its longitude
+      is interior.
+    preconditions:
+    - minX=10.0, maxX=20.0, minY=-10.0, maxY=10.0.
+    - pointX=15.0 and pointY=10.0.
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS; the latitude rejection uses strict comparisons.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LATITUDE_BELOW_MINIMUM
+    category: BOUNDARY
+    description: Point longitude is inside but latitude is immediately below the rectangle.
+    preconditions:
+    - minX=10.0, maxX=20.0, minY=-10.0, maxY=10.0.
+    - pointX=15.0 and pointY=-10.000001.
+    expectedSourceBehavior:
+    - relate(point) returns DISJOINT at the pointY < getMinY() branch before longitude
+      logic.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LATITUDE_ABOVE_MAXIMUM
+    category: BOUNDARY
+    description: Point longitude is inside but latitude is immediately above the rectangle.
+    preconditions:
+    - minX=10.0, maxX=20.0, minY=-10.0, maxY=10.0.
+    - pointX=15.0 and pointY=10.000001.
+    expectedSourceBehavior:
+    - relate(point) returns DISJOINT at the pointY > getMaxY() branch before longitude
+      logic.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_LEFT_OF_MIN_SHIFTED_DISJOINT
+    category: NORMAL
+    description: Ordinary rectangle with pointX below minX, exercising the pX += 360
+      shift without obtaining overlap.
+    preconditions:
+    - minX=10.0, maxX=20.0, minY=-10.0, maxY=10.0.
+    - pointX=0.0 and pointY=0.0.
+    expectedSourceBehavior:
+    - relate(point) returns DISJOINT after the pX < minX branch shifts pointX to 360.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_RIGHT_OF_MAX_SHIFTED_DISJOINT
+    category: NORMAL
+    description: Ordinary rectangle with pointX above maxX, exercising the pX -= 360
+      shift without obtaining overlap.
+    preconditions:
+    - minX=10.0, maxX=20.0, minY=-10.0, maxY=10.0.
+    - pointX=30.0 and pointY=0.0.
+    expectedSourceBehavior:
+    - relate(point) returns DISJOINT after the pX > maxX branch shifts pointX to -330.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EAST_DATELINE_EQUIVALENT_LEFT_SHIFT_CONTAINS
+    category: EDGE
+    description: A rectangle ending at +180 contains the equivalent -180 point after
+      the pX += 360 adjustment.
+    preconditions:
+    - minX=170.0, maxX=180.0, minY=-10.0, maxY=10.0.
+    - pointX=-180.0 and pointY=0.0.
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS after shifting pointX from -180.0 to 180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WEST_DATELINE_EQUIVALENT_RIGHT_SHIFT_CONTAINS
+    category: EDGE
+    description: A rectangle beginning at -180 contains the equivalent +180 point
+      after the pX -= 360 adjustment.
+    preconditions:
+    - minX=-180.0, maxX=-170.0, minY=-10.0, maxY=10.0.
+    - pointX=180.0 and pointY=0.0.
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS after shifting pointX from 180.0 to -180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WRAPPED_DIRECT_EAST_SEGMENT_INTERIOR
+    category: NORMAL
+    description: Dateline-wrapping rectangle with a point in its eastern segment,
+      before any point shift.
+    preconditions:
+    - minX=170.0, maxX=-170.0, minY=-10.0, maxY=10.0.
+    - pointX=175.0 and pointY=0.0.
+    expectedSourceBehavior:
+    - relate(point) unwraps maxX to 190.0 and returns CONTAINS via direct-longitude
+      short-circuit.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WRAPPED_SHIFTED_WEST_SEGMENT_INTERIOR
+    category: NORMAL
+    description: Dateline-wrapping rectangle with a point in its western segment,
+      requiring pointX + 360.
+    preconditions:
+    - minX=170.0, maxX=-170.0, minY=-10.0, maxY=10.0.
+    - pointX=-175.0 and pointY=0.0.
+    expectedSourceBehavior:
+    - relate(point) unwraps the rectangle and returns CONTAINS after shifting pointX
+      to 185.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WRAPPED_POSITIVE_DATELINE_POINT
+    category: BOUNDARY
+    description: Dateline-wrapping rectangle contains +180 directly within its unwrapped
+      [170,190] interval.
+    preconditions:
+    - minX=170.0, maxX=-170.0, minY=-10.0, maxY=10.0.
+    - pointX=180.0 and pointY=0.0.
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS through the direct-longitude short-circuit.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WRAPPED_NEGATIVE_DATELINE_POINT
+    category: BOUNDARY
+    description: Dateline-wrapping rectangle contains -180 after conversion to the
+      unwrapped longitude 180.
+    preconditions:
+    - minX=170.0, maxX=-170.0, minY=-10.0, maxY=10.0.
+    - pointX=-180.0 and pointY=0.0.
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS after the pX < minX branch shifts pointX to 180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WRAPPED_MIN_X_INCLUSIVE
+    category: BOUNDARY
+    description: Point lies on the minimum longitude boundary of a dateline-wrapping
+      rectangle.
+    preconditions:
+    - minX=170.0, maxX=-170.0, minY=-10.0, maxY=10.0.
+    - pointX=170.0 and pointY=0.0.
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS with unwrapped maximum longitude 190.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WRAPPED_MAX_X_INCLUSIVE_AFTER_SHIFT
+    category: BOUNDARY
+    description: Point lies on the maxX=-170 boundary of a wrapping rectangle after
+      longitude unwrapping and shifting.
+    preconditions:
+    - minX=170.0, maxX=-170.0, minY=-10.0, maxY=10.0.
+    - pointX=-170.0 and pointY=0.0.
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS after pointX becomes 190.0, equal to the unwrapped
+      maximum.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WRAPPED_CENTRAL_LONGITUDE_DISJOINT
+    category: NORMAL
+    description: Point is in the central longitude gap excluded by a dateline-wrapping
+      rectangle.
+    preconditions:
+    - minX=170.0, maxX=-170.0, minY=-10.0, maxY=10.0.
+    - pointX=0.0 and pointY=0.0.
+    expectedSourceBehavior:
+    - relate(point) returns DISJOINT after pointX is shifted to 360.0, outside unwrapped
+      [170,190].
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WRAPPED_LATITUDE_REJECTION
+    category: BOUNDARY
+    description: Dateline-wrapping longitude would contain the point, but latitude
+      is above maxY.
+    preconditions:
+    - minX=170.0, maxX=-170.0, minY=-10.0, maxY=10.0.
+    - pointX=-175.0 and pointY=10.000001.
+    expectedSourceBehavior:
+    - relate(point) returns DISJOINT before dateline unwrapping because pointY exceeds
+      maxY.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_WIDTH_ORDINARY_MATCHING_POINT
+    category: EDGE
+    description: Non-dateline vertical rectangle contains a point on its sole longitude.
+    preconditions:
+    - minX=25.0, maxX=25.0, minY=-10.0, maxY=10.0.
+    - pointX=25.0 and pointY=0.0.
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_WIDTH_ORDINARY_NONMATCHING_POINT
+    category: EDGE
+    description: Non-dateline vertical rectangle rejects a point at a different longitude.
+    preconditions:
+    - minX=25.0, maxX=25.0, minY=-10.0, maxY=10.0.
+    - pointX=25.000001 and pointY=0.0.
+    expectedSourceBehavior:
+    - relate(point) returns DISJOINT after the pX > maxX adjustment.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_WIDTH_POSITIVE_DATELINE_WITH_NEGATIVE_POINT
+    category: EDGE
+    description: Zero-width rectangle at +180 recognizes the equivalent -180 point.
+    preconditions:
+    - minX=180.0, maxX=180.0, minY=-10.0, maxY=10.0.
+    - pointX=-180.0 and pointY=0.0.
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS after pX += 360 produces 180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_WIDTH_NEGATIVE_DATELINE_WITH_POSITIVE_POINT
+    category: EDGE
+    description: Zero-width rectangle at -180 recognizes the equivalent +180 point.
+    preconditions:
+    - minX=-180.0, maxX=-180.0, minY=-10.0, maxY=10.0.
+    - pointX=180.0 and pointY=0.0.
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS after pX -= 360 produces -180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_HEIGHT_MATCHING_LATITUDE
+    category: EDGE
+    description: Horizontal zero-height rectangle contains a point exactly at its
+      only latitude.
+    preconditions:
+    - minX=10.0, maxX=20.0, minY=5.0, maxY=5.0.
+    - pointX=15.0 and pointY=5.0.
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_HEIGHT_NONMATCHING_LATITUDE
+    category: EDGE
+    description: Horizontal zero-height rectangle rejects a point infinitesimally
+      above its only latitude.
+    preconditions:
+    - minX=10.0, maxX=20.0, minY=5.0, maxY=5.0.
+    - pointX=15.0 and pointY=5.000001.
+    expectedSourceBehavior:
+    - relate(point) returns DISJOINT at the latitude upper-bound branch.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEAR_WORLD_WIDTH_DIRECT_CONTAINS
+    category: EDGE
+    description: A 359-degree ordinary interval tests a near-world width without using
+      the excluded 360-degree sentinel.
+    preconditions:
+    - minX=-180.0, maxX=179.0, minY=-10.0, maxY=10.0.
+    - pointX=0.0 and pointY=0.0.
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS through direct longitude comparison.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEAR_WORLD_WIDTH_DATELINE_EQUIVALENT_CONTAINS
+    category: EDGE
+    description: A 359-degree interval contains +180 by shifting it onto its -180
+      minimum boundary.
+    preconditions:
+    - minX=-180.0, maxX=179.0, minY=-10.0, maxY=10.0.
+    - pointX=180.0 and pointY=0.0.
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS after pX -= 360 produces -180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_BECOMES_WRAPPED_AFTER_ROTATION
+    category: NORMAL
+    description: Source is an ordinary interval whose independently rotated endpoints
+      cross the dateline in the follow-up.
+    preconditions:
+    - minX=20.0, maxX=100.0, minY=-20.0, maxY=20.0.
+    - pointX=50.0 and pointY=0.0.
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS in the source direct-longitude path.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WRAPPED_BECOMES_ORDINARY_AFTER_ROTATION
+    category: NORMAL
+    description: Source is dateline-wrapping but its endpoints become an ordinary
+      ordered interval after a +150-degree rotation.
+    preconditions:
+    - minX=-170.0, maxX=-100.0, minY=-20.0, maxY=20.0.
+    - pointX=-150.0 and pointY=0.0.
+    expectedSourceBehavior:
+    - relate(point) unwraps maxX to 190.0 and returns CONTAINS after shifting pointX
+      to 210.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SOUTH_POLE_LATITUDE_BOUNDARY
+    category: BOUNDARY
+    description: Point lies on the supported geographic south-pole latitude boundary.
+    preconditions:
+    - minX=-20.0, maxX=20.0, minY=-90.0, maxY=-80.0.
+    - pointX=0.0 and pointY=-90.0.
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS because minY is inclusive.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NORTH_POLE_LATITUDE_BOUNDARY
+    category: BOUNDARY
+    description: Point lies on the supported geographic north-pole latitude boundary.
+    preconditions:
+    - minX=-20.0, maxX=20.0, minY=80.0, maxY=90.0.
+    - pointX=0.0 and pointY=90.0.
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS because maxY is inclusive.
+    targetCases: 1
+    emptyOutputAllowed: false

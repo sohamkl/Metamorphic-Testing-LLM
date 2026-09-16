@@ -1,0 +1,331 @@
+InputDomain:
+  summary: Non-null, day-capable Temporal pairs for which Days.between and the common
+    37-day forward shift complete successfully; cover zero, positive, negative, truncation,
+    calendar-boundary, chronology, zone, representation, and int-result boundaries.
+  globalConstraints:
+  - Both source arguments are non-null Temporal values.
+  - ChronoUnit.DAYS.between(arg0, arg1) must complete successfully for the source
+    pair; temporals that do not support DAYS and mutually incompatible pairs are excluded
+    because the target cannot produce a Days result.
+  - The follow-up values are exactly arg0.plus(37, ChronoUnit.DAYS) and arg1.plus(37,
+    ChronoUnit.DAYS), and both additions must complete successfully.
+  - ChronoUnit.DAYS.between must complete successfully for the shifted pair.
+  - Both source and shifted day counts must lie in the inclusive int range [-2147483648,
+    2147483647], because the target applies Math.toIntExact before constructing Days.
+  - For mixed Temporal types, include only the measurable direction in which the start
+    temporal's DAYS-based until operation accepts the end temporal; incompatible reverse
+    directions are excluded.
+  - For ZonedDateTime values in a region-based variable-offset zone, both arguments
+    use the same ZoneId, and each argument has the same offset as its own 37-day-shifted
+    value; cases violating this are excluded because a common local-day shift is not
+    guaranteed to preserve the DAYS result across offset changes.
+  - Nulls, unsupported DAYS operations, incompatible temporal pairs, failed 37-day
+    shifts, and out-of-int-range results are excluded because the relation requests
+    successful day-count results rather than invalid-input behavior.
+  diversity:
+    temporalFamily:
+    - LocalDate
+    - LocalDateTime
+    - Instant
+    - OffsetDateTime
+    - fixed-offset ZonedDateTime
+    - variable-offset ZonedDateTime
+    - non-ISO ChronoLocalDate
+    - compatible mixed temporal types
+    resultClass:
+    - zero
+    - one
+    - negative one
+    - positive other
+    - negative other
+    - Integer.MAX_VALUE
+    - Integer.MIN_VALUE
+    gapMagnitude:
+    - less than 1 whole day
+    - exactly 1 day
+    - less than 37 days
+    - exactly 37 days
+    - hundreds of days
+    - int boundary
+    calendarTopology:
+    - same date
+    - ordinary dates
+    - month boundary
+    - year boundary
+    - leap day
+    - representable-date boundary
+    direction:
+    - end after start
+    - end equal to start
+    - end before start
+    timeRemainder:
+    - none
+    - positive sub-day remainder
+    - negative sub-day remainder
+    - exact whole day
+    zoneTopology:
+    - no zone
+    - fixed offset
+    - variable zone spanning an offset transition with endpoint-offset stability
+  scenarios:
+  - id: ZERO_LENGTH
+    category: EDGE
+    description: Start and end are the same Temporal value, exercising Days.of(0)
+      and the ZERO sentinel path.
+    preconditions:
+    - arg0.equals(arg1) is true.
+    - Use three supported temporal families among LocalDate, LocalDateTime, and Instant.
+    expectedSourceBehavior:
+    - Days.between(arg0, arg1).getAmount() returns 0.
+    - The returned amount is neither positive nor negative.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: EXACTLY_ONE_DAY_FORWARD
+    category: EDGE
+    description: The end is exactly one supported whole day after the start, exercising
+      Days.of(1) and the ONE sentinel path.
+    preconditions:
+    - arg1 equals arg0.plus(1, ChronoUnit.DAYS).
+    - Use two distinct supported temporal families.
+    expectedSourceBehavior:
+    - Days.between(arg0, arg1).getAmount() returns 1.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: EXACTLY_ONE_DAY_REVERSE
+    category: EDGE
+    description: The end is exactly one whole day before the start.
+    preconditions:
+    - arg1 equals arg0.minus(1, ChronoUnit.DAYS).
+    - Use two distinct supported temporal families.
+    expectedSourceBehavior:
+    - Days.between(arg0, arg1).getAmount() returns -1.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: SMALL_POSITIVE_GAPS
+    category: NORMAL
+    description: Positive non-sentinel gaps shorter than the 37-day transformation.
+    preconditions:
+    - ChronoUnit.DAYS.between(arg0, arg1) is one of 2, 6, or 36.
+    - Assign one distinct requested amount to each case.
+    expectedSourceBehavior:
+    - getAmount() returns the selected positive value.
+    - The result is greater than 1 and less than 37.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: SMALL_NEGATIVE_GAPS
+    category: NORMAL
+    description: Negative non-sentinel gaps whose magnitudes are shorter than 37 days.
+    preconditions:
+    - ChronoUnit.DAYS.between(arg0, arg1) is one of -2, -6, or -36.
+    - Assign one distinct requested amount to each case.
+    expectedSourceBehavior:
+    - getAmount() returns the selected negative value.
+    - The result is less than -1 and greater than -37.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: EXACT_TRANSFORMATION_DISTANCE
+    category: BOUNDARY
+    description: The source gap has the same magnitude as the 37-day common shift.
+    preconditions:
+    - One pair has arg1 equal to arg0.plus(37, ChronoUnit.DAYS).
+    - One pair has arg1 equal to arg0.minus(37, ChronoUnit.DAYS).
+    expectedSourceBehavior:
+    - The forward case returns 37 from getAmount().
+    - The reverse case returns -37 from getAmount().
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: MONTH_BOUNDARY_CROSSINGS
+    category: BOUNDARY
+    description: LocalDate pairs cross ends of 28-day, 30-day, and 31-day months.
+    preconditions:
+    - Each argument is an ISO LocalDate.
+    - Use one pair crossing February in a non-leap year, one crossing a 30-day month
+      boundary, and one crossing a 31-day month boundary.
+    - Each pair has a nonzero gap small enough that both shifted dates remain representable.
+    expectedSourceBehavior:
+    - getAmount() equals the actual count of calendar dates from the inclusive start
+      to the exclusive end.
+    - Month length does not introduce an additional or missing day.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: YEAR_BOUNDARY_CROSSINGS
+    category: BOUNDARY
+    description: ISO LocalDate pairs cross December 31 and January 1 in both directions.
+    preconditions:
+    - One pair starts before and ends after a year boundary.
+    - One pair starts after and ends before a year boundary.
+    - Neither pair also uses February 29.
+    expectedSourceBehavior:
+    - The forward crossing returns a positive whole-day count.
+    - The reverse crossing returns the corresponding negative whole-day count selected
+      for that pair.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LEAP_DAY_TOPOLOGY
+    category: BOUNDARY
+    description: ISO LocalDate pairs place February 29 at or within the inclusive-start,
+      exclusive-end interval.
+    preconditions:
+    - Use leap-year pairs for February 28 to February 29, February 29 to March 1,
+      February 28 to March 1, and the reverse of one such interval.
+    expectedSourceBehavior:
+    - February 28 to February 29 returns 1.
+    - February 29 to March 1 returns 1.
+    - February 28 to March 1 in a leap year returns 2.
+    - The reverse interval returns the negative of its forward whole-day count.
+    targetCases: 4
+    emptyOutputAllowed: false
+  - id: LONG_MULTIYEAR_GAPS
+    category: NORMAL
+    description: Large positive and negative LocalDate gaps span multiple years and
+      at least one leap day.
+    preconditions:
+    - The absolute source day count is at least 400 and less than 2147483647.
+    - One pair is forward and one pair is reverse.
+    - Both intervals include at least one February 29 between their endpoints.
+    expectedSourceBehavior:
+    - The forward case returns a positive amount with magnitude at least 400.
+    - The reverse case returns a negative amount with magnitude at least 400.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: INTEGER_MAXIMUM_RESULT
+    category: BOUNDARY
+    description: The source interval produces the largest result accepted by Math.toIntExact.
+    preconditions:
+    - Use supported day-based temporals for which ChronoUnit.DAYS.between(arg0, arg1)
+      equals 2147483647.
+    - Both endpoints remain representable after adding 37 days.
+    expectedSourceBehavior:
+    - Days.between(arg0, arg1).getAmount() returns 2147483647.
+    - No ArithmeticException is thrown at the inclusive upper int boundary.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: INTEGER_MINIMUM_RESULT
+    category: BOUNDARY
+    description: The source interval produces the smallest result accepted by Math.toIntExact.
+    preconditions:
+    - Use supported day-based temporals for which ChronoUnit.DAYS.between(arg0, arg1)
+      equals -2147483648.
+    - Both endpoints remain representable after adding 37 days.
+    expectedSourceBehavior:
+    - Days.between(arg0, arg1).getAmount() returns -2147483648.
+    - No ArithmeticException is thrown at the inclusive lower int boundary.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LOCALDATE_REPRESENTATION_BOUNDARIES
+    category: BOUNDARY
+    description: LocalDate pairs are close to the minimum or maximum representable
+      date while leaving exactly enough room for the follow-up shift.
+    preconditions:
+    - One case has at least one source endpoint equal to LocalDate.MIN.
+    - One case has at least one source endpoint equal to LocalDate.MAX.minusDays(37),
+      so its shifted endpoint equals LocalDate.MAX.
+    - Each pair has a small, nonzero, in-range whole-day gap.
+    expectedSourceBehavior:
+    - Each source invocation returns the selected small signed gap without overflow.
+    - The source result remains an ordinary int even though an endpoint is at or near
+      a LocalDate representation limit.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LOCALDATETIME_SUBDAY_TRUNCATION
+    category: EDGE
+    description: LocalDateTime pairs distinguish exact whole days from intervals containing
+      only a sub-day remainder.
+    preconditions:
+    - Use one forward interval of 23 hours 59 minutes, one reverse interval of 23
+      hours 59 minutes, one interval of exactly 24 hours, and one interval of 24 hours
+      plus a positive sub-day remainder.
+    - Corresponding start and end nanosecond values are preserved by the 37-day shift.
+    expectedSourceBehavior:
+    - Both intervals with magnitude below 24 hours return 0 because no whole day is
+      present.
+    - The exact 24-hour interval returns 1.
+    - The 24-hour-plus-remainder interval returns 1.
+    targetCases: 4
+    emptyOutputAllowed: false
+  - id: INSTANT_ELAPSED_DAY_COUNTS
+    category: EDGE
+    description: Instant pairs exercise elapsed-time DAYS calculations at and around
+      86400 seconds.
+    preconditions:
+    - Use one interval of exactly 86400 seconds, one positive interval shorter than
+      86400 seconds, and one negative interval whose magnitude exceeds 86400 seconds
+      but is less than 172800 seconds.
+    - All instants remain representable after adding 37 days.
+    expectedSourceBehavior:
+    - The exact 86400-second interval returns 1.
+    - The positive sub-day interval returns 0.
+    - The negative interval between one and two elapsed days returns -1.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: OFFSETDATETIME_FIXED_OFFSET
+    category: NORMAL
+    description: OffsetDateTime pairs use fixed offsets and include exact-day and
+      sub-day relationships.
+    preconditions:
+    - Each pair's two arguments use the same ZoneOffset.
+    - Use distinct nonzero offsets across the cases.
+    - Include one positive exact-day gap, one negative exact-day gap, and one positive
+      sub-day gap crossing a local date boundary.
+    expectedSourceBehavior:
+    - The positive exact-day case returns its positive whole-day count.
+    - The negative exact-day case returns its negative whole-day count.
+    - The sub-day case returns 0 despite crossing a local date boundary.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: ZONEDDATETIME_FIXED_OFFSET_ZONE
+    category: NORMAL
+    description: ZonedDateTime values backed by fixed-offset zones avoid daylight-saving
+      changes while retaining zoned temporal behavior.
+    preconditions:
+    - Each pair uses one fixed-offset ZoneId for both endpoints.
+    - Use one forward and one reverse nonzero whole-day interval.
+    expectedSourceBehavior:
+    - The forward pair returns a positive whole-day count.
+    - The reverse pair returns a negative whole-day count.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ZONEDDATETIME_STABLE_ENDPOINT_OFFSETS
+    category: EDGE
+    description: Region-zone intervals may span a daylight-saving transition, while
+      each endpoint and its own shifted value retain matching offsets.
+    preconditions:
+    - Both arguments are ZonedDateTime values with the same region-based ZoneId.
+    - At least one offset transition lies strictly between the source endpoints.
+    - arg0.getOffset() equals arg0.plusDays(37).getOffset().
+    - arg1.getOffset() equals arg1.plusDays(37).getOffset().
+    - Use local times that are neither in a zone gap nor an overlap.
+    expectedSourceBehavior:
+    - Each invocation returns a finite signed whole-day count.
+    - Spanning an interior offset transition does not itself cause an exception.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: NON_ISO_CHRONOLOGY_DATES
+    category: NORMAL
+    description: Same-chronology non-ISO date temporals exercise the Temporal-based
+      API without assuming ISO LocalDate arguments.
+    preconditions:
+    - Both endpoints in a pair are ChronoLocalDate values from the same non-ISO chronology.
+    - The chronology supports addition and difference in ChronoUnit.DAYS.
+    - Use one forward and one reverse interval with nonzero magnitude.
+    expectedSourceBehavior:
+    - The forward pair returns the selected positive day count.
+    - The reverse pair returns the selected negative day count.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: COMPATIBLE_MIXED_TEMPORAL_DIRECTION
+    category: EDGE
+    description: The start and end have different concrete Temporal types, but the
+      start temporal can obtain and compare the end's date component in DAYS.
+    preconditions:
+    - arg0 is an ISO LocalDate.
+    - arg1 is an ISO date-time Temporal from which LocalDate can be obtained.
+    - Use one forward and one reverse date-component gap.
+    - The source and shifted DAYS.between operations complete successfully in this
+      argument order.
+    expectedSourceBehavior:
+    - getAmount() is determined by the accepted ISO date components in the selected
+      argument order.
+    - The forward case is positive and the reverse case is negative.
+    targetCases: 2
+    emptyOutputAllowed: false

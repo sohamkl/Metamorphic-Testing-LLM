@@ -1,0 +1,616 @@
+InputDomain:
+  summary: Valid non-empty Cartesian circles and finite axis-aligned rectangles in
+    one flat, non-geo SpatialContext. Let the circle center be (cx,cy), radius be
+    r, rectangle be R=[xmin,xmax]x[ymin,ymax], and circle bounding box be B=[cx-r,cx+r]x[cy-r,cy+r].
+  globalConstraints:
+  - The SpatialContext is non-null, flat, and non-geo, as required by the SUT description;
+    the same context is used for the source and follow-up circles.
+  - The CircleImpl receiver is constructed with a non-null, non-empty Point having
+    finite coordinates cx and cy, a finite radius r >= 0, and the selected SpatialContext.
+  - The generated Rectangle argument is non-null and non-empty, has finite coordinates,
+    and satisfies xmin <= xmax and ymin <= ymax; zero width or zero height is allowed.
+  - All circle and rectangle coordinates satisfy the selected SpatialContext's valid
+    coordinate bounds.
+  - The receiver's measured bounding box is finite and has minX=cx-r, maxX=cx+r, minY=cy-r,
+    and maxY=cy+r, consistent with a flat Cartesian circle.
+  - The follow-up uses a finite offset (dx,dy) with dx != 0 or dy != 0, replaces the
+    center by (cx+dx,cy+dy), and replaces every rectangle x coordinate by x+dx and
+    every rectangle y coordinate by y+dy.
+  - The source objects are not mutated while constructing the follow-up; source and
+    follow-up are independently invocable receiver-and-argument pairs.
+  - The follow-up circle retains exactly the source radius, and its rectangle satisfies
+    translatedMaxX-translatedMinX = xmax-xmin and translatedMaxY-translatedMinY =
+    ymax-ymin.
+  - All translated coordinates remain finite, ordered, and within the SpatialContext's
+    valid bounds.
+  - Choose offsets for which floating-point subtraction preserves each center-to-edge
+    displacement, including (xmin+dx)-(cx+dx)=xmin-cx, (xmax+dx)-(cx+dx)=xmax-cx,
+    and the analogous y displacements; this measurably ensures that the represented
+    geometry is a pure translation.
+  - Empty points, empty circles, and empty rectangles are excluded because their NaN/sentinel
+    coordinates do not define a center, width, or height that can be slid as required
+    by the metamorphic relation; CircleImpl.relate(Shape) separately maps emptiness
+    to DISJOINT.
+  - Null rectangles are excluded because the supplied target has no specified null-input
+    behavior and the metamorphic relation does not request invalid inputs.
+  - Negative, NaN, and infinite radii are excluded because the CircleImpl constructor
+    explicitly assumes prior parameter validation, and they do not describe a valid
+    circle for this SUT.
+  diversity:
+    sourceRadius:
+    - zero
+    - positive
+    rectangleDimension:
+    - positive width and height
+    - zero width point or vertical segment
+    - zero height horizontal segment
+    boundingBoxRelation:
+    - DISJOINT
+    - WITHIN
+    - CONTAINS
+    - INTERSECTS
+    - CONTAINS with exact equality
+    expectedCircleRectangleRelation:
+    - DISJOINT
+    - WITHIN
+    - INTERSECTS
+    - CONTAINS
+    centerPositionRelativeToRectangleX:
+    - left of xmin
+    - at xmin
+    - strictly between x edges
+    - at xmax
+    - right of xmax
+    centerPositionRelativeToRectangleY:
+    - below ymin
+    - at ymin
+    - strictly between y edges
+    - at ymax
+    - above ymax
+    contactType:
+    - strict separation
+    - side tangency
+    - corner tangency
+    - strict overlap
+    - strict containment
+    - shared bounding-box boundary
+    phase2ClosestCorner:
+    - inside circle
+    - on circumference
+    - outside circle
+    phase2FarthestCorner:
+    - inside circle
+    - on circumference
+    - outside circle
+    - equal-distance tie
+    coordinateRegion:
+    - negative
+    - zero-crossing
+    - positive
+    - mixed-sign
+    translationDirection:
+    - horizontal
+    - vertical
+    - diagonal
+  scenarios:
+  - id: BOUNDING_BOX_STRICTLY_DISJOINT
+    category: NORMAL
+    description: The rectangle is strictly separated from the circle's enclosing box.
+    preconditions:
+    - r > 0.
+    - At least one of xmax < cx-r, xmin > cx+r, ymax < cy-r, or ymin > cy+r holds.
+    expectedSourceBehavior:
+    - relate returns DISJOINT directly from the enclosing-box DISJOINT sentinel path.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CIRCLE_STRICTLY_WITHIN_RECTANGLE
+    category: NORMAL
+    description: The rectangle strictly surrounds the entire circle bounding box.
+    preconditions:
+    - r > 0.
+    - xmin < cx-r and xmax > cx+r and ymin < cy-r and ymax > cy+r.
+    expectedSourceBehavior:
+    - relate returns WITHIN from the enclosing-box WITHIN path.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CIRCLE_WITHIN_TOUCHING_ONE_RECTANGLE_SIDE
+    category: BOUNDARY
+    description: The circle bounding box is within the rectangle and shares exactly
+      one side.
+    preconditions:
+    - r > 0.
+    - xmin = cx-r, xmax > cx+r, ymin < cy-r, and ymax > cy+r.
+    expectedSourceBehavior:
+    - relate returns WITHIN despite the shared boundary.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CIRCLE_WITHIN_TOUCHING_RECTANGLE_CORNER
+    category: BOUNDARY
+    description: The circle bounding box is within the rectangle and shares two adjacent
+      sides.
+    preconditions:
+    - r > 0.
+    - xmin = cx-r, ymin = cy-r, xmax > cx+r, and ymax > cy+r.
+    expectedSourceBehavior:
+    - relate returns WITHIN with two bounding-box boundaries coincident.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: RECTANGLE_EQUALS_CIRCLE_BOUNDING_BOX
+    category: EDGE
+    description: The rectangle exactly equals the circle's cached enclosing box.
+    preconditions:
+    - r > 0.
+    - xmin = cx-r, xmax = cx+r, ymin = cy-r, and ymax = cy+r.
+    expectedSourceBehavior:
+    - relate returns WITHIN through the explicit bbox CONTAINS plus enclosingBox.equals(rectangle)
+      identity edge case.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DIAGONAL_DISJOINT_NORTHEAST
+    category: NORMAL
+    description: The rectangle overlaps the bounding box in both dimensions but its
+      southwest closest corner is outside the circle.
+    preconditions:
+    - r > 0, xmin > cx, and ymin > cy.
+    - xmin < cx+r and ymin < cy+r.
+    - (xmin-cx)^2 + (ymin-cy)^2 > r^2.
+    expectedSourceBehavior:
+    - relate returns DISJOINT after testing the phase-2 closest corner.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DIAGONAL_DISJOINT_NORTHWEST
+    category: NORMAL
+    description: The rectangle lies northwest of the center, overlaps the bounding
+      box, but its southeast closest corner is outside the circle.
+    preconditions:
+    - r > 0, xmax < cx, and ymin > cy.
+    - xmax > cx-r and ymin < cy+r.
+    - (cx-xmax)^2 + (ymin-cy)^2 > r^2.
+    expectedSourceBehavior:
+    - relate returns DISJOINT using the xAxis > maxX and yAxis < minY closest-corner
+      branches.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DIAGONAL_DISJOINT_SOUTHEAST
+    category: NORMAL
+    description: The rectangle lies southeast of the center, overlaps the bounding
+      box, but its northwest closest corner is outside the circle.
+    preconditions:
+    - r > 0, xmin > cx, and ymax < cy.
+    - xmin < cx+r and ymax > cy-r.
+    - (xmin-cx)^2 + (cy-ymax)^2 > r^2.
+    expectedSourceBehavior:
+    - relate returns DISJOINT using the xAxis < minX and yAxis > maxY closest-corner
+      branches.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DIAGONAL_DISJOINT_SOUTHWEST
+    category: NORMAL
+    description: The rectangle lies southwest of the center, overlaps the bounding
+      box, but its northeast closest corner is outside the circle.
+    preconditions:
+    - r > 0, xmax < cx, and ymax < cy.
+    - xmax > cx-r and ymax > cy-r.
+    - (cx-xmax)^2 + (cy-ymax)^2 > r^2.
+    expectedSourceBehavior:
+    - relate returns DISJOINT using the xAxis > maxX and yAxis > maxY closest-corner
+      branches.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EXTERNAL_TANGENCY_RIGHT_SIDE
+    category: BOUNDARY
+    description: The rectangle starts at the circle's rightmost point and spans the
+      horizontal center axis.
+    preconditions:
+    - r > 0.
+    - xmin = cx+r, xmax > xmin, and ymin < cy < ymax.
+    expectedSourceBehavior:
+    - relate returns INTERSECTS for inclusive side tangency.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EXTERNAL_TANGENCY_LEFT_SIDE
+    category: BOUNDARY
+    description: The rectangle ends at the circle's leftmost point and spans the horizontal
+      center axis.
+    preconditions:
+    - r > 0.
+    - xmax = cx-r, xmin < xmax, and ymin < cy < ymax.
+    expectedSourceBehavior:
+    - relate returns INTERSECTS for inclusive side tangency.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EXTERNAL_TANGENCY_TOP_SIDE
+    category: BOUNDARY
+    description: The rectangle starts at the circle's topmost point and spans the
+      vertical center axis.
+    preconditions:
+    - r > 0.
+    - ymin = cy+r, ymax > ymin, and xmin < cx < xmax.
+    expectedSourceBehavior:
+    - relate returns INTERSECTS for inclusive top-side tangency.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EXTERNAL_TANGENCY_BOTTOM_SIDE
+    category: BOUNDARY
+    description: The rectangle ends at the circle's bottommost point and spans the
+      vertical center axis.
+    preconditions:
+    - r > 0.
+    - ymax = cy-r, ymin < ymax, and xmin < cx < xmax.
+    expectedSourceBehavior:
+    - relate returns INTERSECTS for inclusive bottom-side tangency.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PENETRATING_FROM_RIGHT
+    category: NORMAL
+    description: The rectangle crosses the circle's right side and spans the horizontal
+      center axis.
+    preconditions:
+    - r > 0.
+    - cx < xmin < cx+r < xmax and ymin < cy < ymax.
+    expectedSourceBehavior:
+    - relate returns INTERSECTS; spanning the y axis prevents diagonal-disjoint rejection.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PENETRATING_FROM_LEFT
+    category: NORMAL
+    description: The rectangle crosses the circle's left side and spans the horizontal
+      center axis.
+    preconditions:
+    - r > 0.
+    - xmin < cx-r < xmax < cx and ymin < cy < ymax.
+    expectedSourceBehavior:
+    - relate returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PENETRATING_FROM_TOP
+    category: NORMAL
+    description: The rectangle crosses the circle's top side and spans the vertical
+      center axis.
+    preconditions:
+    - r > 0.
+    - cy < ymin < cy+r < ymax and xmin < cx < xmax.
+    expectedSourceBehavior:
+    - relate returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PENETRATING_FROM_BOTTOM
+    category: NORMAL
+    description: The rectangle crosses the circle's bottom side and spans the vertical
+      center axis.
+    preconditions:
+    - r > 0.
+    - ymin < cy-r < ymax < cy and xmin < cx < xmax.
+    expectedSourceBehavior:
+    - relate returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CORNER_TANGENCY_NORTHEAST
+    category: BOUNDARY
+    description: The rectangle's southwest corner lies exactly on the northeast arc
+      and the rectangle extends outward.
+    preconditions:
+    - r > 0, xmin > cx, and ymin > cy.
+    - (xmin-cx)^2 + (ymin-cy)^2 = r^2.
+    - xmax > xmin and ymax > ymin.
+    expectedSourceBehavior:
+    - relate returns INTERSECTS because the closest corner is contained on the circumference.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CORNER_TANGENCY_NORTHWEST
+    category: BOUNDARY
+    description: The rectangle's southeast corner lies exactly on the northwest arc
+      and the rectangle extends outward.
+    preconditions:
+    - r > 0, xmax < cx, and ymin > cy.
+    - (cx-xmax)^2 + (ymin-cy)^2 = r^2.
+    - xmin < xmax and ymax > ymin.
+    expectedSourceBehavior:
+    - relate returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CORNER_TANGENCY_SOUTHEAST
+    category: BOUNDARY
+    description: The rectangle's northwest corner lies exactly on the southeast arc
+      and the rectangle extends outward.
+    preconditions:
+    - r > 0, xmin > cx, and ymax < cy.
+    - (xmin-cx)^2 + (cy-ymax)^2 = r^2.
+    - xmax > xmin and ymin < ymax.
+    expectedSourceBehavior:
+    - relate returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CORNER_TANGENCY_SOUTHWEST
+    category: BOUNDARY
+    description: The rectangle's northeast corner lies exactly on the southwest arc
+      and the rectangle extends outward.
+    preconditions:
+    - r > 0, xmax < cx, and ymax < cy.
+    - (cx-xmax)^2 + (cy-ymax)^2 = r^2.
+    - xmin < xmax and ymin < ymax.
+    expectedSourceBehavior:
+    - relate returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CENTERED_RECTANGLE_STRICTLY_CONTAINED
+    category: NORMAL
+    description: A positive-area rectangle centered on the circle center has every
+      corner strictly inside the circle.
+    preconditions:
+    - r > 0, xmin < cx < xmax, and ymin < cy < ymax.
+    - The maximum squared distance from (cx,cy) to any rectangle corner is less than
+      r^2.
+    expectedSourceBehavior:
+    - relate returns CONTAINS after the farthest-corner test.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NORTHEAST_RECTANGLE_STRICTLY_CONTAINED
+    category: NORMAL
+    description: The rectangle lies wholly northeast of the center and is strictly
+      contained by the circle.
+    preconditions:
+    - r > 0, cx < xmin < xmax, and cy < ymin < ymax.
+    - (xmax-cx)^2 + (ymax-cy)^2 < r^2.
+    expectedSourceBehavior:
+    - relate returns CONTAINS using maxX and maxY as the farthest coordinates.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NORTHWEST_RECTANGLE_STRICTLY_CONTAINED
+    category: NORMAL
+    description: The rectangle lies wholly northwest of the center and is strictly
+      contained by the circle.
+    preconditions:
+    - r > 0, xmin < xmax < cx, and cy < ymin < ymax.
+    - (cx-xmin)^2 + (ymax-cy)^2 < r^2.
+    expectedSourceBehavior:
+    - relate returns CONTAINS using minX and maxY as the farthest coordinates.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SOUTHEAST_RECTANGLE_STRICTLY_CONTAINED
+    category: NORMAL
+    description: The rectangle lies wholly southeast of the center and is strictly
+      contained by the circle.
+    preconditions:
+    - r > 0, cx < xmin < xmax, and ymin < ymax < cy.
+    - (xmax-cx)^2 + (cy-ymin)^2 < r^2.
+    expectedSourceBehavior:
+    - relate returns CONTAINS using maxX and minY as the farthest coordinates.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SOUTHWEST_RECTANGLE_STRICTLY_CONTAINED
+    category: NORMAL
+    description: The rectangle lies wholly southwest of the center and is strictly
+      contained by the circle.
+    preconditions:
+    - r > 0, xmin < xmax < cx, and ymin < ymax < cy.
+    - (cx-xmin)^2 + (cy-ymin)^2 < r^2.
+    expectedSourceBehavior:
+    - relate returns CONTAINS using minX and minY as the farthest coordinates.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CONTAINED_RECTANGLE_STRADDLES_X_AXIS
+    category: NORMAL
+    description: The rectangle straddles the horizontal center axis but lies to one
+      side of the vertical center axis.
+    preconditions:
+    - r > 0, cx < xmin < xmax, and ymin < cy < ymax.
+    - Every rectangle corner has squared distance less than r^2.
+    - ymax-cy != cy-ymin.
+    expectedSourceBehavior:
+    - relate returns CONTAINS and exercises selection of the farther y edge while
+      yAxis equals closestY.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CONTAINED_RECTANGLE_STRADDLES_Y_AXIS
+    category: NORMAL
+    description: The rectangle straddles the vertical center axis but lies above the
+      horizontal center axis.
+    preconditions:
+    - r > 0, xmin < cx < xmax, and cy < ymin < ymax.
+    - Every rectangle corner has squared distance less than r^2.
+    - xmax-cx != cx-xmin.
+    expectedSourceBehavior:
+    - relate returns CONTAINS and exercises selection of the farther x edge while
+      xAxis equals closestX.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FARTHEST_CORNER_ON_CIRCUMFERENCE
+    category: BOUNDARY
+    description: The rectangle is contained by the circle with at least one farthest
+      corner exactly on the circumference.
+    preconditions:
+    - r > 0 and B contains R.
+    - The maximum squared distance from the center to a rectangle corner equals r^2.
+    - R is not equal to B.
+    expectedSourceBehavior:
+    - relate returns CONTAINS because contains includes the circumference.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CENTERED_RECTANGLE_CORNERS_OUTSIDE
+    category: NORMAL
+    description: The circle bounding box contains a centered rectangle, but its corners
+      lie outside the circle.
+    preconditions:
+    - r > 0, xmin < cx < xmax, and ymin < cy < ymax.
+    - B contains R and R is not equal to B.
+    - The selected farthest corner has squared distance greater than r^2.
+    expectedSourceBehavior:
+    - relate returns INTERSECTS after the farthest-corner containment test fails.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NORTHEAST_RECTANGLE_FARTHEST_CORNER_OUTSIDE
+    category: NORMAL
+    description: A rectangle wholly northeast of the center is inside the bounding
+      box but has its northeast corner outside the circle.
+    preconditions:
+    - r > 0, cx < xmin < xmax <= cx+r, and cy < ymin < ymax <= cy+r.
+    - (xmin-cx)^2 + (ymin-cy)^2 <= r^2.
+    - (xmax-cx)^2 + (ymax-cy)^2 > r^2.
+    expectedSourceBehavior:
+    - relate returns INTERSECTS rather than CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NORTHWEST_RECTANGLE_FARTHEST_CORNER_OUTSIDE
+    category: NORMAL
+    description: A rectangle wholly northwest of the center is inside the bounding
+      box but has its northwest corner outside the circle.
+    preconditions:
+    - r > 0, cx-r <= xmin < xmax < cx, and cy < ymin < ymax <= cy+r.
+    - (cx-xmax)^2 + (ymin-cy)^2 <= r^2.
+    - (cx-xmin)^2 + (ymax-cy)^2 > r^2.
+    expectedSourceBehavior:
+    - relate returns INTERSECTS rather than CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SOUTHEAST_RECTANGLE_FARTHEST_CORNER_OUTSIDE
+    category: NORMAL
+    description: A rectangle wholly southeast of the center is inside the bounding
+      box but has its southeast corner outside the circle.
+    preconditions:
+    - r > 0, cx < xmin < xmax <= cx+r, and cy-r <= ymin < ymax < cy.
+    - (xmin-cx)^2 + (cy-ymax)^2 <= r^2.
+    - (xmax-cx)^2 + (cy-ymin)^2 > r^2.
+    expectedSourceBehavior:
+    - relate returns INTERSECTS rather than CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SOUTHWEST_RECTANGLE_FARTHEST_CORNER_OUTSIDE
+    category: NORMAL
+    description: A rectangle wholly southwest of the center is inside the bounding
+      box but has its southwest corner outside the circle.
+    preconditions:
+    - r > 0, cx-r <= xmin < xmax < cx, and cy-r <= ymin < ymax < cy.
+    - (cx-xmax)^2 + (cy-ymax)^2 <= r^2.
+    - (cx-xmin)^2 + (cy-ymin)^2 > r^2.
+    expectedSourceBehavior:
+    - relate returns INTERSECTS rather than CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WIDE_AXIS_CROSSING_RECTANGLE
+    category: NORMAL
+    description: A thin horizontal rectangle crosses both sides of the circle, with
+      portions outside the bounding box.
+    preconditions:
+    - r > 0.
+    - xmin < cx-r and xmax > cx+r.
+    - ymin < cy < ymax and cy-ymin < r and ymax-cy < r.
+    expectedSourceBehavior:
+    - relate returns INTERSECTS; the enclosing boxes intersect but neither encloses
+      the other.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: TALL_AXIS_CROSSING_RECTANGLE
+    category: NORMAL
+    description: A thin vertical rectangle crosses the top and bottom of the circle,
+      with portions outside the bounding box.
+    preconditions:
+    - r > 0.
+    - ymin < cy-r and ymax > cy+r.
+    - xmin < cx < xmax and cx-xmin < r and xmax-cx < r.
+    expectedSourceBehavior:
+    - relate returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DEGENERATE_POINT_AT_CENTER
+    category: EDGE
+    description: The rectangle is a zero-width, zero-height point at the center of
+      a positive-radius circle.
+    preconditions:
+    - r > 0.
+    - xmin = xmax = cx and ymin = ymax = cy.
+    expectedSourceBehavior:
+    - relate returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DEGENERATE_POINT_ON_CIRCUMFERENCE
+    category: BOUNDARY
+    description: The rectangle is a point at the circle's rightmost circumference
+      location.
+    preconditions:
+    - r > 0.
+    - xmin = xmax = cx+r and ymin = ymax = cy.
+    expectedSourceBehavior:
+    - relate returns CONTAINS because the circumference point satisfies contains.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DEGENERATE_POINT_INSIDE_BOX_OUTSIDE_CIRCLE
+    category: EDGE
+    description: The rectangle is a point in a bounding-box corner region but outside
+      the circle.
+    preconditions:
+    - r > 0.
+    - xmin = xmax, ymin = ymax, xmin > cx, and ymin > cy.
+    - xmin < cx+r and ymin < cy+r.
+    - (xmin-cx)^2 + (ymin-cy)^2 > r^2.
+    expectedSourceBehavior:
+    - relate returns DISJOINT through the closest-corner test.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DEGENERATE_CHORD_SEGMENT_CONTAINED
+    category: EDGE
+    description: The rectangle is a horizontal line segment through the center with
+      both endpoints strictly inside the circle.
+    preconditions:
+    - r > 0.
+    - ymin = ymax = cy.
+    - cx-r < xmin < cx < xmax < cx+r.
+    expectedSourceBehavior:
+    - relate returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DEGENERATE_SECANT_SEGMENT
+    category: EDGE
+    description: The rectangle is a horizontal line segment through the center extending
+      beyond both sides of the circle.
+    preconditions:
+    - r > 0.
+    - ymin = ymax = cy.
+    - xmin < cx-r and xmax > cx+r.
+    expectedSourceBehavior:
+    - relate returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DEGENERATE_TANGENT_SEGMENT
+    category: EDGE
+    description: The rectangle is a vertical line segment tangent at the circle's
+      rightmost point and extends above and below it.
+    preconditions:
+    - r > 0.
+    - xmin = xmax = cx+r.
+    - ymin < cy < ymax.
+    expectedSourceBehavior:
+    - relate returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_RADIUS_STRICTLY_INSIDE_RECTANGLE
+    category: EDGE
+    description: A zero-radius circle is represented by its center point, which lies
+      strictly inside a positive-area rectangle.
+    preconditions:
+    - r = 0.
+    - xmin < cx < xmax and ymin < cy < ymax.
+    expectedSourceBehavior:
+    - relate returns WITHIN from the point-sized enclosing-box WITHIN path.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_RADIUS_EQUALS_POINT_RECTANGLE
+    category: EDGE
+    description: A zero-radius circle and a point rectangle have the same coordinates.
+    preconditions:
+    - r = 0.
+    - xmin = xmax = cx and ymin = ymax = cy.
+    expectedSourceBehavior:
+    - relate returns WITHIN through the explicit equal-enclosing-box edge case.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_RADIUS_DISJOINT_FROM_RECTANGLE
+    category: EDGE
+    description: A zero-radius circle's center point is strictly outside the rectangle.
+    preconditions:
+    - r = 0.
+    - At least one of xmax < cx, xmin > cx, ymax < cy, or ymin > cy holds.
+    expectedSourceBehavior:
+    - relate returns DISJOINT from the enclosing-box DISJOINT path.
+    targetCases: 1
+    emptyOutputAllowed: false

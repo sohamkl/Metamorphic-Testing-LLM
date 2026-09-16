@@ -1,0 +1,383 @@
+InputDomain:
+  summary: Finite, non-empty circle/rectangle inputs in a flat non-geo SpatialContext,
+    paired with a non-zero common translation that keeps every translated coordinate
+    valid in the same context. Cases cover bounding-box shortcuts, phase-2 closest/farthest-corner
+    decisions, tangencies, zero-radius circles, and degenerate valid rectangles.
+  globalConstraints:
+  - Use a non-geo SpatialContext and a non-empty Point receiver center with finite
+    x and y coordinates.
+  - Use a finite radius r >= 0; negative, NaN, and infinite radii are excluded because
+    the constructor explicitly assumes prior parameter validation and the metamorphic
+    relation does not request invalid-input behavior.
+  - Use finite rectangle bounds minX <= maxX and minY <= maxY; zero width and/or zero
+    height are included where the Rectangle implementation admits them.
+  - For every source case, construct the follow-up by adding the same finite non-zero
+    offset (dx,dy) to the circle center and to all four rectangle bounds; preserve
+    r, rectangle width, and rectangle height.
+  - Choose the source placement and offset so that both source and follow-up coordinates
+    remain valid for the selected SpatialContext.
+  - Empty circles and empty rectangles are excluded from this translation domain because
+    an empty circle is represented through an empty Point and the supplied source
+    assigns its radius and enclosing-box coordinates to NaN, so a finite geometric
+    slide of both centers and bounds is not defined by the stated metamorphic relation.
+  diversity:
+    boundingBoxPath:
+    - distinct
+    - measurable
+    - bbox DISJOINT; bbox WITHIN; bbox CONTAINS with exact equality; bbox INTERSECTS;
+      bbox CONTAINS followed by phase 2
+    axisPosition:
+    - distinct
+    - measurable
+    - center left of rectangle; right of rectangle; below rectangle; above rectangle;
+      inside x-span only; inside y-span only; inside both spans
+    distanceBoundary:
+    - distinct
+    - measurable
+    - strictly outside circle; closest corner exactly at radius; strictly inside circle;
+      farthest corner exactly at radius; farthest corner outside radius
+    shapeArea:
+    - distinct
+    - measurable
+    - positive-radius circle; zero-radius circle; positive-area rectangle; zero-width
+      line; zero-height line; point rectangle
+  scenarios:
+  - id: BBOX_DISJOINT_RIGHT
+    category: NORMAL
+    description: A positive-area rectangle lies strictly to the right of the circle
+      bounding box.
+    preconditions:
+    - Let C=(cx,cy), r>0, and R=[cx+r+1,cx+r+3] x [cy-1,cy+1].
+    expectedSourceBehavior:
+    - relate(R) returns DISJOINT through the enclosing-box DISJOINT shortcut.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BBOX_DISJOINT_LEFT
+    category: NORMAL
+    description: A positive-area rectangle lies strictly to the left of the circle
+      bounding box.
+    preconditions:
+    - Let C=(cx,cy), r>0, and R=[cx-r-3,cx-r-1] x [cy-1,cy+1].
+    expectedSourceBehavior:
+    - relate(R) returns DISJOINT through the enclosing-box DISJOINT shortcut.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BBOX_DISJOINT_ABOVE
+    category: NORMAL
+    description: A positive-area rectangle lies strictly above the circle bounding
+      box.
+    preconditions:
+    - Let C=(cx,cy), r>0, and R=[cx-1,cx+1] x [cy+r+1,cy+r+3].
+    expectedSourceBehavior:
+    - relate(R) returns DISJOINT through the enclosing-box DISJOINT shortcut.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BBOX_DISJOINT_BELOW
+    category: NORMAL
+    description: A positive-area rectangle lies strictly below the circle bounding
+      box.
+    preconditions:
+    - Let C=(cx,cy), r>0, and R=[cx-1,cx+1] x [cy-r-3,cy-r-1].
+    expectedSourceBehavior:
+    - relate(R) returns DISJOINT through the enclosing-box DISJOINT shortcut.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BBOX_CORNER_OVERLAP_CIRCLE_DISJOINT
+    category: EDGE
+    description: The rectangle overlaps the circle bounding box only near a corner,
+      but its nearest corner is strictly outside the circle.
+    preconditions:
+    - Let C=(cx,cy), r>0, choose a,b with 0<a<r, 0<b<r, and a^2+b^2>r^2.
+    - R=[cx+a,cx+r] x [cy+b,cy+r].
+    expectedSourceBehavior:
+    - relate(R) reaches phase 2 and returns DISJOINT after the closest-corner containment
+      test fails.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CLOSEST_CORNER_TANGENCY
+    category: BOUNDARY
+    description: The rectangle first meets the circle at its closest corner.
+    preconditions:
+    - Let C=(cx,cy), r>0, choose a,b>0 with a<r, b<r, and a^2+b^2=r^2.
+    - R=[cx+a,cx+r] x [cy+b,cy+r].
+    expectedSourceBehavior:
+    - relate(R) returns INTERSECTS because the closest corner is contained at the
+      radius boundary.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CORNER_PENETRATION_INTERSECTS
+    category: NORMAL
+    description: The rectangle enters the circle through a corner while extending
+      beyond it.
+    preconditions:
+    - Let C=(cx,cy), r>0, choose a,b>0 with a<r, b<r, and a^2+b^2<r^2.
+    - R=[cx+a,cx+r+1] x [cy+b,cy+r+1].
+    expectedSourceBehavior:
+    - relate(R) returns INTERSECTS after phase 2 establishes that the rectangle is
+      not disjoint.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: VERTICAL_AXIS_SPAN_INTERSECTS
+    category: NORMAL
+    description: The rectangle spans the circle x-axis but is above the center and
+      only overlaps the circle.
+    preconditions:
+    - Let C=(cx,cy), r>0, and R=[cx-r/4,cx+r/4] x [cy+3*r/4,cy+2*r].
+    expectedSourceBehavior:
+    - relate(R) returns INTERSECTS; phase 2 takes the xAxis-inside-rectangle branch
+      and cannot classify the shapes as disjoint.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: HORIZONTAL_AXIS_SPAN_INTERSECTS
+    category: NORMAL
+    description: The rectangle spans the circle y-axis but is to the right of the
+      center and only overlaps the circle.
+    preconditions:
+    - Let C=(cx,cy), r>0, and R=[cx+3*r/4,cx+2*r] x [cy-r/4,cy+r/4].
+    expectedSourceBehavior:
+    - relate(R) returns INTERSECTS; phase 2 takes the yAxis-inside-rectangle branch
+      and cannot classify the shapes as disjoint.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BOTH_AXES_SPANNED_BBOX_INTERSECTS
+    category: NORMAL
+    description: The rectangle contains the center but extends beyond the circle bounding
+      box in both horizontal directions.
+    preconditions:
+    - Let C=(cx,cy), r>0, and R=[cx-2*r,cx+2*r] x [cy-r/4,cy+r/4].
+    expectedSourceBehavior:
+    - relate(R) returns INTERSECTS because the bounding box is not contained by R
+      and phase 2 rules out DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BBOX_WITHIN_STRICT_RECTANGLE
+    category: NORMAL
+    description: The rectangle strictly contains the full enclosing box of the circle.
+    preconditions:
+    - Let C=(cx,cy), r>0, and R=[cx-r-1,cx+r+1] x [cy-r-1,cy+r+1].
+    expectedSourceBehavior:
+    - relate(R) returns WITHIN through the enclosing-box WITHIN shortcut.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BBOX_WITHIN_BOUNDARY_TOUCHING_RECTANGLE
+    category: BOUNDARY
+    description: The rectangle contains the enclosing box while sharing its left and
+      right bounds.
+    preconditions:
+    - Let C=(cx,cy), r>0, and R=[cx-r,cx+r] x [cy-r-1,cy+r+1].
+    expectedSourceBehavior:
+    - relate(R) returns WITHIN through the enclosing-box WITHIN shortcut.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: RECTANGLE_EQUALS_CIRCLE_BBOX
+    category: EDGE
+    description: The rectangle exactly equals the calculated enclosing box of a positive-radius
+      circle.
+    preconditions:
+    - Let C=(cx,cy), r>0, and R=[cx-r,cx+r] x [cy-r,cy+r].
+    expectedSourceBehavior:
+    - relate(R) returns WITHIN through the explicit enclosingBox.equals(R) identity
+      edge case.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SMALL_CENTERED_RECTANGLE_CONTAINED
+    category: NORMAL
+    description: A positive-area rectangle centered at C is strictly inside the circle.
+    preconditions:
+    - Let C=(cx,cy), r>0, choose q with 0<q<r/sqrt(2), and R=[cx-q,cx+q] x [cy-q,cy+q].
+    expectedSourceBehavior:
+    - relate(R) returns CONTAINS after the farthest-corner containment test succeeds.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: OFFCENTER_RECTANGLE_CONTAINED
+    category: NORMAL
+    description: A rectangle is entirely inside the circle while the center lies left
+      of its x-span and inside its y-span.
+    preconditions:
+    - Let C=(cx,cy), r>0, choose 0<a<b<r and h>0 such that b^2+h^2<r^2.
+    - R=[cx+a,cx+b] x [cy-h,cy+h].
+    expectedSourceBehavior:
+    - relate(R) returns CONTAINS and exercises the xAxis-left-of-rectangle farthest-point
+      selection.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ABOVE_CENTER_RECTANGLE_CONTAINED
+    category: NORMAL
+    description: A rectangle is entirely inside the circle while the center lies below
+      its y-span and inside its x-span.
+    preconditions:
+    - Let C=(cx,cy), r>0, choose 0<a<b<r and h>0 such that b^2+h^2<r^2.
+    - R=[cx-h,cx+h] x [cy+a,cy+b].
+    expectedSourceBehavior:
+    - relate(R) returns CONTAINS and exercises the yAxis-below-rectangle farthest-point
+      selection.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FARTHEST_CORNER_TANGENCY_CONTAINS
+    category: BOUNDARY
+    description: Every rectangle point is in the circle and a farthest corner lies
+      exactly on the circle boundary.
+    preconditions:
+    - Let C=(cx,cy), r>0, choose a,b>0 with a^2+b^2=r^2.
+    - R=[cx-a,cx+a] x [cy-b,cy+b].
+    expectedSourceBehavior:
+    - relate(R) returns CONTAINS because the farthest corner satisfies the inclusive
+      containment boundary.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FARTHEST_CORNER_OUTSIDE_INTERSECTS
+    category: BOUNDARY
+    description: The rectangle is inside the circle bounding box but at least one
+      farthest corner is strictly outside the circle.
+    preconditions:
+    - Let C=(cx,cy), r>0, choose a,b with 0<a<r, 0<b<r, and a^2+b^2>r^2.
+    - R=[cx-a,cx+a] x [cy-b,cy+b].
+    expectedSourceBehavior:
+    - relate(R) returns INTERSECTS after the farthest-corner containment test fails.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BBOX_CONTAINS_RECTANGLE_AXIS_SPAN_INTERSECTS
+    category: NORMAL
+    description: The rectangle is within the bounding box and spans both axes, but
+      its corners are outside the circle.
+    preconditions:
+    - Let C=(cx,cy), r>0, and R=[cx-r,cx+r] x [cy-r,cy+r].
+    expectedSourceBehavior:
+    - relate(R) returns WITHIN because this rectangle equals the bounding box, exercising
+      the equality override instead of normal farthest-corner processing.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BBOX_CONTAINS_NON_EQUAL_LARGE_RECTANGLE_INTERSECTS
+    category: NORMAL
+    description: A non-equal rectangle lies inside the bounding box but has corners
+      outside the circle.
+    preconditions:
+    - Let C=(cx,cy), r>0, choose 0<a<r and 0<b<r with a^2+b^2>r^2.
+    - R=[cx-a,cx+a] x [cy-b,cy+b], with a != r or b != r.
+    expectedSourceBehavior:
+    - relate(R) returns INTERSECTS through bbox CONTAINS followed by a failed farthest-corner
+      containment test.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_RADIUS_CENTER_STRICTLY_INSIDE_RECTANGLE
+    category: EDGE
+    description: A zero-radius circle center is strictly inside a positive-area rectangle.
+    preconditions:
+    - Let C=(cx,cy), r=0, and choose a,b>0 with R=[cx-a,cx+a] x [cy-b,cy+b].
+    expectedSourceBehavior:
+    - relate(R) returns WITHIN because the point-sized enclosing box is within R.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_RADIUS_OUTSIDE_RECTANGLE
+    category: EDGE
+    description: A zero-radius circle center is strictly outside the rectangle.
+    preconditions:
+    - Let C=(cx,cy), r=0, and R=[cx+1,cx+2] x [cy-1,cy+1].
+    expectedSourceBehavior:
+    - relate(R) returns DISJOINT through the point-sized enclosing-box shortcut.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_RADIUS_CENTER_ON_RECTANGLE_BOUNDARY
+    category: BOUNDARY
+    description: A zero-radius circle center lies on one edge of a positive-area rectangle.
+    preconditions:
+    - Let C=(cx,cy), r=0, and R=[cx,cx+2] x [cy-1,cy+1].
+    expectedSourceBehavior:
+    - relate(R) returns INTERSECTS when the point-sized bounding box meets the rectangle
+      boundary.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_RADIUS_EQUALS_POINT_RECTANGLE
+    category: EDGE
+    description: A zero-radius circle and a zero-width, zero-height rectangle have
+      identical coordinates.
+    preconditions:
+    - Let C=(cx,cy), r=0, and R=[cx,cx] x [cy,cy].
+    expectedSourceBehavior:
+    - relate(R) returns WITHIN through the enclosingBox.equals(R) edge case.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: HORIZONTAL_LINE_STRICTLY_CONTAINED
+    category: EDGE
+    description: A zero-height horizontal rectangle segment is strictly inside a positive-radius
+      circle.
+    preconditions:
+    - Let C=(cx,cy), r>0, choose 0<a<r, and R=[cx-a,cx+a] x [cy,cy].
+    expectedSourceBehavior:
+    - relate(R) returns CONTAINS because its farthest endpoint is inside the circle.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: HORIZONTAL_LINE_CROSSING_CIRCLE
+    category: EDGE
+    description: A zero-height horizontal rectangle segment crosses the circle and
+      extends beyond it.
+    preconditions:
+    - Let C=(cx,cy), r>0, and R=[cx-2*r,cx+2*r] x [cy,cy].
+    expectedSourceBehavior:
+    - relate(R) returns INTERSECTS because the bounding box does not contain the whole
+      segment.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: VERTICAL_LINE_STRICTLY_CONTAINED
+    category: EDGE
+    description: A zero-width vertical rectangle segment is strictly inside a positive-radius
+      circle.
+    preconditions:
+    - Let C=(cx,cy), r>0, choose 0<a<r, and R=[cx,cx] x [cy-a,cy+a].
+    expectedSourceBehavior:
+    - relate(R) returns CONTAINS because its farthest endpoint is inside the circle.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: VERTICAL_LINE_TANGENT
+    category: BOUNDARY
+    description: A zero-width vertical rectangle segment touches the circle at the
+      center-height point and otherwise lies outside.
+    preconditions:
+    - Let C=(cx,cy), r>0, choose h>0, and R=[cx+r,cx+r] x [cy-h,cy+h].
+    expectedSourceBehavior:
+    - relate(R) returns INTERSECTS because the segment touches the circle but is not
+      fully contained.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POINT_RECTANGLE_STRICTLY_INSIDE
+    category: EDGE
+    description: A point rectangle lies strictly inside a positive-radius circle away
+      from its center.
+    preconditions:
+    - Let C=(cx,cy), r>0, choose a,b with a^2+b^2<r^2 and (a,b)!=(0,0).
+    - R=[cx+a,cx+a] x [cy+b,cy+b].
+    expectedSourceBehavior:
+    - relate(R) returns CONTAINS after the sole rectangle point passes the farthest-point
+      containment test.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POINT_RECTANGLE_ON_CIRCLE_BOUNDARY
+    category: BOUNDARY
+    description: A point rectangle lies exactly on the positive-radius circle boundary.
+    preconditions:
+    - Let C=(cx,cy), r>0, and R=[cx+r,cx+r] x [cy,cy].
+    expectedSourceBehavior:
+    - relate(R) returns CONTAINS because contains(x,y) includes the distance-equals-radius
+      boundary.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POINT_RECTANGLE_IN_BBOX_OUTSIDE_CIRCLE
+    category: EDGE
+    description: A point rectangle is inside the circle bounding box but strictly
+      outside the circle.
+    preconditions:
+    - Let C=(cx,cy), r>0, choose a,b with 0<a<r, 0<b<r, and a^2+b^2>r^2.
+    - R=[cx+a,cx+a] x [cy+b,cy+b].
+    expectedSourceBehavior:
+    - relate(R) returns DISJOINT after phase 2 rejects the closest point.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POINT_RECTANGLE_OUTSIDE_BBOX
+    category: EDGE
+    description: A point rectangle lies strictly outside the circle bounding box.
+    preconditions:
+    - Let C=(cx,cy), r>0, and R=[cx+r+1,cx+r+1] x [cy,cy].
+    expectedSourceBehavior:
+    - relate(R) returns DISJOINT through the enclosing-box DISJOINT shortcut.
+    targetCases: 1
+    emptyOutputAllowed: false

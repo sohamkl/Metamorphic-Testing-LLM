@@ -1,0 +1,389 @@
+InputDomain:
+  summary: Valid, bounded LocalDateRange receivers whose exclusive end can be advanced
+    by exactly 23 days without becoming unbounded, overflowing LocalDate, or causing
+    lengthInDays() saturation. The source and follow-up therefore both use the finite-length
+    calculation and the follow-up length is source length plus 23.
+  globalConstraints:
+  - Source receiver must be a successfully constructed LocalDateRange with start !=
+    LocalDate.MIN, so the source is not unbounded at the start.
+  - Source receiver must have end <= LocalDate.MAX.minusDays(24); after moving end
+    23 days later, follow-up end is at most LocalDate.MAX.minusDays(1), remains representable,
+    and is not the LocalDate.MAX unbounded-end sentinel.
+  - Let D = ChronoUnit.DAYS.between(receiver.getStart(), receiver.getEnd()). Require
+    0 <= D <= Integer.MAX_VALUE - 23, so both source D and follow-up D + 23 fit the
+    finite int result without saturation.
+  - Exclude valid ranges unbounded at either side because lengthInDays() returns Integer.MAX_VALUE
+    as an unbounded-range flag and adding 23 to that flag is not the stated relation.
+  - Exclude valid bounded ranges with D > Integer.MAX_VALUE - 23 because the follow-up
+    would exceed the representable finite result and lengthInDays() saturates at Integer.MAX_VALUE
+    rather than producing source length plus 23.
+  - Exclude valid ranges with end >= LocalDate.MAX.minusDays(23) because adding 23
+    days either produces LocalDate.MAX, which denotes an unbounded end and returns
+    the sentinel, or exceeds LocalDate.MAX.
+  diversity:
+    constructionPath:
+    - of(LocalDate,LocalDate)
+    - of(LocalDate,Period)
+    - ofClosed(LocalDate,LocalDate)
+    - ofEmpty(LocalDate)
+    - parse(CharSequence) date/date form
+    - parse(CharSequence) date/period form
+    - parse(CharSequence) period/date form
+    - from(Temporal) local-date-query path
+    - from(Temporal) Year branch
+    - from(Temporal) YearMonth branch
+    sourceLength:
+    - '0'
+    - '1'
+    - '2'
+    - '10'
+    - '22'
+    - '23'
+    - month-dependent period length
+    - leap-year-dependent length
+    - Integer.MAX_VALUE - 23
+    datePosition:
+    - ordinary modern dates
+    - month boundary
+    - year boundary
+    - leap-day interval
+    - proleptic year zero
+    - immediately above LocalDate.MIN restrictions
+    - immediately below LocalDate.MAX follow-up restriction
+  scenarios:
+  - id: EMPTY_RANGE_FACTORY
+    category: EDGE
+    description: Empty bounded range created through the dedicated empty-range factory.
+    preconditions:
+    - Receiver is LocalDateRange.ofEmpty(LocalDate.of(2024, 6, 15)).
+    - Source start and end both equal 2024-06-15, so D = 0.
+    expectedSourceBehavior:
+    - lengthInDays() returns 0.
+    - Advancing the exclusive end by 23 days yields a bounded range of length 23.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DIRECT_ONE_DAY_RANGE
+    category: NORMAL
+    description: Ordinary one-day half-open range created with explicit start and
+      end.
+    preconditions:
+    - Receiver is LocalDateRange.of(LocalDate.of(2024, 1, 1), LocalDate.of(2024, 1,
+      2)).
+    - D = 1.
+    expectedSourceBehavior:
+    - lengthInDays() returns 1.
+    - The follow-up length is 24.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DIRECT_TWENTY_TWO_DAY_RANGE
+    category: BOUNDARY
+    description: Finite range one day below the transformation amount.
+    preconditions:
+    - Receiver is LocalDateRange.of(LocalDate.of(2024, 3, 1), LocalDate.of(2024, 3,
+      23)).
+    - D = 22.
+    expectedSourceBehavior:
+    - lengthInDays() returns 22.
+    - The follow-up length is 45.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DIRECT_TWENTY_THREE_DAY_RANGE
+    category: BOUNDARY
+    description: Finite range whose source length equals the 23-day end movement.
+    preconditions:
+    - Receiver is LocalDateRange.of(LocalDate.of(2024, 3, 1), LocalDate.of(2024, 3,
+      24)).
+    - D = 23.
+    expectedSourceBehavior:
+    - lengthInDays() returns 23.
+    - The follow-up length is 46.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DIRECT_TEN_DAY_RANGE
+    category: NORMAL
+    description: Ordinary multi-day range away from calendar and representation boundaries.
+    preconditions:
+    - Receiver is LocalDateRange.of(LocalDate.of(2024, 7, 10), LocalDate.of(2024,
+      7, 20)).
+    - D = 10.
+    expectedSourceBehavior:
+    - lengthInDays() returns 10.
+    - The follow-up length is 33.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DIRECT_MONTH_BOUNDARY_RANGE
+    category: EDGE
+    description: Half-open range crossing from January into February.
+    preconditions:
+    - Receiver is LocalDateRange.of(LocalDate.of(2024, 1, 31), LocalDate.of(2024,
+      2, 2)).
+    - D = 2.
+    expectedSourceBehavior:
+    - lengthInDays() returns 2 despite crossing a month boundary.
+    - The follow-up length is 25.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DIRECT_LEAP_DAY_RANGE
+    category: EDGE
+    description: Half-open range spanning leap day in a leap year.
+    preconditions:
+    - Receiver is LocalDateRange.of(LocalDate.of(2024, 2, 28), LocalDate.of(2024,
+      3, 1)).
+    - D = 2.
+    expectedSourceBehavior:
+    - lengthInDays() returns 2.
+    - The follow-up length is 25.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DIRECT_NON_LEAP_FEBRUARY_RANGE
+    category: EDGE
+    description: Corresponding February boundary in a non-leap year.
+    preconditions:
+    - Receiver is LocalDateRange.of(LocalDate.of(2023, 2, 28), LocalDate.of(2023,
+      3, 1)).
+    - D = 1.
+    expectedSourceBehavior:
+    - lengthInDays() returns 1.
+    - The follow-up length is 24.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DIRECT_YEAR_BOUNDARY_RANGE
+    category: EDGE
+    description: Half-open range crossing from one calendar year into the next.
+    preconditions:
+    - Receiver is LocalDateRange.of(LocalDate.of(2023, 12, 31), LocalDate.of(2024,
+      1, 1)).
+    - D = 1.
+    expectedSourceBehavior:
+    - lengthInDays() returns 1.
+    - The follow-up length is 24.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DIRECT_PROLEPTIC_YEAR_ZERO_RANGE
+    category: EDGE
+    description: Valid range using ISO proleptic year zero.
+    preconditions:
+    - Receiver is LocalDateRange.of(LocalDate.of(0, 12, 31), LocalDate.of(1, 1, 2)).
+    - D = 2.
+    expectedSourceBehavior:
+    - lengthInDays() returns 2.
+    - The follow-up length is 25.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DIRECT_NEAR_MIN_VALID_RANGE
+    category: BOUNDARY
+    description: Shortest practical bounded range immediately beyond the prohibited
+      LocalDate.MIN end positions.
+    preconditions:
+    - Receiver is LocalDateRange.of(LocalDate.MIN.plusDays(1), LocalDate.MIN.plusDays(2)).
+    - D = 1.
+    - Source start is not LocalDate.MIN and source end is not LocalDate.MIN.plusDays(1).
+    expectedSourceBehavior:
+    - lengthInDays() returns 1 rather than the unbounded sentinel.
+    - The follow-up end is LocalDate.MIN.plusDays(25) and the follow-up length is
+      24.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DIRECT_NEAR_MAX_FOLLOWUP_SAFE_RANGE
+    category: BOUNDARY
+    description: Bounded range whose follow-up end reaches LocalDate.MAX.minusDays(1),
+      the latest allowed bounded follow-up end.
+    preconditions:
+    - Receiver is LocalDateRange.of(LocalDate.MAX.minusDays(25), LocalDate.MAX.minusDays(24)).
+    - D = 1.
+    - Advancing source end by 23 days produces LocalDate.MAX.minusDays(1), not LocalDate.MAX.
+    expectedSourceBehavior:
+    - lengthInDays() returns 1.
+    - The follow-up remains bounded and has length 24.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DIRECT_MAX_FINITE_RELATION_LENGTH
+    category: BOUNDARY
+    description: Largest source length for which adding 23 remains an exact finite
+      int result.
+    preconditions:
+    - Let start = LocalDate.of(0, 1, 1).
+    - Receiver is LocalDateRange.of(start, start.plusDays(Integer.MAX_VALUE - 23L)).
+    - D = Integer.MAX_VALUE - 23.
+    expectedSourceBehavior:
+    - lengthInDays() returns Integer.MAX_VALUE - 23 without saturation.
+    - The follow-up length is exactly Integer.MAX_VALUE.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PERIOD_ZERO_LENGTH
+    category: EDGE
+    description: Empty range produced by the start-plus-zero-period construction path.
+    preconditions:
+    - Receiver is LocalDateRange.of(LocalDate.of(2024, 6, 15), Period.ZERO).
+    - D = 0.
+    expectedSourceBehavior:
+    - lengthInDays() returns 0.
+    - The follow-up length is 23.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PERIOD_DAY_LENGTH
+    category: NORMAL
+    description: Range produced from a positive day-based Period.
+    preconditions:
+    - Receiver is LocalDateRange.of(LocalDate.of(2024, 6, 15), Period.ofDays(10)).
+    - D = 10.
+    expectedSourceBehavior:
+    - lengthInDays() returns 10.
+    - The follow-up length is 33.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PERIOD_MONTH_FROM_JANUARY_31
+    category: EDGE
+    description: Range produced by adding one month to January 31 in a leap year.
+    preconditions:
+    - Receiver is LocalDateRange.of(LocalDate.of(2024, 1, 31), Period.ofMonths(1)).
+    - The calculated end is 2024-02-29 and D = 29.
+    expectedSourceBehavior:
+    - lengthInDays() returns 29.
+    - The follow-up length is 52.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PERIOD_YEAR_ACROSS_LEAP_YEAR
+    category: EDGE
+    description: Range produced by a one-year Period whose interval includes leap
+      day.
+    preconditions:
+    - Receiver is LocalDateRange.of(LocalDate.of(2023, 3, 1), Period.ofYears(1)).
+    - The calculated end is 2024-03-01 and D = 366.
+    expectedSourceBehavior:
+    - lengthInDays() returns 366.
+    - The follow-up length is 389.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CLOSED_SINGLE_DATE
+    category: EDGE
+    description: Closed construction with equal inclusive endpoints, which becomes
+      a one-day internal half-open range.
+    preconditions:
+    - Receiver is LocalDateRange.ofClosed(LocalDate.of(2024, 6, 15), LocalDate.of(2024,
+      6, 15)).
+    - Internal exclusive end is 2024-06-16 and D = 1.
+    expectedSourceBehavior:
+    - lengthInDays() returns 1.
+    - The follow-up length is 24.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CLOSED_LEAP_DAY_INTERVAL
+    category: EDGE
+    description: Closed range whose inclusive endpoints span leap day.
+    preconditions:
+    - Receiver is LocalDateRange.ofClosed(LocalDate.of(2024, 2, 28), LocalDate.of(2024,
+      3, 1)).
+    - Internal exclusive end is 2024-03-02 and D = 3.
+    expectedSourceBehavior:
+    - lengthInDays() returns 3.
+    - The follow-up length is 26.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PARSE_DATE_DATE
+    category: NORMAL
+    description: Parsed range using the date slash date grammar.
+    preconditions:
+    - Receiver is LocalDateRange.parse("2024-06-01/2024-06-11").
+    - Parsed start is 2024-06-01, parsed exclusive end is 2024-06-11, and D = 10.
+    expectedSourceBehavior:
+    - lengthInDays() returns 10.
+    - The follow-up length is 33.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PARSE_DATE_PERIOD
+    category: NORMAL
+    description: Parsed range using the date slash period grammar.
+    preconditions:
+    - Receiver is LocalDateRange.parse("2024-06-01/P10D").
+    - Parsed end is start plus P10D and D = 10.
+    expectedSourceBehavior:
+    - lengthInDays() returns 10.
+    - The follow-up length is 33.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PARSE_PERIOD_DATE
+    category: NORMAL
+    description: Parsed range using the period slash date grammar.
+    preconditions:
+    - Receiver is LocalDateRange.parse("P10D/2024-06-11").
+    - Parsed start is end minus P10D and D = 10.
+    expectedSourceBehavior:
+    - lengthInDays() returns 10.
+    - The follow-up length is 33.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FROM_LOCAL_DATE
+    category: NORMAL
+    description: Temporal conversion through the local-date query path for a LocalDate.
+    preconditions:
+    - Receiver is LocalDateRange.from(LocalDate.of(2024, 6, 15)).
+    - from(Temporal) creates a closed one-date range with D = 1.
+    expectedSourceBehavior:
+    - lengthInDays() returns 1.
+    - The follow-up length is 24.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FROM_LOCAL_DATE_TIME
+    category: EDGE
+    description: Temporal conversion through the local-date query path while ignoring
+      a time component.
+    preconditions:
+    - Receiver is LocalDateRange.from(LocalDateTime.of(2024, 6, 15, 23, 59, 59)).
+    - The temporal local-date query yields 2024-06-15 and from(Temporal) creates D
+      = 1.
+    expectedSourceBehavior:
+    - lengthInDays() returns 1.
+    - The follow-up length is 24.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FROM_LEAP_YEAR_MONTH
+    category: EDGE
+    description: Temporal conversion through the YearMonth branch for February of
+      a leap year.
+    preconditions:
+    - Receiver is LocalDateRange.from(YearMonth.of(2024, 2)).
+    - The generated range is from 2024-02-01 through exclusive end 2024-03-01, so
+      D = 29.
+    expectedSourceBehavior:
+    - lengthInDays() returns 29.
+    - The follow-up length is 52.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FROM_NON_LEAP_YEAR_MONTH
+    category: EDGE
+    description: Temporal conversion through the YearMonth branch for February of
+      a non-leap year.
+    preconditions:
+    - Receiver is LocalDateRange.from(YearMonth.of(2023, 2)).
+    - The generated range is from 2023-02-01 through exclusive end 2023-03-01, so
+      D = 28.
+    expectedSourceBehavior:
+    - lengthInDays() returns 28.
+    - The follow-up length is 51.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FROM_LEAP_YEAR
+    category: EDGE
+    description: Temporal conversion through the Year branch for a leap year.
+    preconditions:
+    - Receiver is LocalDateRange.from(Year.of(2024)).
+    - The generated range is from 2024-01-01 through exclusive end 2025-01-01, so
+      D = 366.
+    expectedSourceBehavior:
+    - lengthInDays() returns 366.
+    - The follow-up length is 389.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FROM_NON_LEAP_YEAR
+    category: NORMAL
+    description: Temporal conversion through the Year branch for a non-leap year.
+    preconditions:
+    - Receiver is LocalDateRange.from(Year.of(2023)).
+    - The generated range is from 2023-01-01 through exclusive end 2024-01-01, so
+      D = 365.
+    expectedSourceBehavior:
+    - lengthInDays() returns 365.
+    - The follow-up length is 388.
+    targetCases: 1
+    emptyOutputAllowed: false
