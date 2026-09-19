@@ -1,0 +1,361 @@
+InputDomain:
+  summary: Non-null, non-empty, rectangular double matrices whose transpose is also
+    a valid matrix input; cases emphasize pivot discovery, marked rows, EPSILON classification,
+    elimination, rank bounds, and sentinel double values.
+  globalConstraints:
+  - The source matrix is non-null and has at least one row, because computeRank reads
+    matrix.length and generateFollowUp reads source.length.
+  - Every source row is non-null, has the same length, and that common column count
+    is at least one; this makes the input rectangular and ensures matrix[0].length
+    and the transpose construction are defined.
+  - The follow-up is exactly the rectangular transpose produced by generateFollowUp,
+    with dimensions sourceColumnCount by sourceRowCount and identical double elements.
+  - Element values are drawn from the Java double domain accepted by validateInputMatrix;
+    no source case relies on mutation because computeRank operates on a deep copy.
+  - The expected source and follow-up results are compared as int ranks by assertRelation,
+    so each case must exercise a source/follow-up pair with the same expected rank.
+  diversity:
+    shape:
+    - 1x1
+    - 1xN
+    - Nx1
+    - square
+    - tall
+    - wide
+    expectedRank:
+    - '0'
+    - '1'
+    - intermediate positive rank
+    - full row rank
+    - full column rank
+    pivotPath:
+    - pivot in first row
+    - skip zero or EPSILON-small entries
+    - select a later row
+    - no pivot in a column
+    - continue after marked rows
+    numericRegime:
+    - zero and small finite values
+    - negative finite values
+    - exact EPSILON boundary
+    - near-EPSILON values
+    - large finite values
+    - NaN
+    - positive infinity
+  scenarios:
+  - id: SINGLE_NONZERO_ELEMENT
+    category: BOUNDARY
+    description: A 1x1 matrix containing one ordinary nonzero finite value.
+    preconditions:
+    - source is [[7.0]].
+    - The only column has a nonzero pivot in the only row.
+    expectedSourceBehavior:
+    - computeRank returns 1.
+    - The transposed follow-up is identical and assertRelation observes equal rank
+      1.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SINGLE_ZERO_ELEMENT
+    category: BOUNDARY
+    description: A 1x1 all-zero matrix exercises the no-pivot sentinel immediately.
+    preconditions:
+    - source is [[0.0]].
+    - The only value satisfies isZero because its absolute value is less than EPSILON.
+    expectedSourceBehavior:
+    - findPivotRow returns numRows for the only column and computeRank returns 0.
+    - The transpose has the same contents and rank 0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ALL_ZERO_RECTANGULAR
+    category: NORMAL
+    description: A rectangular matrix in which every column has no usable pivot.
+    preconditions:
+    - source is a 3x4 matrix containing only 0.0.
+    - Every findPivotRow call reaches its numRows sentinel.
+    expectedSourceBehavior:
+    - computeRank returns 0 despite four columns and three rows.
+    - Transposition preserves the all-zero structure and the returned rank.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: IDENTITY_FULL_SQUARE_RANK
+    category: NORMAL
+    description: A square identity matrix supplies a fresh pivot in every column.
+    preconditions:
+    - source is the 3x3 identity matrix.
+    - Each pivot is in the next unmarked row and column.
+    expectedSourceBehavior:
+    - normalizePivotRow and eliminateRows are reached for every pivot.
+    - computeRank returns 3 and the transpose also returns 3.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: TALL_FULL_COLUMN_RANK
+    category: NORMAL
+    description: A tall matrix has more rows than columns and independent columns.
+    preconditions:
+    - source is [[1.0, 0.0], [0.0, 1.0], [2.0, 3.0]].
+    - Both columns contain usable pivots, but rank cannot exceed the two columns.
+    expectedSourceBehavior:
+    - computeRank returns 2.
+    - The 2x3 transpose also returns 2, exercising the rectangular rank relation.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WIDE_FULL_ROW_RANK
+    category: NORMAL
+    description: A wide matrix has more columns than rows and independent rows.
+    preconditions:
+    - source is [[1.0, 0.0, 2.0, 0.0], [0.0, 1.0, 0.0, 3.0]].
+    - Two pivots can be found, after which all rows are marked.
+    expectedSourceBehavior:
+    - computeRank returns 2.
+    - The 4x2 transpose returns the same rank, covering the opposite rectangular orientation.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DEPENDENT_ROWS
+    category: NORMAL
+    description: Multiple nonzero rows are scalar multiples, so elimination must avoid
+      counting dependent structure.
+    preconditions:
+    - source is [[1.0, 2.0, 3.0], [2.0, 4.0, 6.0], [-3.0, -6.0, -9.0]].
+    - The second and third rows are multiples of the first.
+    expectedSourceBehavior:
+    - The first pivot is found, while later columns do not create independent marked
+      rows.
+    - computeRank returns 1 and the transpose returns 1.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LATER_ROW_FIRST_PIVOT
+    category: NORMAL
+    description: The first row is zero in the first column, so pivot selection must
+      scan to a later row.
+    preconditions:
+    - source is [[0.0, 1.0], [1.0, 0.0]].
+    - In column zero, row zero isZero and row one is the first usable pivot.
+    expectedSourceBehavior:
+    - findPivotRow selects row one for column zero and subsequently selects row zero
+      for column one.
+    - computeRank returns 2; the transposed permutation matrix also returns 2.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_LEADING_COLUMNS
+    category: NORMAL
+    description: Several leading columns have no pivot before a later column supplies
+      the only rank.
+    preconditions:
+    - source is [[0.0, 0.0, 1.0], [0.0, 0.0, 2.0]].
+    - Columns zero and one return the no-pivot sentinel, while column two has a pivot.
+    expectedSourceBehavior:
+    - computeRank returns 1 after continuing past columns with no pivot.
+    - The transpose also has rank 1.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MARKED_ROW_SKIPPED_IN_LATER_COLUMN
+    category: NORMAL
+    description: A previously marked row contains a later-column value, but pivot
+      search must skip it and use an unmarked row.
+    preconditions:
+    - source is [[1.0, 2.0, 3.0], [2.0, 4.0, 6.0], [0.0, 0.0, 1.0]].
+    - After the first pivot and elimination, row zero is marked and column two must
+      obtain its pivot from an unmarked row.
+    expectedSourceBehavior:
+    - rowMarked prevents a marked row from being selected again.
+    - computeRank returns 2 and the transpose returns 2.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DUPLICATE_COLUMNS
+    category: NORMAL
+    description: Nonzero columns are duplicates, requiring elimination to expose dependence.
+    preconditions:
+    - source is [[1.0, 1.0, 0.0], [2.0, 2.0, 0.0], [0.0, 0.0, 0.0]].
+    - The second column is dependent on the first and the third is zero.
+    expectedSourceBehavior:
+    - Only one independent pivot is counted.
+    - computeRank returns 1 and the transposed matrix returns 1.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_PIVOT_NORMALIZATION
+    category: NORMAL
+    description: Negative pivot and elimination values exercise division and subtraction
+      without relying on positive-only entries.
+    preconditions:
+    - source is [[-2.0, 4.0], [6.0, -12.0], [1.0, 0.0]].
+    - The first two rows are dependent, while the third supplies an independent direction.
+    expectedSourceBehavior:
+    - normalizePivotRow divides by a negative pivot and eliminateRows processes negative
+      multipliers.
+    - computeRank returns 2 and the transpose returns 2.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BELOW_EPSILON_PIVOT
+    category: BOUNDARY
+    description: A nonzero value strictly below EPSILON is treated as zero by isZero.
+    preconditions:
+    - source is [[1.0, 1.0e-11], [0.0, 1.0e-11]].
+    - Both 1.0e-11 values satisfy Math.abs(value) < 1e-10.
+    expectedSourceBehavior:
+    - The first column supplies one pivot; the second column has no usable pivot after
+      EPSILON classification.
+    - computeRank returns 1 and the transpose returns 1.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EXACT_EPSILON_PIVOT
+    category: BOUNDARY
+    description: A value exactly equal to EPSILON is not zero because isZero uses
+      a strict less-than comparison.
+    preconditions:
+    - source is [[1.0, 1.0e-10], [0.0, 1.0e-10]].
+    - Math.abs(1.0e-10) is not less than EPSILON.
+    expectedSourceBehavior:
+    - The second column supplies a second pivot after the first pivot.
+    - computeRank returns 2 and the transpose returns 2.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ABOVE_EPSILON_NEAR_DEPENDENCE
+    category: EDGE
+    description: A small residual just above EPSILON survives elimination and contributes
+      a pivot.
+    preconditions:
+    - source is [[1.0, 1.0], [1.0, 1.0 + 2.0e-10]].
+    - Elimination leaves a residual of approximately 2.0e-10, whose magnitude exceeds
+      EPSILON.
+    expectedSourceBehavior:
+    - The residual is treated as nonzero and a second pivot is counted.
+    - computeRank returns 2 and the transpose returns 2.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BELOW_EPSILON_NEAR_DEPENDENCE
+    category: EDGE
+    description: A small residual below EPSILON is discarded after elimination.
+    preconditions:
+    - source is [[1.0, 1.0], [1.0, 1.0 + 5.0e-11]].
+    - Elimination leaves a residual with magnitude below EPSILON.
+    expectedSourceBehavior:
+    - The residual is classified as zero, so only one pivot is counted.
+    - computeRank returns 1 and the transpose returns 1.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FIRST_NONZERO_PIVOT_NOT_LARGEST
+    category: NORMAL
+    description: Pivot selection uses the first usable row rather than the largest
+      magnitude pivot.
+    preconditions:
+    - source is [[1.0e-12, 1.0], [1.0, 0.0]].
+    - The first entry is below EPSILON and is skipped, so row one is selected in column
+      zero.
+    expectedSourceBehavior:
+    - findPivotRow selects the first row whose value is not isZero, not a numerically
+      largest row.
+    - computeRank returns 2 and the transpose returns 2.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SINGLE_ROW_WITH_INITIAL_ZERO
+    category: BOUNDARY
+    description: A single row has an initial zero followed by a usable pivot.
+    preconditions:
+    - source is [[0.0, 0.0, -4.0, 8.0]].
+    - The first two columns have no pivot and the third column supplies the sole pivot.
+    expectedSourceBehavior:
+    - computeRank returns 1 after scanning past two sentinel columns.
+    - The 4x1 transpose returns 1.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SINGLE_COLUMN_WITH_ZERO_ROWS
+    category: BOUNDARY
+    description: A single-column matrix contains zero rows before and after one nonzero
+      row.
+    preconditions:
+    - source is [[0.0], [5.0], [0.0], [-10.0]].
+    - Only one column exists, so at most one pivot can be counted.
+    expectedSourceBehavior:
+    - findPivotRow selects the first usable row, and computeRank returns 1.
+    - The 1x4 transpose returns 1.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LARGE_FINITE_VALUES
+    category: EDGE
+    description: Large finite values exercise normalization and elimination while
+      remaining representable double values.
+    preconditions:
+    - source is [[1.0e150, 2.0e150], [2.0e150, 4.0e150], [0.0, 1.0e150]].
+    - The first two rows are dependent and the third adds an independent direction.
+    expectedSourceBehavior:
+    - computeRank returns 2 without requiring values outside the finite double range.
+    - The transposed matrix returns 2.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MIXED_SIGN_FULL_RANK
+    category: NORMAL
+    description: A mixed-sign square matrix requires pivot normalization and elimination
+      across all columns.
+    preconditions:
+    - source is [[2.0, -1.0, 0.0], [1.0, 1.0, 3.0], [0.0, 4.0, 1.0]].
+    - Its rows and columns provide three independent pivot opportunities.
+    expectedSourceBehavior:
+    - computeRank returns 3.
+    - The transpose also returns 3, exercising the relation on a non-symmetric matrix.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NAN_SINGLETON
+    category: EDGE
+    description: A singleton containing NaN exercises isZero's Math.abs(NaN) behavior
+      without changing matrix shape.
+    preconditions:
+    - source is [[Double.NaN]].
+    - Math.abs(Double.NaN) is NaN, and NaN < EPSILON is false.
+    expectedSourceBehavior:
+    - The NaN entry is treated as a usable pivot by isZero, so computeRank returns
+      1.
+    - The transpose is identical and returns 1.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_INFINITY_SINGLETON
+    category: EDGE
+    description: A singleton containing positive infinity is classified as nonzero
+      by isZero.
+    preconditions:
+    - source is [[Double.POSITIVE_INFINITY]].
+    - Math.abs(Double.POSITIVE_INFINITY) is not less than EPSILON.
+    expectedSourceBehavior:
+    - computeRank returns 1.
+    - The identical transpose returns 1.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: INFINITY_WITH_SECOND_PIVOT
+    category: EDGE
+    description: Positive infinity participates in normalization while a later finite
+      row supplies another pivot.
+    preconditions:
+    - source is [[Double.POSITIVE_INFINITY, 1.0], [0.0, 1.0]].
+    - The first column has an infinite pivot and the second column remains usable
+      in the unmarked second row.
+    expectedSourceBehavior:
+    - computeRank returns 2.
+    - The transposed matrix also returns 2, checking transpose invariance across non-finite
+      arithmetic.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NAN_WITH_FINITE_PIVOT
+    category: EDGE
+    description: NaN in one pivot row is followed by a finite row, exercising the
+      implementation's nonzero classification for NaN.
+    preconditions:
+    - source is [[Double.NaN, 0.0], [0.0, 1.0]].
+    - Both NaN and 1.0 are classified as nonzero by isZero.
+    expectedSourceBehavior:
+    - The NaN entry supplies the first pivot and the finite second row supplies another
+      pivot.
+    - computeRank returns 2 and the transpose returns 2.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NONSYMMETRIC_RANK_TWO_RECTANGLE
+    category: NORMAL
+    description: A 3x4 nonsymmetric matrix has an intermediate rank and distinct row
+      and column traversal orders after transpose.
+    preconditions:
+    - source is [[1.0, 2.0, 0.0, 1.0], [0.0, 1.0, 1.0, 0.0], [1.0, 3.0, 1.0, 1.0]].
+    - The third row is the sum of the first two, so the matrix has rank 2.
+    expectedSourceBehavior:
+    - Elimination must expose the row dependence rather than count all three nonzero
+      rows.
+    - computeRank returns 2 and the 4x3 transpose returns 2.
+    targetCases: 1
+    emptyOutputAllowed: false

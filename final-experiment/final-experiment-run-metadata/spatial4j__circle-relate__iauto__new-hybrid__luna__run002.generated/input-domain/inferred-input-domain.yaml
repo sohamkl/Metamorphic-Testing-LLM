@@ -1,0 +1,390 @@
+InputDomain:
+  summary: Non-geodetic finite Cartesian circles and finite non-empty rectangles,
+    with source and follow-up shapes translated by the fixed offset (17.5, -9.25).
+  globalConstraints:
+  - Use one non-geodetic SpatialContext for the source circle and for construction
+    of the follow-up circle and RectangleImpl.
+  - The circle center is either a finite point or an explicitly empty point; non-empty
+    center coordinates must remain finite after adding 17.5 and -9.25.
+  - The circle radius is finite and non-negative, including zero; the constructor
+    records NaN for an empty center and that empty-center case is handled separately.
+  - The rectangle is non-null, non-empty, finite, and has minX <= maxX and minY <=
+    maxY; its translated coordinates must remain finite and preserve those orderings.
+  - Do not use antimeridian, world-wrap, pole, or geodetic-crossing cases because
+    relateRectanglePhase2 explicitly does not support those cases and the requested
+    context is non-geodetic.
+  - Do not use null inputs because generateFollowUp rejects a null circle or rectangle
+    with Objects.requireNonNull before the metamorphic assertion.
+  - For every scenario, invoke the supplied target overload relate(Rectangle), generate
+    the follow-up with the supplied transformation, invoke the same overload on the
+    shifted shapes, and require sourceOutput == followUpOutput.
+  diversity:
+    relationPath:
+    - EMPTY_CIRCLE_SENTINEL
+    - BBOX_DISJOINT
+    - BBOX_WITHIN
+    - BBOX_EQUALITY_WITHIN
+    - PHASE2_DISJOINT
+    - PHASE2_INTERSECTS
+    - PHASE2_CONTAINS
+    - TANGENT_BOUNDARY
+    circleRadius:
+    - ZERO
+    - POSITIVE
+    circleAxisAgainstRectangleX:
+    - LEFT_OF
+    - RIGHT_OF
+    - INSIDE_OR_ON
+    circleAxisAgainstRectangleY:
+    - BELOW
+    - ABOVE
+    - INSIDE_OR_ON
+    rectangleShape:
+    - FULL_AREA
+    - ZERO_WIDTH
+    - ZERO_HEIGHT
+    - SINGLE_POINT
+    closestPointStatus:
+    - OUTSIDE_CIRCLE
+    - ON_CIRCLE
+    - INSIDE_CIRCLE
+    farthestPointStatus:
+    - OUTSIDE_CIRCLE
+    - ON_CIRCLE
+    - INSIDE_CIRCLE
+    bboxRelation:
+    - DISJOINT
+    - WITHIN
+    - CONTAINS
+    - INTERSECTS
+  scenarios:
+  - id: EMPTY_CENTER_SENTINEL
+    category: EDGE
+    description: The circle is constructed with an explicitly empty center, causing
+      CircleImpl to store NaN radius and a NaN enclosing box; the rectangle is finite
+      and non-empty.
+    preconditions:
+    - circle.getCenter().isEmpty() is true.
+    - The rectangle satisfies the finite non-empty rectangle constraints.
+    - The follow-up construction is attempted exactly as supplied, using the empty
+      center translated by the fixed offset.
+    expectedSourceBehavior:
+    - The target overload is exercised directly; do not substitute the relate(Shape)
+      empty shortcut, which is not part of this overload.
+    - The source and follow-up invocations must produce the same SpatialRelation object
+      identity as required by assertRelation.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_CIRCLE_BBOX_DISJOINT
+    category: NORMAL
+    description: A positive-radius circle and rectangle are separated far enough that
+      their enclosing boxes are disjoint.
+    preconditions:
+    - circle center is (0, 0) and radius is 2.
+    - rectangle is [10, 12] x [10, 12].
+    - enclosingBox.relate(rectangle) is SpatialRelation.DISJOINT.
+    expectedSourceBehavior:
+    - relate(Rectangle) returns DISJOINT immediately from the enclosing-box shortcut.
+    - Translating both shapes preserves the disjoint enclosing-box relation and the
+      returned relation.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_RADIUS_POINT_BBOX_DISJOINT
+    category: BOUNDARY
+    description: A zero-radius circle behaves as a point whose enclosing box is disjoint
+      from the rectangle.
+    preconditions:
+    - circle center is (0, 0) and radius is 0.
+    - rectangle is [2, 3] x [2, 3].
+    - enclosingBox.relate(rectangle) is DISJOINT.
+    expectedSourceBehavior:
+    - The enclosing-box DISJOINT return path is taken without entering rectangle phase
+      two.
+    - The translated point-circle and rectangle remain DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CIRCLE_BBOX_WITHIN_LARGE_RECTANGLE
+    category: NORMAL
+    description: The rectangle strictly contains the circle's enclosing box.
+    preconditions:
+    - circle center is (0, 0) and radius is 2.
+    - rectangle is [-10, 10] x [-10, 10].
+    - enclosingBox.relate(rectangle) is WITHIN.
+    expectedSourceBehavior:
+    - relate(Rectangle) returns WITHIN from the enclosing-box shortcut.
+    - The follow-up remains WITHIN after the common translation.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_RADIUS_RECTANGLE_CONTAINS_CENTER
+    category: BOUNDARY
+    description: A zero-radius circle lies strictly inside a larger rectangle.
+    preconditions:
+    - circle center is (1, 1) and radius is 0.
+    - rectangle is [-2, 4] x [-3, 5].
+    - the circle enclosing box is within the rectangle.
+    expectedSourceBehavior:
+    - The target returns WITHIN through the bboxSect == WITHIN path.
+    - The result remains WITHIN after translating both shapes.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ENCLOSING_BOX_EQUAL_RECTANGLE
+    category: EDGE
+    description: The rectangle has exactly the same finite coordinates as the circle's
+      enclosingBox.
+    preconditions:
+    - circle has a finite non-empty center and positive radius.
+    - rectangle.minX equals enclosingBox.minX, rectangle.maxX equals enclosingBox.maxX,
+      rectangle.minY equals enclosingBox.minY, and rectangle.maxY equals enclosingBox.maxY.
+    - enclosingBox.relate(rectangle) is CONTAINS before the equals check.
+    expectedSourceBehavior:
+    - The enclosing-box equality identity edge case returns WITHIN.
+    - The follow-up rectangle is exactly the translated counterpart of the source
+      enclosing box, so the same identity edge case remains WITHIN.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BBOX_CONTAINS_RECTANGLE_CIRCLE_CONTAINS_ALL_CORNERS
+    category: NORMAL
+    description: The circle's enclosing box contains a smaller rectangle and every
+      farthest rectangle corner is inside the circle.
+    preconditions:
+    - circle center is (0, 0) and radius is 10.
+    - rectangle is [-2, 2] x [-2, 2].
+    - enclosingBox.relate(rectangle) is CONTAINS.
+    - contains(2, 2) and contains(2, -2) are true.
+    expectedSourceBehavior:
+    - Phase two reaches the farthest-point test and returns CONTAINS.
+    - The translated rectangle remains contained by the translated circle, so the
+      follow-up returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BBOX_CONTAINS_RECTANGLE_FARTHEST_CORNER_OUTSIDE
+    category: NORMAL
+    description: The rectangle lies within the circle's enclosing box but extends
+      beyond the circle at a farthest corner.
+    preconditions:
+    - circle center is (0, 0) and radius is 5.
+    - rectangle is [-4, 4] x [-4, 4].
+    - enclosingBox.relate(rectangle) is CONTAINS.
+    - at least one farthest corner selected by phase two is outside the circle.
+    expectedSourceBehavior:
+    - Phase two does not return CONTAINS and returns INTERSECTS after the farthest-point
+      test.
+    - Translation preserves the outside-corner relationship and returns INTERSECTS
+      again.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: AXES_OUTSIDE_BBOX_OVERLAP_BUT_CORNER_DISJOINT
+    category: NORMAL
+    description: The circle center is outside the rectangle on both axes; the enclosing
+      boxes overlap, but the closest rectangle corner is outside the circle.
+    preconditions:
+    - circle center is (0, 0) and radius is 2.
+    - rectangle is [1.9, 3] x [1.9, 3].
+    - circle x-axis is below rectangle.minX and y-axis is below rectangle.minY.
+    - enclosingBox.relate(rectangle) is not DISJOINT.
+    - contains(rectangle.minX, rectangle.minY) is false.
+    expectedSourceBehavior:
+    - Phase two enters the both-axes-outside closest-point check and returns DISJOINT.
+    - The same closest-corner relationship holds after translation, so the follow-up
+      returns DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: X_AXIS_LEFT_Y_AXIS_INSIDE_INTERSECTION
+    category: NORMAL
+    description: The circle center is left of the rectangle but its y-axis lies within
+      the rectangle, producing an actual intersection.
+    preconditions:
+    - circle center is (0, 0) and radius is 3.
+    - rectangle is [2, 4] x [-1, 1].
+    - circle x-axis is less than rectangle.minX and circle y-axis is between rectangle.minY
+      and rectangle.maxY.
+    - enclosingBox.relate(rectangle) is INTERSECTS.
+    expectedSourceBehavior:
+    - The x-axis-outside and y-axis-inside branches are exercised.
+    - The result is INTERSECTS rather than the both-axes-outside DISJOINT result,
+      and translation preserves it.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: X_AXIS_RIGHT_Y_AXIS_INSIDE_INTERSECTION
+    category: NORMAL
+    description: The circle center is right of the rectangle while its y-axis lies
+      within the rectangle.
+    preconditions:
+    - circle center is (0, 0) and radius is 3.
+    - rectangle is [-4, -2] x [-1, 1].
+    - circle x-axis is greater than rectangle.maxX and circle y-axis is between rectangle.minY
+      and rectangle.maxY.
+    - enclosingBox.relate(rectangle) is INTERSECTS.
+    expectedSourceBehavior:
+    - The xAxis > r.getMaxX branch and y-axis-inside branch are exercised.
+    - The source and follow-up relations are both INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: Y_AXIS_BELOW_X_AXIS_INSIDE_INTERSECTION
+    category: NORMAL
+    description: The circle center is below the rectangle while its x-axis lies within
+      the rectangle.
+    preconditions:
+    - circle center is (0, 0) and radius is 3.
+    - rectangle is [-1, 1] x [2, 4].
+    - circle y-axis is less than rectangle.minY and circle x-axis is between rectangle.minX
+      and rectangle.maxX.
+    - enclosingBox.relate(rectangle) is INTERSECTS.
+    expectedSourceBehavior:
+    - The yAxis < r.getMinY branch and x-axis-inside branch are exercised.
+    - Because an axis is spanned, phase two cannot use the both-axes-outside shortcut;
+      the relation is INTERSECTS and remains so after translation.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: Y_AXIS_ABOVE_X_AXIS_INSIDE_INTERSECTION
+    category: NORMAL
+    description: The circle center is above the rectangle while its x-axis lies within
+      the rectangle.
+    preconditions:
+    - circle center is (0, 0) and radius is 3.
+    - rectangle is [-1, 1] x [-4, -2].
+    - circle y-axis is greater than rectangle.maxY and circle x-axis is between rectangle.minX
+      and rectangle.maxX.
+    - enclosingBox.relate(rectangle) is INTERSECTS.
+    expectedSourceBehavior:
+    - The yAxis > r.getMaxY branch and x-axis-inside branch are exercised.
+    - The source and follow-up relations are INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CIRCLE_CENTER_INSIDE_RECTANGLE
+    category: NORMAL
+    description: The rectangle spans both circle axes, while its boundaries cut the
+      circle so neither containment relation applies.
+    preconditions:
+    - circle center is (0, 0) and radius is 5.
+    - rectangle is [-3, 3] x [-1, 1].
+    - circle x-axis and y-axis are both within the rectangle.
+    - enclosingBox.relate(rectangle) is INTERSECTS.
+    expectedSourceBehavior:
+    - Both closest-axis selections use the axis-inside branches.
+    - The result is INTERSECTS, and the common translation preserves the relation.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CLOSEST_POINT_TANGENT
+    category: BOUNDARY
+    description: The rectangle is outside the circle on both axes and its closest
+      corner lies exactly on the circle boundary.
+    preconditions:
+    - circle center is (0, 0) and radius is 5.
+    - rectangle is [3, 4] x [4, 5], so the closest corner is (3, 4).
+    - enclosingBox.relate(rectangle) is not DISJOINT.
+    - contains(3, 4) is true under the distance calculator's boundary-inclusive within
+      test.
+    expectedSourceBehavior:
+    - The both-axes-outside closest-point check does not return DISJOINT at tangency.
+    - The source and translated follow-up exercise the boundary relation consistently
+      and return the same SpatialRelation identity.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FARTHEST_POINT_TANGENT
+    category: BOUNDARY
+    description: The circle's enclosing box contains the rectangle and the selected
+      farthest corner lies exactly on the circle boundary.
+    preconditions:
+    - circle center is (0, 0) and radius is 5.
+    - rectangle is [-3, 3] x [-4, 4].
+    - enclosingBox.relate(rectangle) is CONTAINS.
+    - the selected farthest corner has distance exactly 5 from the center.
+    expectedSourceBehavior:
+    - The farthest-point contains test is exercised at its equality boundary.
+    - The source and follow-up return the same relation, with no change caused by
+      translation.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DEGENERATE_ZERO_WIDTH_RECTANGLE
+    category: EDGE
+    description: A finite rectangle has minX equal to maxX and intersects the circle
+      as a vertical degenerate rectangle.
+    preconditions:
+    - circle center is (0, 0) and radius is 3.
+    - rectangle is [2, 2] x [-1, 1].
+    - rectangle is non-empty according to the supplied Rectangle implementation and
+      enclosingBox.relate(rectangle) is not DISJOINT.
+    expectedSourceBehavior:
+    - Rectangle phase two handles equal minX and maxX without changing coordinate
+      ordering.
+    - The translated degenerate rectangle has the same relation to the translated
+      circle as the source.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DEGENERATE_ZERO_HEIGHT_RECTANGLE
+    category: EDGE
+    description: A finite rectangle has minY equal to maxY and intersects the circle
+      as a horizontal degenerate rectangle.
+    preconditions:
+    - circle center is (0, 0) and radius is 3.
+    - rectangle is [-1, 1] x [2, 2].
+    - rectangle is non-empty according to the supplied Rectangle implementation and
+      enclosingBox.relate(rectangle) is not DISJOINT.
+    expectedSourceBehavior:
+    - Rectangle phase two handles equal minY and maxY without changing coordinate
+      ordering.
+    - The source and follow-up relations are identical.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SINGLE_POINT_RECTANGLE_ON_CIRCLE
+    category: BOUNDARY
+    description: The rectangle degenerates to one point on the circle boundary.
+    preconditions:
+    - circle center is (0, 0) and radius is 5.
+    - rectangle is [3, 4] x [3, 4].
+    - the rectangle point has distance exactly 5 from the circle center.
+    expectedSourceBehavior:
+    - The target reaches the rectangle relation logic with both rectangle dimensions
+      degenerate.
+    - Translating both shapes preserves the point-on-circle boundary relationship
+      and the returned relation.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_RADIUS_SINGLE_POINT_RECTANGLE_SAME_POINT
+    category: BOUNDARY
+    description: Both the circle and rectangle represent the same single finite point.
+    preconditions:
+    - circle center is (2, -1) and radius is 0.
+    - rectangle is [2, 2] x [-1, -1].
+    - the circle enclosing box equals the rectangle.
+    expectedSourceBehavior:
+    - The enclosing-box equality edge case is exercised for a zero-radius circle and
+      returns WITHIN.
+    - The translated source and follow-up shapes remain equal and produce the same
+      relation.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: RECTANGLE_STRADDLES_CIRCLE_X_AXIS
+    category: EDGE
+    description: The rectangle spans the circle x-axis while its y placement requires
+      the phase-two farthest and alternate-corner reasoning.
+    preconditions:
+    - circle center is (0, 0) and radius is 6.
+    - rectangle is [-2, 2] x [-5, 5].
+    - circle x-axis lies within the rectangle and the rectangle's y interval spans
+      the circle y-axis.
+    - enclosingBox.relate(rectangle) is CONTAINS.
+    expectedSourceBehavior:
+    - The x-axis-inside and y-axis-inside paths are exercised.
+    - The source and follow-up relations are identical, including any farthest-corner
+      decision made by phase two.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: TRANSLATION_CROSSES_NO_COORDINATE_LIMIT
+    category: NORMAL
+    description: A valid finite configuration is placed near ordinary Cartesian coordinates
+      so the fixed translation changes every coordinate but remains finite.
+    preconditions:
+    - circle center and rectangle coordinates are finite before and after adding the
+      fixed shift.
+    - The source configuration has bboxSect equal to INTERSECTS and an actual circle-rectangle
+      intersection.
+    - No coordinate relies on longitude, latitude, antimeridian, or pole semantics.
+    expectedSourceBehavior:
+    - The follow-up uses the same radius and context and translates the center and
+      all rectangle bounds by exactly (17.5, -9.25).
+    - The returned source and follow-up relations are equal, demonstrating translation
+      invariance through the actual relate logic rather than a shape swap.
+    targetCases: 1
+    emptyOutputAllowed: false

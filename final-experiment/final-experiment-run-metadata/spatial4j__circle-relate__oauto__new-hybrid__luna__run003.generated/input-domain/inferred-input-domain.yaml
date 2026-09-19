@@ -1,0 +1,303 @@
+InputDomain:
+  summary: Finite, non-geodetic Cartesian circles and rectangles selected to exercise
+    CircleImpl.relate(Rectangle)'s bounding-box shortcut, identity edge case, closest-point
+    disjointness test, containment test, axis-position branches, degenerate rectangles,
+    and zero-radius boundaries; every follow-up applies the supplied common translation.
+  globalConstraints:
+  - Use non-null CircleImpl and Rectangle instances.
+  - Use the same non-geodetic SpatialContext for the circle and rectangle, with finite
+    point coordinates, finite rectangle coordinates, and a finite radius greater than
+    or equal to 0.
+  - Construct rectangles with minX <= maxX and minY <= maxY; permit zero width or
+    zero height because Rectangle is passed directly to the target and the source
+    has no-area handling paths.
+  - Choose source coordinates so adding SHIFT_X = 17.5 and SHIFT_Y = -9.25 to every
+    coordinate remains finite and produces a constructible shifted Point and RectangleImpl
+    in the supplied follow-up.
+  - Do not use null arguments, NaN, infinities, antimeridian-crossing rectangles,
+    or pole-related coordinates; the supplied metamorphic relation is defined for
+    valid non-geodetic source inputs and does not request invalid-input testing.
+  - For each scenario, invoke CircleImpl.relate(Rectangle) directly, generate the
+    follow-up with the supplied generateFollowUp method, and require assertRelation
+    to observe the same SpatialRelation object value.
+  diversity:
+    radiusClass:
+    - positive radius
+    - zero radius
+    boundingBoxRelation:
+    - DISJOINT
+    - WITHIN
+    - CONTAINS
+    - INTERSECTS
+    - CONTAINS with exact equality
+    circleAxisPositionRelativeToRectangle:
+    - left and below
+    - left with Y inside
+    - right with Y inside
+    - X inside and above
+    - both axes inside
+    phase2Outcome:
+    - DISJOINT
+    - INTERSECTS
+    - CONTAINS
+    rectangleShape:
+    - full-area rectangle
+    - zero-width rectangle
+    - zero-height rectangle
+    - point rectangle
+    boundaryStatus:
+    - strictly separated
+    - strict containment
+    - tangent at closest point
+    - tangent at farthest point
+    - circle-box identity
+  scenarios:
+  - id: BBOX_DISJOINT_HORIZONTAL
+    category: NORMAL
+    description: A radius-5 circle centered at (0,0) has enclosing box [-5,5] x [-5,5],
+      while the rectangle [6,8] x [-1,1] is horizontally separated from that box.
+    preconditions:
+    - Circle center is (0,0) and radius is 5.
+    - Rectangle has minX=6, maxX=8, minY=-1, maxY=1.
+    - The enclosing-box relation is DISJOINT, so relate(Rectangle) takes its early
+      DISJOINT return.
+    expectedSourceBehavior:
+    - The source result is SpatialRelation.DISJOINT.
+    - The translated circle and rectangle retain the same enclosing-box separation
+      and the follow-up result must also be DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BBOX_WITHIN_LARGE_RECTANGLE
+    category: NORMAL
+    description: The circle's enclosing box lies strictly inside a substantially larger
+      rectangle.
+    preconditions:
+    - Circle center is (0,0) and radius is 5.
+    - Rectangle has minX=-10, maxX=10, minY=-10, maxY=10.
+    - enclosingBox.relate(rectangle) is WITHIN.
+    expectedSourceBehavior:
+    - The source method returns SpatialRelation.WITHIN from the bounding-box shortcut.
+    - The common translation preserves the WITHIN relation.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BBOX_IDENTITY_EDGE
+    category: EDGE
+    description: The rectangle is exactly equal to the circle's calculated enclosing
+      box.
+    preconditions:
+    - Circle center is (0,0) and radius is 5.
+    - Rectangle coordinates are exactly minX=-5, maxX=5, minY=-5, maxY=5, matching
+      circle.getBoundingBox().
+    - enclosingBox.relate(rectangle) is CONTAINS and enclosingBox.equals(rectangle)
+      is true.
+    expectedSourceBehavior:
+    - The explicit identity edge case returns SpatialRelation.WITHIN.
+    - The shifted RectangleImpl remains coordinate-equal to the shifted circle's enclosing
+      box, so the follow-up also returns WITHIN.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: RECTANGLE_STRICTLY_CONTAINED_BY_CIRCLE
+    category: NORMAL
+    description: A small rectangle is contained by the circle, with all of its corners
+      strictly inside the circle.
+    preconditions:
+    - Circle center is (0,0) and radius is 5.
+    - Rectangle is [-3,3] x [-3,3], so its farthest corners have distance sqrt(18),
+      less than 5.
+    - The circle enclosing box CONTAINS the rectangle.
+    expectedSourceBehavior:
+    - Phase 2 accepts the closest point as non-disjoint and the farthest rectangle
+      corner as contained, returning SpatialRelation.CONTAINS.
+    - The follow-up result remains CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BBOX_CONTAINS_RECTANGLE_CORNER_OUTSIDE_CIRCLE
+    category: NORMAL
+    description: The rectangle is inside the circle's enclosing box but extends beyond
+      the circle at a corner.
+    preconditions:
+    - Circle center is (0,0) and radius is 5.
+    - Rectangle is [-4,4] x [-4,4]; its corners have distance sqrt(32), greater than
+      5.
+    - The enclosing-box relation is CONTAINS, the circle axes lie inside the rectangle,
+      and the farthest corner is outside the circle.
+    expectedSourceBehavior:
+    - The bounding box does not prove containment, and phase 2 returns SpatialRelation.INTERSECTS.
+    - The follow-up result remains INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PHASE2_DIAGONAL_GAP
+    category: BOUNDARY
+    description: The rectangle overlaps the circle bounding box at a corner, but its
+      closest corner is outside the circle.
+    preconditions:
+    - Circle center is (0,0) and radius is 5.
+    - Rectangle is [4,6] x [4,6].
+    - Both circle axes are outside the rectangle, closest point is (4,4), and 4^2
+      + 4^2 > 5^2.
+    - The bounding boxes intersect, so phase 2 rather than the early DISJOINT shortcut
+      performs the closest-point test.
+    expectedSourceBehavior:
+    - The closest-point test returns SpatialRelation.DISJOINT.
+    - The translated diagonal gap produces the same DISJOINT result.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PHASE2_X_AXIS_OUTSIDE_TANGENT
+    category: BOUNDARY
+    description: The circle center is left of the rectangle while its Y axis lies
+      within the rectangle; the rectangle begins tangent to the circle.
+    preconditions:
+    - Circle center is (0,0) and radius is 5.
+    - Rectangle is [5,7] x [-1,1].
+    - xAxis < minX, yAxis is between minY and maxY, and the closest point is (5,0),
+      exactly at distance 5.
+    - The enclosing boxes intersect at the tangent boundary.
+    expectedSourceBehavior:
+    - Because the closest point is contained at the circle boundary and the rectangle
+      is not within the circle, phase 2 returns SpatialRelation.INTERSECTS.
+    - The translated tangent configuration remains INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PHASE2_Y_AXIS_OUTSIDE
+    category: NORMAL
+    description: The circle center is below the rectangle while its X axis lies within
+      the rectangle, exercising the Y-axis outside branch.
+    preconditions:
+    - Circle center is (0,0) and radius is 5.
+    - Rectangle is [-1,1] x [4,6].
+    - xAxis is inside the rectangle, yAxis < minY, and closest point (0,4) is inside
+      the circle.
+    - The enclosing boxes intersect but the rectangle is not contained by the circle.
+    expectedSourceBehavior:
+    - Phase 2 reaches the non-disjoint result and returns SpatialRelation.INTERSECTS.
+    - The follow-up result remains INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PHASE2_BOTH_AXES_INSIDE_INTERSECTION
+    category: NORMAL
+    description: Both circle axes lie inside a rectangle that contains the enclosing
+      box only partially relative to the circle.
+    preconditions:
+    - Circle center is (0,0) and radius is 5.
+    - Rectangle is [-4,4] x [-4,4].
+    - Both axes are inside the rectangle, and the selected farthest corner (4,4) is
+      outside the circle.
+    expectedSourceBehavior:
+    - The axis-overlap path cannot classify the shapes as disjoint; the farthest-corner
+      test returns SpatialRelation.INTERSECTS.
+    - The common translation preserves INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FARTHEST_CORNER_STRICTLY_INSIDE
+    category: NORMAL
+    description: The enclosing box contains the rectangle and every rectangle corner
+      is strictly inside the circle.
+    preconditions:
+    - Circle center is (0,0) and radius is 5.
+    - Rectangle is [-2,2] x [-2,2], whose farthest corner distance is sqrt(8), less
+      than 5.
+    - bboxSect is CONTAINS and the farthest-point containment check succeeds.
+    expectedSourceBehavior:
+    - Phase 2 returns SpatialRelation.CONTAINS.
+    - The follow-up result remains CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FARTHEST_POINT_ON_CIRCLE
+    category: BOUNDARY
+    description: A zero-height rectangle has its farthest point exactly on the circle
+      boundary while remaining within the enclosing box.
+    preconditions:
+    - Circle center is (0,0) and radius is 5.
+    - Rectangle is [-5,0] x [0,0].
+    - The enclosing box CONTAINS the rectangle, and the farthest point (-5,0) has
+      distance exactly 5.
+    expectedSourceBehavior:
+    - The inclusive contains check accepts the boundary point, so the source result
+      is SpatialRelation.CONTAINS.
+    - The translated boundary configuration also returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_RADIUS_INSIDE_RECTANGLE
+    category: EDGE
+    description: A zero-radius circle is represented by a point at (0,0) and lies
+      strictly inside a larger rectangle.
+    preconditions:
+    - Circle center is (0,0) and radius is 0.
+    - Rectangle is [-2,2] x [-2,2].
+    - The circle's enclosing box is the zero-size box at (0,0), which is within the
+      rectangle.
+    expectedSourceBehavior:
+    - The bounding-box shortcut returns SpatialRelation.WITHIN.
+    - The translated zero-radius circle and rectangle also return WITHIN.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_RADIUS_OUTSIDE_RECTANGLE
+    category: EDGE
+    description: A zero-radius circle is separated from a rectangle.
+    preconditions:
+    - Circle center is (0,0) and radius is 0.
+    - Rectangle is [2,3] x [2,3].
+    - The zero-size enclosing box is DISJOINT from the rectangle.
+    expectedSourceBehavior:
+    - The source result is SpatialRelation.DISJOINT.
+    - The translated result remains DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_RADIUS_ON_RECTANGLE_BOUNDARY
+    category: BOUNDARY
+    description: A zero-radius circle is located at a rectangle corner.
+    preconditions:
+    - Circle center is (0,0) and radius is 0.
+    - Rectangle is [0,2] x [0,2].
+    - The circle's enclosing box and rectangle meet at the point (0,0), exercising
+      a contact boundary rather than strict separation.
+    expectedSourceBehavior:
+    - The source method returns a non-DISJOINT relation determined by the enclosing-box
+      boundary contact, and the exact same relation must be returned after translation.
+    - The test must compare the source and follow-up SpatialRelation values through
+      assertRelation rather than assuming a different relation for a no-area circle.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POINT_RECTANGLE_INSIDE_CIRCLE
+    category: EDGE
+    description: A point rectangle lies strictly inside a positive-radius circle.
+    preconditions:
+    - Circle center is (0,0) and radius is 5.
+    - Rectangle has minX=maxX=3 and minY=maxY=4.
+    - The point rectangle is inside the enclosing box and its distance from the center
+      is exactly 5, providing a point-shape boundary case.
+    expectedSourceBehavior:
+    - The farthest-point containment check accepts the inclusive circle boundary and
+      returns SpatialRelation.CONTAINS.
+    - The translated point rectangle remains CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POINT_RECTANGLE_OUTSIDE_CIRCLE_WITHIN_BBOX
+    category: EDGE
+    description: A point rectangle lies inside the circle's square bounding box but
+      outside the circle.
+    preconditions:
+    - Circle center is (0,0) and radius is 5.
+    - Rectangle has minX=maxX=4 and minY=maxY=4.
+    - The point is within [-5,5] x [-5,5] but has distance sqrt(32), greater than
+      5.
+    expectedSourceBehavior:
+    - Phase 2 rejects the closest/farthest point as outside and returns SpatialRelation.DISJOINT.
+    - The translated point configuration remains DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FARTHEST_AXIS_TIE
+    category: EDGE
+    description: The rectangle is symmetric about both circle axes, making the source's
+      strict greater-than farthest-X and farthest-Y selections take their tie alternatives.
+    preconditions:
+    - Circle center is (0,0) and radius is 5.
+    - Rectangle is [-4,4] x [-4,4], so the distances to each horizontal and vertical
+      boundary are tied.
+    - The enclosing box CONTAINS the rectangle, but the selected farthest corner (4,4)
+      is outside the circle.
+    expectedSourceBehavior:
+    - The tie-selection branches are exercised and the result is SpatialRelation.INTERSECTS.
+    - The common translation preserves the same axis-distance ties and returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false

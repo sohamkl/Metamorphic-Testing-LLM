@@ -70,7 +70,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true", help="Print commands without running them.")
     parser.add_argument("--list", action="store_true", help="List planned run IDs and exit.")
     parser.add_argument("--run", dest="runs", action="append", help="Restrict to a manifest run id.")
-    parser.add_argument("--mode", dest="modes", action="append", choices=["dev", "nl"], help="Restrict to a mode.")
+    parser.add_argument("--mode", dest="modes", action="append", choices=["dev", "nl", "iauto", "oauto"],
+                        help="Restrict to a mode.")
     parser.add_argument(
         "--input-generator",
         dest="input_generators",

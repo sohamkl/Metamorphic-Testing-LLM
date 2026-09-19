@@ -37,7 +37,9 @@ public final class InvocationWrapperGenerator {
         }
 
         Method developerFollowUp = null;
-        if (config.mrProvider() == MRProvider.DEV) {
+        // Only the developer-owned half can be wrapped. o-AUTO names no follow-up method (the LLM writes that
+        // half), and the wrapper is still wanted for harvesting source inputs, so it is emitted without one.
+        if (config.mrProvider() == MRProvider.DEV && !config.developerFollowUpMethod().isBlank()) {
             Class<?> specClass = Class.forName(JavaSourceNames.qualifiedName(config.developerMrFile()), false, loader);
             Class<?>[] followUpParameters = invocationComponentTypes(sutClass, target);
             developerFollowUp = specClass.getMethod(

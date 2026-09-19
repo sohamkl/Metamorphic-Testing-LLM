@@ -43,7 +43,8 @@ public final class PromptConfigLoader {
         GenerationMode mode = deriveMode(jsonRequired, testSuiteRequired, mrProvider);
         String developerFollowUpMethod = stringValue(values, "DeveloperFollowUpMethod");
         String developerAssertMethod = stringValue(values, "DeveloperAssertMethod");
-        validateDeveloperMrConfig(mode, developerMrFile, developerFollowUpMethod, developerAssertMethod);
+        validateDeveloperMrConfig(mode, developerMrFile, developerFollowUpMethod, developerAssertMethod,
+                stringValue(values, "MRInput"), stringValue(values, "MROutput"));
         int count = parsePositiveInt(stringValue(values, "Count"), 5, "Count");
         InputDomainRequirements inputDomainRequirements = InputDomainRequirementsParser.parse(
                 values.get("InputDomain"), stringValue(values, "Constraints"), count);
@@ -153,23 +154,42 @@ public final class PromptConfigLoader {
         return GenerationMode.FULL_JUNIT;
     }
 
+    /**
+     * The developer owns whichever half of the relation the prompt names a method for. Naming both is the
+     * fully developer-owned MR; naming one leaves the other half to the LLM, which then needs that half
+     * stated in prose (i-AUTO names the follow-up only, o-AUTO the assertion only).
+     */
     private static void validateDeveloperMrConfig(
             GenerationMode mode,
             Path developerMrFile,
             String developerFollowUpMethod,
-            String developerAssertMethod) {
+            String developerAssertMethod,
+            String mrInput,
+            String mrOutput) {
         if (!mode.usesDeveloperMrHelpers()) {
             return;
         }
         if (developerMrFile == null) {
             throw new IllegalArgumentException("MRProvider: DEV requires DeveloperMrFile.");
         }
-        if (developerFollowUpMethod == null || developerFollowUpMethod.trim().isEmpty()) {
-            throw new IllegalArgumentException("MRProvider: DEV requires DeveloperFollowUpMethod.");
+        boolean hasFollowUp = !isBlank(developerFollowUpMethod);
+        boolean hasAssert = !isBlank(developerAssertMethod);
+        if (!hasFollowUp && !hasAssert) {
+            throw new IllegalArgumentException(
+                    "MRProvider: DEV requires DeveloperFollowUpMethod, DeveloperAssertMethod, or both.");
         }
-        if (developerAssertMethod == null || developerAssertMethod.trim().isEmpty()) {
-            throw new IllegalArgumentException("MRProvider: DEV requires DeveloperAssertMethod.");
+        if (!hasFollowUp && isBlank(mrInput)) {
+            throw new IllegalArgumentException(
+                    "Omitting DeveloperFollowUpMethod leaves the input transformation to the LLM, so MRInput is required.");
         }
+        if (!hasAssert && isBlank(mrOutput)) {
+            throw new IllegalArgumentException(
+                    "Omitting DeveloperAssertMethod leaves the output relation to the LLM, so MROutput is required.");
+        }
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.trim().isEmpty();
     }
 
     private static List<Path> parseSupportFiles(Object raw, Path repoRoot) {

@@ -129,6 +129,16 @@ public final class PromptConfig {
         return sutDescription;
     }
 
+    /** The input-transformation half of the relation, in prose. Blank when the developer owns this half. */
+    public String mrInput() {
+        return mrInput;
+    }
+
+    /** The output-relation half of the relation, in prose. Blank when the developer owns this half. */
+    public String mrOutput() {
+        return mrOutput;
+    }
+
     public String metamorphicRelationStatement() {
         if (!mrInput.isBlank() && !mrOutput.isBlank()) {
             return "If " + mrInput + ", then " + mrOutput + ".";

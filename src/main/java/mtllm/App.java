@@ -275,6 +275,11 @@ public final class App {
                     + " requires MRProvider: DEV -- Randoop applies the developer-owned MR in-process; "
                     + "there is no LLM-written oracle in this path.");
         }
+        if (config.developerFollowUpMethod().isBlank() || config.developerAssertMethod().isBlank()) {
+            return TestRunResult.failed("InputGenerator " + config.inputGenerator()
+                    + " requires both DeveloperFollowUpMethod and DeveloperAssertMethod -- Randoop reflects on "
+                    + "both halves of the MR, so the half-developer i-AUTO/o-AUTO configs are LLM-path only.");
+        }
 
         // Derive the executed-data sub-config so writeSplitAndReport runs the passing/failing split
         // + report (the combined BOTH mode does not, by itself, generate executed MT data).

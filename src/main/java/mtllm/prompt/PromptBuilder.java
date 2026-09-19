@@ -139,12 +139,16 @@ public final class PromptBuilder {
                 prompt.append("Developer-provided metamorphic helper file: ")
                         .append(config.developerMrFile() == null ? "not provided" : config.developerMrFile())
                         .append("\n");
-                prompt.append("Developer follow-up method to call: ")
-                        .append(config.developerFollowUpMethod())
-                        .append("\n");
-                prompt.append("Developer assertion method to call: ")
-                        .append(config.developerAssertMethod())
-                        .append("\n");
+                if (developerOwnsInput(config)) {
+                    prompt.append("Developer follow-up method to call: ")
+                            .append(config.developerFollowUpMethod())
+                            .append("\n");
+                }
+                if (developerOwnsOutput(config)) {
+                    prompt.append("Developer assertion method to call: ")
+                            .append(config.developerAssertMethod())
+                            .append("\n");
+                }
                 prompt.append("Developer MR helper source:\n");
                 prompt.append("```java\n").append(config.developerMrSource()).append("\n```\n\n");
             }
@@ -155,14 +159,32 @@ public final class PromptBuilder {
     }
 
     private static void appendMetamorphicRelation(StringBuilder prompt, PromptConfig config) {
-        // A developer-owned MR is defined by its helper code, which appendSutSection already includes. Restating
-        // MRInput/MROutput prose as well would give the model a second definition, and one that only some
-        // prompt.yaml files carry, so the prose is reserved for LLM-owned MRs.
-        if (config.mode().usesDeveloperMrHelpers()) {
+        // A developer-owned half is defined by its helper code, which appendSutSection already includes. Restating
+        // that half as prose too would give the model a second definition of it, so each half is stated in prose
+        // only when the LLM owns it: both halves for an LLM-owned MR, one half for i-AUTO/o-AUTO, neither for DEV.
+        if (!config.mode().usesDeveloperMrHelpers()) {
+            prompt.append("Metamorphic relation:\n");
+            prompt.append(config.metamorphicRelationStatement()).append("\n\n");
             return;
         }
-        prompt.append("Metamorphic relation:\n");
-        prompt.append(config.metamorphicRelationStatement()).append("\n\n");
+        if (!developerOwnsInput(config)) {
+            prompt.append("Metamorphic input transformation you must implement:\n");
+            prompt.append(config.mrInput()).append("\n\n");
+        }
+        if (!developerOwnsOutput(config)) {
+            prompt.append("Metamorphic output relation you must implement:\n");
+            prompt.append(config.mrOutput()).append("\n\n");
+        }
+    }
+
+    /** True when the prompt names a developer method for the input-transformation half. */
+    private static boolean developerOwnsInput(PromptConfig config) {
+        return !config.developerFollowUpMethod().isBlank();
+    }
+
+    /** True when the prompt names a developer method for the output-relation half. */
+    private static boolean developerOwnsOutput(PromptConfig config) {
+        return !config.developerAssertMethod().isBlank();
     }
 
     private static void appendTaskSection(StringBuilder prompt, PromptConfig config) {
@@ -253,20 +275,41 @@ public final class PromptBuilder {
     private static void appendDeveloperMrJUnitTask(StringBuilder prompt, PromptConfig config) {
         prompt.append("Generate a complete JUnit 5 test class with this exact public class name: ")
                 .append(config.generatedClassName()).append(".\n");
+        boolean devInput = developerOwnsInput(config);
+        boolean devOutput = developerOwnsOutput(config);
         prompt.append("Selected workflow: JUnit test-suite generation with developer-defined MR helpers.\n");
-        prompt.append("The developer has already written the follow-up transformation and assertion logic.\n");
+        if (devInput && devOutput) {
+            prompt.append("The developer has already written the follow-up transformation and assertion logic.\n");
+        } else if (devInput) {
+            prompt.append("The developer has written the follow-up transformation. You must write the output relation "
+                    + "assertion yourself, from the stated metamorphic output relation.\n");
+        } else {
+            prompt.append("The developer has written the output relation assertion. You must write the follow-up "
+                    + "transformation yourself, from the stated metamorphic input transformation.\n");
+        }
         prompt.append("You must call these exact methods:\n");
         prompt.append("- SUT method: ").append(targetMethodCallName(config)).append("\n");
-        prompt.append("- Follow-up transformation: ").append(config.developerFollowUpMethod()).append("\n");
-        prompt.append("- Output relation assertion: ").append(config.developerAssertMethod()).append("\n\n");
+        if (devInput) {
+            prompt.append("- Follow-up transformation: ").append(config.developerFollowUpMethod()).append("\n");
+        }
+        if (devOutput) {
+            prompt.append("- Output relation assertion: ").append(config.developerAssertMethod()).append("\n");
+        }
+        prompt.append("\n");
 
         prompt.append("The class must contain:\n");
         prompt.append("- Individual JUnit 5 @Test methods with diverse deterministic candidate source inputs.\n");
         prompt.append("- Each @Test method must construct one concrete source input directly inside the test body or through small source-construction helpers.\n");
         prompt.append("- Each test must run the target SUT method on the source input.\n");
-        prompt.append("- Each test must call the developer follow-up method to create the follow-up input.\n");
+        prompt.append(devInput
+                ? "- Each test must call the developer follow-up method to create the follow-up input.\n"
+                : "- Each test must create the follow-up input with one generateFollowUp helper that you write, "
+                        + "implementing exactly the stated input transformation.\n");
         prompt.append("- Each test must run the target SUT method on the follow-up input.\n");
-        prompt.append("- Each test must call the developer assertion method with the source output and follow-up output.\n");
+        prompt.append(devOutput
+                ? "- Each test must call the developer assertion method with the source output and follow-up output.\n"
+                : "- Each test must check the outputs with one assertMetamorphicRelation helper that you write, "
+                        + "implementing exactly the stated output relation.\n");
         prompt.append("- At most ").append(config.count()).append(" source-input test methods.\n");
         prompt.append("- JUnit 5 imports from org.junit.jupiter.api.Test only, unless another JUnit import is genuinely needed.\n");
         prompt.append("- No package declaration; import public SUT/helper classes by package name when needed.\n\n");
@@ -274,15 +317,34 @@ public final class PromptBuilder {
         prompt.append("Strict developer-MR JUnit rules:\n");
         prompt.append("- Always call the SUT method with its owning class name, for example ")
                 .append(targetMethodCallName(config)).append("(source), not a bare method call.\n");
-        prompt.append("- Always call the developer MR methods with their owning class names, for example ")
-                .append(config.developerFollowUpMethod()).append("(source) and ")
-                .append(config.developerAssertMethod()).append("(sourceOutput, followUpOutput).\n");
+        if (devInput) {
+            prompt.append("- Always call the developer follow-up method with its owning class name, for example ")
+                    .append(config.developerFollowUpMethod()).append("(source).\n");
+        }
+        if (devOutput) {
+            prompt.append("- Always call the developer assertion method with its owning class name, for example ")
+                    .append(config.developerAssertMethod()).append("(sourceOutput, followUpOutput).\n");
+        }
         prompt.append("- Do not use static imports for the SUT method or developer MR methods.\n");
-        prompt.append("- Do not generate a generateFollowUp method.\n");
-        prompt.append("- Do not generate an assertMetamorphicRelation or assertRelation method.\n");
-        prompt.append("- Do not rewrite, duplicate, reinterpret, or inline the developer-provided MR helper logic.\n");
-        prompt.append("- Do not use assertEquals, assertNotEquals, or other assertion calls directly unless they are inside the developer-provided assertion method already.\n");
-        prompt.append("- The generated JUnit class should be only candidate source-input construction plus calls to the SUT and developer helper methods.\n");
+        if (devInput) {
+            prompt.append("- Do not generate a generateFollowUp method.\n");
+        }
+        if (devOutput) {
+            prompt.append("- Do not generate an assertMetamorphicRelation or assertRelation method.\n");
+        }
+        prompt.append("- Do not rewrite, duplicate, reinterpret, or inline the logic of the developer MR methods named above.\n");
+        if (!devInput || !devOutput) {
+            prompt.append("- The developer MR helper file may contain methods for the half you must write; do not call "
+                    + "them, and do not copy their bodies. Write that half yourself from the stated relation.\n");
+        }
+        prompt.append(devOutput
+                ? "- Do not use assertEquals, assertNotEquals, or other assertion calls directly unless they are inside the developer-provided assertion method already.\n"
+                : "- Keep every assertion inside your single assertMetamorphicRelation helper. Assert only the stated "
+                        + "output relation between the source and follow-up outputs: no expected literal outputs, no "
+                        + "checks of what the SUT returns for one input on its own.\n");
+        prompt.append(devInput && devOutput
+                ? "- The generated JUnit class should be only candidate source-input construction plus calls to the SUT and developer helper methods.\n"
+                : "- The generated JUnit class should be only candidate source-input construction, the one MR helper you write, and calls to the SUT and developer helper methods.\n");
         prompt.append("- Do not try to decide which tests pass or fail. The backend will run the candidates and split actual passing/failing results into separate files.\n");
         prompt.append("- Do not add inline comments that state computed totals, expected outputs, or follow-up outputs; they can be misleading when the SUT is buggy.\n\n");
 

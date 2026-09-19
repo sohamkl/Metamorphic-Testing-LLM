@@ -1,0 +1,306 @@
+InputDomain:
+  summary: IEEE-754 double inputs accepted by normLonDEG, covering the inclusive longitude
+    interval, both signs of zero, values just inside and outside the boundaries, positive
+    and negative wrapping, modulo-zero sentinels, large finite values, and non-finite
+    values; each source case is followed by Java double addition of 360.0.
+  globalConstraints:
+  - Each source case is one Java double value; no constructor or object setup is required
+    because normLonDEG is static.
+  - The follow-up input is exactly sourceInput + 360.0, as specified by generateFollowUp.
+  - Finite source outputs are expected to be within the documented inclusive range
+    [-180.0, 180.0]; NaN and infinities are included because the supplied method performs
+    no input validation and accepts every double value at the API boundary.
+  - The metamorphic assertion treats outputs within 1e-9 degrees as equal and accepts
+    any pair in which both outputs are within 1e-9 degrees of either antimeridian
+    representation.
+  diversity:
+    sourceInputClass:
+    - negative finite
+    - negative zero
+    - zero
+    - positive finite
+    - positive infinity
+    - negative infinity
+    - NaN
+    sourceRangeRelation:
+    - strictly inside (-180.0, 180.0)
+    - exactly -180.0
+    - exactly 180.0
+    - just below -180.0
+    - just above 180.0
+    - strictly outside with nonzero remainder
+    - outside at a positive modulo-zero boundary
+    - outside at a negative modulo-zero boundary
+    - very large finite magnitude
+    sourceBranch:
+    - inclusive in-range return
+    - negative remainder branch
+    - positive nonzero remainder branch
+    - positive exact-zero remainder branch
+    - fallback -180 plus remainder branch
+    - NaN-producing arithmetic path
+  scenarios:
+  - id: INTERIOR_NEGATIVE_LONGITUDE
+    category: NORMAL
+    description: A finite negative longitude strictly inside the documented interval.
+    preconditions:
+    - sourceInput = -73.25, so -180.0 < sourceInput < 0.0.
+    expectedSourceBehavior:
+    - The inclusive range condition returns the source value unchanged.
+    - The follow-up input is 286.75 and normalizes to -73.25, so the relation compares
+      the same meridian.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: INTERIOR_ZERO_LONGITUDE
+    category: NORMAL
+    description: The central meridian represented by positive zero.
+    preconditions:
+    - sourceInput = 0.0.
+    expectedSourceBehavior:
+    - The inclusive range condition returns 0.0 without modulo arithmetic.
+    - The follow-up input is 360.0 and exercises wrapping back to zero.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: INTERIOR_POSITIVE_LONGITUDE
+    category: NORMAL
+    description: A finite positive longitude strictly inside the documented interval.
+    preconditions:
+    - sourceInput = 73.25, so 0.0 < sourceInput < 180.0.
+    expectedSourceBehavior:
+    - The inclusive range condition returns the source value unchanged.
+    - The follow-up input is 433.25 and normalizes to 73.25.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_ZERO_PRESERVATION
+    category: EDGE
+    description: Negative zero reaches the common in-range return path while preserving
+      its signed-zero representation.
+    preconditions:
+    - sourceInput is the IEEE-754 value -0.0.
+    expectedSourceBehavior:
+    - The comparisons satisfy the inclusive range condition and the method returns
+      the input value, including its negative-zero sign.
+    - The follow-up addition produces a value numerically equivalent to 360.0; the
+      relation uses absolute difference and therefore treats the normalized zero meridians
+      as equal.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LOWER_ANTIMERIDIAN_ENDPOINT
+    category: BOUNDARY
+    description: The inclusive lower endpoint -180.0.
+    preconditions:
+    - sourceInput = -180.0.
+    expectedSourceBehavior:
+    - The common-case condition returns -180.0 unchanged.
+    - The follow-up input is 180.0, which also returns unchanged; the relation explicitly
+      accepts the two antimeridian representations.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UPPER_ANTIMERIDIAN_ENDPOINT
+    category: BOUNDARY
+    description: The inclusive upper endpoint 180.0.
+    preconditions:
+    - sourceInput = 180.0.
+    expectedSourceBehavior:
+    - The common-case condition returns 180.0 unchanged.
+    - The follow-up input is 540.0 and reaches the positive exact-zero remainder sentinel,
+      returning 180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: JUST_BELOW_LOWER_ANTIMERIDIAN
+    category: BOUNDARY
+    description: The representable finite value immediately below -180.0.
+    preconditions:
+    - sourceInput = Math.nextDown(-180.0), equivalently the greatest representable
+      double less than -180.0.
+    expectedSourceBehavior:
+    - The in-range condition is false and the modulo path produces a result just above
+      179.99999999999997 degrees.
+    - The follow-up crosses into the corresponding in-range or wrapped representation;
+      the result should remain within the 1e-9-degree MR tolerance.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: JUST_ABOVE_UPPER_ANTIMERIDIAN
+    category: BOUNDARY
+    description: The representable finite value immediately above 180.0.
+    preconditions:
+    - sourceInput = Math.nextUp(180.0), equivalently the least representable double
+      greater than 180.0.
+    expectedSourceBehavior:
+    - The in-range condition is false and the modulo path returns a value just below
+      -180.0.
+    - The follow-up exercises the same meridian near the antimeridian and is checked
+      with the supplied antimeridian tolerance.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_NONZERO_REMAINDER
+    category: NORMAL
+    description: A positive out-of-range longitude whose offset modulo 360 is positive
+      and nonzero.
+    preconditions:
+    - sourceInput = 181.0.
+    - sourceInput > 180.0 and (sourceInput + 180.0) % 360.0 = 1.0.
+    expectedSourceBehavior:
+    - The negative-remainder and exact-zero tests are false.
+    - The fallback result is -179.0.
+    - The follow-up input 541.0 follows the same positive nonzero remainder path and
+      returns -179.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_NONZERO_REMAINDER
+    category: NORMAL
+    description: A negative out-of-range longitude whose modulo offset is negative.
+    preconditions:
+    - sourceInput = -181.0.
+    - sourceInput < -180.0 and (sourceInput + 180.0) % 360.0 = -1.0.
+    expectedSourceBehavior:
+    - The negative-remainder branch returns 179.0.
+    - The follow-up input -181.0 after adding 360.0 is 179.0 and returns unchanged.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_FULL_REVOLUTION
+    category: BOUNDARY
+    description: One positive full revolution outside the interval.
+    preconditions:
+    - sourceInput = 360.0.
+    - sourceInput > 180.0 and (sourceInput + 180.0) % 360.0 = 180.0.
+    expectedSourceBehavior:
+    - The exact-zero condition is false because the remainder is 180.0.
+    - The fallback result is 0.0.
+    - The follow-up input 720.0 also normalizes to 0.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_FULL_REVOLUTION
+    category: BOUNDARY
+    description: One negative full revolution outside the interval.
+    preconditions:
+    - sourceInput = -360.0.
+    - sourceInput < -180.0 and (sourceInput + 180.0) % 360.0 = -180.0.
+    expectedSourceBehavior:
+    - The negative-remainder branch returns 0.0.
+    - The follow-up input is 0.0 and returns unchanged.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_ANTIMERIDIAN_SENTINEL
+    category: EDGE
+    description: A positive value congruent to +180 degrees that reaches the explicit
+      positive exact-zero sentinel.
+    preconditions:
+    - sourceInput = 540.0.
+    - sourceInput > 180.0 and (sourceInput + 180.0) % 360.0 = 0.0.
+    expectedSourceBehavior:
+    - The exact-zero condition is true and sourceInput > 0, so the method returns
+      +180.0.
+    - The follow-up input 900.0 reaches the same sentinel and returns +180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_ANTIMERIDIAN_SENTINEL
+    category: EDGE
+    description: A negative value congruent to -180 degrees that falls through to
+      the -180 plus offset result.
+    preconditions:
+    - sourceInput = -540.0.
+    - sourceInput < -180.0 and (sourceInput + 180.0) % 360.0 is negative zero.
+    expectedSourceBehavior:
+    - The negative-remainder and positive-input exact-zero conditions are false, so
+      the fallback returns -180.0.
+    - The follow-up input -180.0 returns unchanged; both outputs are antimeridian
+      representations accepted by the relation.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MULTIPLE_REVOLUTIONS_POSITIVE
+    category: NORMAL
+    description: A positive finite longitude several revolutions from the normal interval
+      with a non-boundary remainder.
+    preconditions:
+    - sourceInput = 12345.678901.
+    - sourceInput > 180.0 and its Java remainder (sourceInput + 180.0) % 360.0 is
+      finite and nonzero.
+    expectedSourceBehavior:
+    - The method bypasses the in-range path and returns a finite value in [-180.0,
+      180.0].
+    - The follow-up tests periodicity after one additional 360-degree shift rather
+      than merely repeating an in-range case.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MULTIPLE_REVOLUTIONS_NEGATIVE
+    category: NORMAL
+    description: A negative finite longitude several revolutions from the normal interval
+      with a negative remainder.
+    preconditions:
+    - sourceInput = -12345.678901.
+    - sourceInput < -180.0 and (sourceInput + 180.0) % 360.0 < 0.0.
+    expectedSourceBehavior:
+    - The negative-remainder branch returns a finite value in [-180.0, 180.0].
+    - The follow-up checks that adding exactly one revolution preserves that normalized
+      longitude.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LARGE_POSITIVE_FINITE
+    category: EDGE
+    description: The largest finite positive double, where the source arithmetic is
+      dominated by double precision.
+    preconditions:
+    - sourceInput = Double.MAX_VALUE.
+    - sourceInput is finite and greater than 180.0.
+    expectedSourceBehavior:
+    - The method performs the modulo path and returns a finite normalized result rather
+      than throwing.
+    - The follow-up addition of 360.0 is rounded according to Java double arithmetic;
+      the relation observes whether the resulting normalized outputs remain within
+      its stated tolerance.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LARGE_NEGATIVE_FINITE
+    category: EDGE
+    description: The most negative finite double, exercising large-magnitude negative
+      remainder arithmetic.
+    preconditions:
+    - sourceInput = -Double.MAX_VALUE.
+    - sourceInput is finite and less than -180.0.
+    expectedSourceBehavior:
+    - The method performs the modulo path and returns a finite normalized result rather
+      than throwing.
+    - The follow-up uses the exact Java result of adding 360.0, allowing precision
+      effects to be observed under the supplied MR.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_INFINITY_INPUT
+    category: EDGE
+    description: Positive infinity, which is accepted by the double signature but
+      is outside the finite longitude interval.
+    preconditions:
+    - sourceInput = Double.POSITIVE_INFINITY.
+    expectedSourceBehavior:
+    - The in-range comparisons are false; arithmetic involving infinity produces NaN,
+      and the method returns NaN.
+    - The follow-up remains positive infinity and also returns NaN; the supplied assertion's
+      NaN difference does not exceed its tolerance, so this case must not be treated
+      as evidence of numeric periodicity.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_INFINITY_INPUT
+    category: EDGE
+    description: Negative infinity, exercising the corresponding non-finite arithmetic
+      path.
+    preconditions:
+    - sourceInput = Double.NEGATIVE_INFINITY.
+    expectedSourceBehavior:
+    - The method returns NaN because the modulo arithmetic on infinity is NaN.
+    - The follow-up remains negative infinity and returns NaN; the relation assertion
+      is non-failing only because its NaN difference comparison is false.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NAN_INPUT
+    category: EDGE
+    description: NaN, for which all ordered range comparisons and modulo arithmetic
+      produce NaN behavior.
+    preconditions:
+    - sourceInput = Double.NaN.
+    expectedSourceBehavior:
+    - The inclusive range condition is false, the remainder is NaN, and the method
+      returns NaN.
+    - The follow-up is NaN and also returns NaN; the supplied relation does not reject
+      the pair because Math.abs(NaN) is NaN and NaN > 1e-9 is false.
+    targetCases: 1
+    emptyOutputAllowed: false

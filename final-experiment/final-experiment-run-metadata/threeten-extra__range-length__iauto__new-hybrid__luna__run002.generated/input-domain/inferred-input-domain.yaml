@@ -1,0 +1,489 @@
+InputDomain:
+  summary: Source cases are valid LocalDateRange instances whose end can be moved
+    exactly 23 days later by the supplied follow-up generator; cases cover finite,
+    empty, unbounded-start, construction-path, date-boundary, and int-result boundary
+    behavior.
+  globalConstraints:
+  - The source receiver is a non-null LocalDateRange created through one of the supplied
+    public construction paths.
+  - The source range satisfies the constructor invariant start <= end, does not start
+    at LocalDate.MAX.minusDays(1), and does not end at LocalDate.MIN or LocalDate.MIN.plusDays(1).
+  - The source end is no later than LocalDate.MAX.minusDays(23), so range.getEnd().plusDays(23)
+    is representable for the supplied follow-up generator.
+  - A source with end LocalDate.MAX is excluded because generateFollowUp calls plusDays(23)
+    before the metamorphic assertion can run; this is a constraint of the supplied
+    relation, not of LocalDateRange.
+  - Invalid construction arguments and parse text are excluded because the supplied
+    metamorphic relation accepts a LocalDateRange receiver and does not request invalid-input
+    testing.
+  - The source may have an unbounded start, because its finite end still permits follow-up
+    construction; the relation will skip the unbounded sentinel result.
+  - The source may have a finite day span larger than Integer.MAX_VALUE, because the
+    API returns int and the relation's int subtraction must be exercised rather than
+    excluding reachable valid ranges.
+  diversity:
+    constructionPath:
+    - of(LocalDate, LocalDate)
+    - ofClosed(LocalDate, LocalDate)
+    - of(LocalDate, Period)
+    - ofEmpty(LocalDate)
+    - from(LocalDate)
+    - from(Year)
+    - from(YearMonth)
+    - from(YearHalf)
+    - from(YearQuarter)
+    - from(YearWeek)
+    - parse(date/date)
+    - parse(date/period)
+    - parse(period/date)
+    - ofUnboundedStart(LocalDate)
+    boundedness:
+    - finite start and finite end
+    - unbounded start and finite end
+    - finite start and follow-up end equal to LocalDate.MAX
+    rangeShape:
+    - empty
+    - one day
+    - short positive span
+    - month boundary
+    - leap-day boundary
+    - year boundary
+    - long positive span
+    - int-result boundary span
+    sourceEndPosition:
+    - ordinary date
+    - LocalDate.MIN.plusDays(2)
+    - LocalDate.MAX.minusDays(23)
+    - at least 23 days before LocalDate.MAX
+    sourceLength:
+    - '0'
+    - '1'
+    - 2 through 22
+    - '23'
+    - ordinary multi-day value
+    - Integer.MAX_VALUE.minus(23)
+    - Integer.MAX_VALUE.minus(22)
+    - Integer.MAX_VALUE.minus(1)
+    - Integer.MAX_VALUE
+    - greater than Integer.MAX_VALUE
+  scenarios:
+  - id: EMPTY_RANGE_VIA_OF
+    category: EDGE
+    description: An ordinary empty half-open range has equal finite start and end.
+    preconditions:
+    - Construct range = LocalDateRange.of(2020-01-15, 2020-01-15).
+    - range.getStart().equals(range.getEnd()) and both bounds are not prohibited sentinel
+      positions.
+    expectedSourceBehavior:
+    - lengthInDays() returns the zero-day length.
+    - The follow-up has the same start and an end 23 days later, so the relation has
+      two finite int outputs and checks an increase of 23.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EMPTY_RANGE_VIA_OF_EMPTY
+    category: EDGE
+    description: An empty range created through the dedicated empty-range factory
+      reaches the same target length branch through a distinct construction path.
+    preconditions:
+    - Construct range = LocalDateRange.ofEmpty(2020-02-29).
+    - The selected date is neither LocalDate.MIN, LocalDate.MIN.plusDays(1), LocalDate.MAX.minusDays(1),
+      nor LocalDate.MAX.
+    expectedSourceBehavior:
+    - lengthInDays() returns 0.
+    - The follow-up construction is valid and its finite length is 23.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ONE_DAY_HALF_OPEN_RANGE
+    category: BOUNDARY
+    description: A finite half-open range containing exactly one whole day.
+    preconditions:
+    - Construct range = LocalDateRange.of(2021-03-10, 2021-03-11).
+    - The epoch-day difference between end and start is exactly 1.
+    expectedSourceBehavior:
+    - lengthInDays() returns 1.
+    - The follow-up output is 24, giving the requested increase of 23.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SHORT_SPANS_BELOW_EXTRA_DAYS
+    category: NORMAL
+    description: Finite positive ranges whose lengths are smaller than, equal to,
+      and just larger than the relation's 23-day extension.
+    preconditions:
+    - 'Use three cases created with LocalDateRange.of: lengths 2, 22, and 23 days.'
+    - Each source end is at least 23 days before LocalDate.MAX.
+    expectedSourceBehavior:
+    - Each source length is the exact finite whole-day difference.
+    - Each follow-up remains finite and the expected output increase is 23.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: ORDINARY_MULTI_DAY_RANGE
+    category: NORMAL
+    description: A conventional finite range with a non-boundary multi-day length.
+    preconditions:
+    - Construct range = LocalDateRange.of(2024-04-01, 2024-05-15).
+    - The source length is 44 days and the end permits plusDays(23).
+    expectedSourceBehavior:
+    - lengthInDays() returns the finite day difference of 44.
+    - The follow-up output is 67 and the assertion checks an increase of 23.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LEAP_DAY_CROSSING_RANGE
+    category: BOUNDARY
+    description: A finite range crossing February 29 exercises calendar-to-epoch-day
+      behavior.
+    preconditions:
+    - Construct range = LocalDateRange.of(2020-02-28, 2020-03-02).
+    - The source includes the leap day in the half-open interval and has length 3.
+    expectedSourceBehavior:
+    - lengthInDays() counts whole days rather than nominal calendar month positions.
+    - The follow-up remains finite and must be 23 days longer.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MONTH_AND_YEAR_BOUNDARY_RANGES
+    category: BOUNDARY
+    description: Finite ranges crossing month-end and year-end boundaries.
+    preconditions:
+    - 'Use two cases: 2021-01-31 to 2021-02-01, and 2021-12-31 to 2022-01-02.'
+    - Both cases are created with LocalDateRange.of and have finite ends at least
+      23 days from LocalDate.MAX.
+    expectedSourceBehavior:
+    - lengthInDays() follows the epoch-day difference across the calendar boundary.
+    - Each follow-up length is exactly 23 greater than its source length.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: CLOSED_ONE_DATE_RANGE
+    category: BOUNDARY
+    description: A one-date closed range is converted to a one-day half-open range.
+    preconditions:
+    - Construct range = LocalDateRange.ofClosed(2022-06-30, 2022-06-30).
+    - The resulting exclusive end is 2022-07-01.
+    expectedSourceBehavior:
+    - lengthInDays() returns 1, not 0, because the closed endpoint is converted to
+      the next exclusive date.
+    - The follow-up relation checks a 23-day increase.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CLOSED_LEAP_AND_YEAR_RANGES
+    category: NORMAL
+    description: Closed ranges exercise conversion of an inclusive end through leap
+      and year boundaries.
+    preconditions:
+    - 'Use two cases: LocalDateRange.ofClosed(2020-02-28, 2020-03-01) and LocalDateRange.ofClosed(2021-12-30,
+      2022-01-01).'
+    - Both resulting exclusive ends are finite and permit plusDays(23).
+    expectedSourceBehavior:
+    - lengthInDays() reflects the inclusive closed input after conversion to an exclusive
+      end.
+    - The follow-up output is 23 greater for each finite result.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ZERO_PERIOD_RANGE
+    category: EDGE
+    description: A zero Period supplied to the period factory creates an empty range
+      at an ordinary date.
+    preconditions:
+    - Construct range = LocalDateRange.of(2023-05-17, Period.ZERO).
+    - The resulting start and end are equal and are not prohibited boundary dates.
+    expectedSourceBehavior:
+    - lengthInDays() returns 0.
+    - The follow-up extends the end by 23 days and remains constructible.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PERIOD_DAYS_RANGE
+    category: NORMAL
+    description: A positive day-based Period creates a finite range whose length is
+      directly measurable.
+    preconditions:
+    - Construct range = LocalDateRange.of(2023-05-17, Period.ofDays(10)).
+    - The resulting source length is 10 and the end permits plusDays(23).
+    expectedSourceBehavior:
+    - lengthInDays() returns 10.
+    - The follow-up output is 33.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PERIOD_MONTHS_AND_YEARS_RANGE
+    category: BOUNDARY
+    description: Positive calendar Periods exercise LocalDate.plus(Period) before
+      lengthInDays is called.
+    preconditions:
+    - 'Use two cases: start 2020-01-31 with Period.ofMonths(1), and start 2019-01-01
+      with Period.ofYears(1).'
+    - Both resulting ends are finite and no later than LocalDate.MAX.minusDays(23).
+    expectedSourceBehavior:
+    - lengthInDays() measures the actual resulting date difference, including LocalDate's
+      month-end adjustment.
+    - The follow-up relation checks an increase of 23 on each finite result.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: FROM_LOCAL_DATE
+    category: NORMAL
+    description: The from(Temporal) path receives a LocalDate, which the source converts
+      to a one-day closed range.
+    preconditions:
+    - Construct range = LocalDateRange.from(LocalDate.of(2024, 7, 4)).
+    - The LocalDate temporal supplies a local date and from creates a closed one-date
+      range.
+    expectedSourceBehavior:
+    - lengthInDays() returns 1 after the closed-range conversion.
+    - The follow-up output is 24.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FROM_YEAR
+    category: NORMAL
+    description: The from(Temporal) Year branch creates the range for a complete ordinary
+      year.
+    preconditions:
+    - Construct range = LocalDateRange.from(Year.of(2023)).
+    - The resulting range starts on 2023-01-01, ends exclusively after 2023-12-31,
+      and is finite.
+    expectedSourceBehavior:
+    - lengthInDays() returns the actual number of days in the year.
+    - The follow-up extends the finite end by 23 days and the relation checks the
+      corresponding increase.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FROM_LEAP_YEAR
+    category: BOUNDARY
+    description: The from(Temporal) Year branch creates a complete leap year.
+    preconditions:
+    - Construct range = LocalDateRange.from(Year.of(2020)).
+    - The resulting range contains February 29 and has a finite end permitting plusDays(23).
+    expectedSourceBehavior:
+    - lengthInDays() distinguishes the leap year from a 365-day year.
+    - The finite follow-up result is 23 larger.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FROM_YEAR_MONTH
+    category: NORMAL
+    description: The from(Temporal) YearMonth branch creates a complete month.
+    preconditions:
+    - Construct range = LocalDateRange.from(YearMonth.of(2024, 2)).
+    - The range starts on February 1 and ends exclusively on March 1.
+    expectedSourceBehavior:
+    - lengthInDays() returns 29 for the leap February.
+    - The follow-up result is 52.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FROM_YEAR_HALF
+    category: NORMAL
+    description: The from(Temporal) YearHalf branch creates a complete half-year.
+    preconditions:
+    - Construct range = LocalDateRange.from(YearHalf.of(2023, 2)).
+    - The resulting range is finite and its end is at least 23 days before LocalDate.MAX.
+    expectedSourceBehavior:
+    - lengthInDays() returns the actual day count for the second half of 2023.
+    - The follow-up output is 23 greater.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FROM_YEAR_QUARTER
+    category: NORMAL
+    description: The from(Temporal) YearQuarter branch creates a complete quarter.
+    preconditions:
+    - Construct range = LocalDateRange.from(YearQuarter.of(2024, 1)).
+    - The resulting range is the finite first quarter of a leap year.
+    expectedSourceBehavior:
+    - lengthInDays() returns the actual quarter day count.
+    - The relation checks a finite increase of 23.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FROM_YEAR_WEEK
+    category: NORMAL
+    description: The from(Temporal) YearWeek branch creates a Monday-through-Sunday
+      closed week.
+    preconditions:
+    - Construct range = LocalDateRange.from(YearWeek.of(2024, 1)).
+    - The resulting half-open range contains exactly seven days and has a safe finite
+      end.
+    expectedSourceBehavior:
+    - lengthInDays() returns 7.
+    - The follow-up output is 30.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PARSE_DATE_DATE
+    category: NORMAL
+    description: Parsing two dates creates a finite half-open range.
+    preconditions:
+    - Construct range = LocalDateRange.parse("2024-01-01/2024-01-10").
+    - The parsed source length is 9 and the end permits plusDays(23).
+    expectedSourceBehavior:
+    - lengthInDays() returns 9.
+    - The follow-up relation checks an output increase of 23.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PARSE_DATE_PERIOD
+    category: NORMAL
+    description: Parsing a date followed by a Period creates the end by adding the
+      parsed Period.
+    preconditions:
+    - Construct range = LocalDateRange.parse("2024-01-01/P10D").
+    - The resulting range is finite and has length 10.
+    expectedSourceBehavior:
+    - lengthInDays() returns the length after Period addition.
+    - The follow-up output is 33.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PARSE_PERIOD_DATE
+    category: NORMAL
+    description: Parsing a Period followed by a date creates the start by subtracting
+      the Period from the parsed end.
+    preconditions:
+    - Construct range = LocalDateRange.parse("P10D/2024-01-11").
+    - The resulting range is 2024-01-01 through 2024-01-11 exclusive.
+    expectedSourceBehavior:
+    - lengthInDays() returns 10.
+    - The follow-up output is 33.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UNBOUNDED_START_SENTINEL
+    category: EDGE
+    description: A range with LocalDate.MIN as its start and an ordinary finite end
+      reaches the unbounded-range sentinel path.
+    preconditions:
+    - Construct range = LocalDateRange.ofUnboundedStart(2024-01-01).
+    - The end is finite and at least 23 days before LocalDate.MAX.
+    expectedSourceBehavior:
+    - lengthInDays() returns Integer.MAX_VALUE because the range is unbounded at the
+      start.
+    - The follow-up remains unbounded at the start, and the supplied assertion skips
+      when it sees the sentinel output.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MINIMUM_START_PLUS_ONE
+    category: BOUNDARY
+    description: A finite one-day range begins at the date immediately after LocalDate.MIN,
+      the closest permitted finite start to the lower boundary.
+    preconditions:
+    - Construct range = LocalDateRange.of(LocalDate.MIN.plusDays(1), LocalDate.MIN.plusDays(2)).
+    - The end is permitted because only LocalDate.MIN and LocalDate.MIN.plusDays(1)
+      are forbidden as an end.
+    expectedSourceBehavior:
+    - lengthInDays() returns 1 and does not use the unbounded-start sentinel.
+    - The follow-up is constructible and has length 24.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MINIMUM_START_WITH_NEAR_BOUNDARY_END
+    category: BOUNDARY
+    description: A finite range starts at LocalDate.MIN and ends at the first permitted
+      end after the lower-bound exclusions.
+    preconditions:
+    - Construct range = LocalDateRange.of(LocalDate.MIN, LocalDate.MIN.plusDays(2)).
+    - The source is unbounded at the start but its end is finite and follow-up-safe.
+    expectedSourceBehavior:
+    - lengthInDays() returns Integer.MAX_VALUE through the unbounded-start sentinel
+      path.
+    - The follow-up remains sentinel-valued and the relation skips arithmetic.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MAXIMUM_SIDE_FINITE_START
+    category: BOUNDARY
+    description: A finite range uses a start close to LocalDate.MAX while retaining
+      a bounded end.
+    preconditions:
+    - Construct range = LocalDateRange.of(LocalDate.MAX.minusDays(25), LocalDate.MAX.minusDays(23)).
+    - The start is not LocalDate.MAX.minusDays(1), the end is bounded, and end.plusDays(23)
+      equals LocalDate.MAX.
+    expectedSourceBehavior:
+    - lengthInDays() returns the finite two-day difference.
+    - The follow-up construction reaches an unbounded end, so the supplied assertion
+      skips because the follow-up output is the unbounded sentinel.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: END_PLUS_23_REACHES_MAX
+    category: EDGE
+    description: A finite source whose end is exactly 23 days before LocalDate.MAX
+      exercises the follow-up's transition to an unbounded end.
+    preconditions:
+    - Use a finite start at least 24 days before LocalDate.MAX and set end = LocalDate.MAX.minusDays(23).
+    - The source end.plusDays(23) equals LocalDate.MAX without arithmetic overflow.
+    expectedSourceBehavior:
+    - The source length is finite.
+    - The follow-up is valid but unbounded at the end; the assertion intentionally
+      skips the relation when followUpOutput is Integer.MAX_VALUE.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: INT_MAX_MINUS_23_LENGTH
+    category: BOUNDARY
+    description: A finite range whose mathematical source length is Integer.MAX_VALUE
+      minus 23 reaches the largest source value that extends mathematically to Integer.MAX_VALUE.
+    preconditions:
+    - Construct with LocalDateRange.of(start, end) such that end.toEpochDay() - start.toEpochDay()
+      equals Integer.MAX_VALUE - 23.
+    - Choose dates sufficiently before LocalDate.MAX so end.plusDays(23) is representable
+      and the follow-up remains finite.
+    expectedSourceBehavior:
+    - lengthInDays() returns the int result for a span of Integer.MAX_VALUE - 23 days.
+    - The follow-up's mathematical length is Integer.MAX_VALUE, exercising collision
+      between a finite length and the unbounded sentinel value.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: INT_MAX_MINUS_22_LENGTH
+    category: BOUNDARY
+    description: A finite range whose source length is one day beyond the previous
+      int boundary tests follow-up arithmetic at Integer.MAX_VALUE plus one.
+    preconditions:
+    - Construct a finite range with epoch-day difference Integer.MAX_VALUE - 22.
+    - The end is at least 23 days before LocalDate.MAX.
+    expectedSourceBehavior:
+    - lengthInDays() returns the API's int representation for the source span.
+    - The follow-up increases the mathematical span by 23 and exercises the int result
+      boundary immediately beyond Integer.MAX_VALUE.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: INT_MAX_MINUS_1_LENGTH
+    category: BOUNDARY
+    description: A finite span ending one day below Integer.MAX_VALUE tests a 23-day
+      extension across the int boundary.
+    preconditions:
+    - Construct a finite range whose epoch-day difference is Integer.MAX_VALUE - 1.
+    - The dates are chosen so the end can be moved 23 days later.
+    expectedSourceBehavior:
+    - lengthInDays() is invoked on a valid finite range near the maximum representable
+      int result.
+    - The follow-up exercises the relation's int subtraction after a mathematically
+      valid 23-day extension.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FINITE_LENGTH_EQUALS_INT_MAX
+    category: EDGE
+    description: A mathematically finite range of exactly Integer.MAX_VALUE days tests
+      collision with the sentinel value returned for unbounded ranges.
+    preconditions:
+    - Construct a finite range with end.toEpochDay() - start.toEpochDay() equal to
+      Integer.MAX_VALUE.
+    - The source end is at least 23 days before LocalDate.MAX.
+    expectedSourceBehavior:
+    - lengthInDays() is invoked on a bounded range even though its int result equals
+      Integer.MAX_VALUE.
+    - The supplied relation treats that output as the sentinel and may skip, exposing
+      the API/relation value collision.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LENGTH_GREATER_THAN_INT_MAX
+    category: EDGE
+    description: A valid bounded range with a mathematical length greater than Integer.MAX_VALUE
+      exercises the target's int-return boundary without excluding reachable valid
+      input.
+    preconditions:
+    - Construct a finite range with epoch-day difference greater than Integer.MAX_VALUE
+      and with end at least 23 days before LocalDate.MAX.
+    - The source has neither an unbounded start nor an unbounded end.
+    expectedSourceBehavior:
+    - lengthInDays() is invoked on the valid bounded range and its int-valued result
+      is observed.
+    - The follow-up is also bounded and 23 mathematical days longer, allowing the
+      metamorphic assertion to reveal any int-representation or subtraction limitation.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FINITE_RANGE_FROM_BOUNDARY_SAFE_END
+    category: NORMAL
+    description: A long but ordinary finite range whose end is deliberately separated
+      from LocalDate.MAX by more than the required extension.
+    preconditions:
+    - 'Use two cases created with LocalDateRange.of: 1900-01-01/1901-01-01 and 2000-01-01/2025-01-01.'
+    - Both ends are at least 23 days before LocalDate.MAX and neither range is unbounded.
+    expectedSourceBehavior:
+    - lengthInDays() returns each actual finite whole-day difference.
+    - Both follow-ups remain finite and the relation checks an increase of exactly
+      23.
+    targetCases: 2
+    emptyOutputAllowed: false

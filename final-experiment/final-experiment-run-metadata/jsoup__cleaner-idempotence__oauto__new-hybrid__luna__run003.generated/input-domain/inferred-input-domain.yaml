@@ -1,0 +1,505 @@
+InputDomain:
+  summary: Non-null HTML body fragments, non-null base URI strings, and non-null Safelist
+    policies covering empty, built-in, copied, relative-link, tag, attribute, protocol,
+    entity, and malformed-markup paths of Jsoup.clean; every case is checked for idempotence
+    by cleaning its source output again with the same base URI and Safelist.
+  globalConstraints:
+  - bodyHtml is a non-null java.lang.String; the domain includes the empty string,
+    whitespace-only strings, ordinary text, HTML markup, character references, malformed
+    markup, and strings containing non-ASCII UTF-16 content.
+  - baseUri is a non-null java.lang.String; it may be empty, absolute HTTP or HTTPS,
+    absolute non-HTTP, relative-looking, or syntactically unusual because Jsoup.clean
+    accepts the String directly and the supplied MR rejects only null.
+  - safelist is a non-null org.jsoup.safety.Safelist obtained from a supplied public
+    constructor, one of the supplied factory methods, or a copy of such a Safelist;
+    no null Safelist is used because generateFollowUp calls Objects.requireNonNull.
+  - Each source case invokes exactly Jsoup.clean(bodyHtml, baseUri, safelist), and
+    its follow-up invokes Jsoup.clean(sourceOutput, baseUri, safelist) as required
+    by generateFollowUp.
+  - The source and follow-up use the same baseUri object value and the same Safelist
+    object value; the expected relation is exact String equality between the two cleaning
+    results.
+  - No assertion depends on an output being non-empty unless the source fragment contains
+    retained text or an allowed element; structural-only or fully removed input may
+    validly produce an empty output.
+  diversity:
+    bodyShape:
+    - empty
+    - plain text
+    - allowed element
+    - disallowed element
+    - nested mixed elements
+    - malformed or unbalanced markup
+    - character references
+    - URL-bearing element
+    - comment or metadata-like markup
+    safelistConstruction:
+    - new Safelist()
+    - Safelist.none()
+    - Safelist.simpleText()
+    - Safelist.basic()
+    - Safelist.basicWithImages()
+    - Safelist.relaxed()
+    - copy of a supplied Safelist
+    baseUriClass:
+    - empty string
+    - absolute HTTP URI
+    - absolute HTTPS URI
+    - non-HTTP absolute-looking URI
+    - relative-looking URI
+    policyInteraction:
+    - text-only retention
+    - allowed tag retention
+    - attribute filtering
+    - URL protocol filtering
+    - relative URL resolution
+    - image policy
+    - nested policy filtering
+    - enforced or normalized attributes
+    sourceComplexity:
+    - zero characters
+    - single text node
+    - single element
+    - multiple sibling elements
+    - nested depth at least two
+    - mixed text and markup
+    - malformed nesting
+  scenarios:
+  - id: EMPTY_FRAGMENT_WITH_NONE_POLICY
+    category: EDGE
+    description: An empty body fragment is cleaned with Safelist.none() and an empty
+      base URI.
+    preconditions:
+    - bodyHtml equals the empty string.
+    - baseUri equals the empty string.
+    - safelist is Safelist.none().
+    expectedSourceBehavior:
+    - Jsoup.clean parses the empty body fragment and returns a String, possibly empty.
+    - The follow-up receives the source String and must produce exactly the same String.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: WHITESPACE_ONLY_TEXT
+    category: EDGE
+    description: A whitespace-only fragment exercises body-fragment parsing without
+      element filtering.
+    preconditions:
+    - bodyHtml contains at least one HTML whitespace character and no non-whitespace
+      character.
+    - baseUri is empty.
+    - safelist is Safelist.none().
+    expectedSourceBehavior:
+    - Cleaning processes the fragment as text under the text-only policy.
+    - The result is suitable as the follow-up source without introducing a non-idempotent
+      second-cleaning change.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: PLAIN_TEXT_NONE_POLICY
+    category: NORMAL
+    description: Plain text containing punctuation and a character that could be confused
+      with markup is cleaned under the text-only policy.
+    preconditions:
+    - bodyHtml contains no element start or end tags and contains at least one non-whitespace
+      character.
+    - bodyHtml contains at least one of &, <, >, or a quote character.
+    - safelist is Safelist.none().
+    - baseUri is empty.
+    expectedSourceBehavior:
+    - Text is retained as HTML text and any required escaping is represented in the
+      returned HTML String.
+    - The returned escaped representation remains stable when cleaned again.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DISALLOWED_ELEMENT_TEXT_RETENTION
+    category: NORMAL
+    description: A fragment contains a disallowed element surrounding ordinary text.
+    preconditions:
+    - bodyHtml contains one element tag not permitted by Safelist.none() and contains
+      non-whitespace text inside or adjacent to that element.
+    - baseUri is empty.
+    - safelist is Safelist.none().
+    expectedSourceBehavior:
+    - The unsafe element markup is not retained as an allowed element, while the cleaner
+      processes the contained text according to the text-only policy.
+    - The source output, including any retained text escaping, is a valid follow-up
+      source.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SIMPLE_TEXT_POLICY_MARKUP
+    category: NORMAL
+    description: A fragment mixes plain text with markup under Safelist.simpleText().
+    preconditions:
+    - bodyHtml contains at least two text runs and at least one element tag.
+    - safelist is Safelist.simpleText().
+    - baseUri is an empty string.
+    expectedSourceBehavior:
+    - The result exercises simple-text filtering and returns the retained text representation
+      rather than relying on an untouched-input fast path.
+    - A second clean uses that returned representation and must not change it.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BASIC_ALLOWED_INLINE_ELEMENTS
+    category: NORMAL
+    description: Basic-policy-allowed inline markup is combined with text and a nested
+      allowed inline element.
+    preconditions:
+    - bodyHtml contains nested inline tags selected from common basic-policy markup,
+      such as a paragraph, emphasis, or strong element.
+    - At least one text node is present.
+    - safelist is Safelist.basic().
+    - baseUri is an absolute HTTPS URI.
+    expectedSourceBehavior:
+    - Allowed elements and their permitted text content are candidates for retention.
+    - The output is passed unchanged as the next source, testing idempotence across
+      retained element serialization.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BASIC_DISALLOWED_SCRIPT_WITH_TEXT
+    category: NORMAL
+    description: Basic policy receives a fragment containing an unsafe script element
+      and visible surrounding text.
+    preconditions:
+    - bodyHtml contains a script element and non-script text before or after it.
+    - safelist is Safelist.basic().
+    - baseUri is an absolute HTTPS URI.
+    expectedSourceBehavior:
+    - Unsafe markup is filtered by the Cleaner while ordinary retained content is
+      still processed.
+    - The resulting safe fragment must be stable under the developer-provided second
+      cleaning.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BASIC_ALLOWED_ATTRIBUTE_AND_REMOVED_ATTRIBUTE
+    category: NORMAL
+    description: One basic-policy element carries both a policy-permitted attribute
+      candidate and an unrelated attribute candidate.
+    preconditions:
+    - bodyHtml contains an element allowed by Safelist.basic() with at least two attributes.
+    - One attribute is an attribute used by basic inline or link markup, and one attribute
+      is not part of that policy.
+    - baseUri is an absolute HTTP URI.
+    - safelist is Safelist.basic().
+    expectedSourceBehavior:
+    - Cleaner attribute filtering is exercised rather than only tag filtering.
+    - The normalized attribute set and serialization are used as the follow-up input.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BASIC_RELATIVE_LINK_WITH_EMPTY_BASE
+    category: BOUNDARY
+    description: A basic-policy link contains a relative URL while baseUri is empty.
+    preconditions:
+    - bodyHtml contains an allowed link element with a relative href value.
+    - baseUri equals the empty string.
+    - safelist is Safelist.basic().
+    expectedSourceBehavior:
+    - The clean method takes its ordinary empty-base path because the policy does
+      not preserve relative links by default unless configured otherwise.
+    - URL attribute filtering or normalization is exercised, and the result is checked
+      for exact second-clean equality.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BASIC_ABSOLUTE_HTTP_LINK
+    category: NORMAL
+    description: A basic-policy link contains an absolute HTTP URL with a non-empty
+      base URI.
+    preconditions:
+    - bodyHtml contains an allowed link element whose href begins with http://.
+    - baseUri equals https://example.test/path/.
+    - safelist is Safelist.basic().
+    expectedSourceBehavior:
+    - The non-empty-base branch is used and the URL protocol check sees an absolute
+      HTTP URL.
+    - The returned link markup, whether retained or normalized by the policy, is idempotent.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BASIC_UNSAFE_LINK_PROTOCOL
+    category: NORMAL
+    description: A basic-policy link contains a URL using a protocol outside the policy's
+      permitted URL protocols.
+    preconditions:
+    - bodyHtml contains an allowed link element whose href begins with a non-HTTP,
+      non-HTTPS protocol such as javascript:.
+    - baseUri is an absolute HTTPS URI.
+    - safelist is Safelist.basic().
+    expectedSourceBehavior:
+    - URL protocol sanitization is exercised independently of element-name filtering.
+    - The source output is used verbatim as the follow-up body and must remain unchanged
+      by the second clean.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: BASIC_QUERY_AND_FRAGMENT_LINK
+    category: EDGE
+    description: A basic-policy link contains a relative URL with query and fragment
+      components.
+    preconditions:
+    - bodyHtml contains an allowed link with href equal in shape to page.html?x=1#part.
+    - baseUri equals https://example.test/root/.
+    - safelist is Safelist.basic().
+    expectedSourceBehavior:
+    - Relative URL resolution and URL attribute serialization are exercised with both
+      query and fragment syntax.
+    - The resolved or filtered result is stable under a second cleaning.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BASIC_WITH_IMAGES_ALLOWED_IMAGE
+    category: NORMAL
+    description: An image element with an allowed source URL is cleaned under the
+      image-enabled basic policy.
+    preconditions:
+    - bodyHtml contains an img element with a source URL and at least one text-adjacent
+      or surrounding node.
+    - safelist is Safelist.basicWithImages().
+    - baseUri equals https://example.test/assets/.
+    expectedSourceBehavior:
+    - Image-specific element and URL handling is exercised.
+    - The serialized image result is cleaned again with the same image-enabled policy
+      for exact equality.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BASIC_WITH_IMAGES_UNSAFE_IMAGE_URL
+    category: NORMAL
+    description: An image element is present but its source uses an unsafe URL protocol.
+    preconditions:
+    - bodyHtml contains an img element whose src uses a non-permitted protocol.
+    - safelist is Safelist.basicWithImages().
+    - baseUri is an absolute HTTPS URI.
+    expectedSourceBehavior:
+    - Image tag allowance and URL protocol filtering are both reached.
+    - The output may omit the unsafe image attribute or image content, but whatever
+      is returned must be idempotent.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: RELAXED_TABLE_STRUCTURE
+    category: NORMAL
+    description: A relaxed policy processes nested table-related elements with text
+      in cells.
+    preconditions:
+    - bodyHtml contains a table-shaped fragment with at least one row-like element,
+      one cell-like element, and non-whitespace cell text.
+    - safelist is Safelist.relaxed().
+    - baseUri is https://example.test/.
+    expectedSourceBehavior:
+    - The policy's broader element set is exercised on nested structure rather than
+      a single inline tag.
+    - The returned structural HTML is used as the second input and must remain exactly
+      equal after cleaning.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: RELAXED_FORM_CONTROLS
+    category: NORMAL
+    description: A relaxed policy processes a form-like fragment containing multiple
+      nested control elements and attributes.
+    preconditions:
+    - bodyHtml contains a form-like element and at least two nested control or label-like
+      elements.
+    - At least one nested element has an attribute.
+    - safelist is Safelist.relaxed().
+    - baseUri is an absolute HTTP URI.
+    expectedSourceBehavior:
+    - Broader tag and attribute filtering is exercised across siblings and nesting.
+    - The normalized output is tested as a complete follow-up fragment.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: RELATIVE_LINK_PRESERVATION_SENTINEL_BRANCH
+    category: BOUNDARY
+    description: A Safelist configured to preserve relative links is used with an
+      empty base URI, directly reaching Jsoup.clean's DummyUri assignment branch.
+    preconditions:
+    - safelist is a non-null Safelist configured with preserveRelativeLinks(true),
+      such as a copy of Safelist.basic() with that setting.
+    - baseUri equals the empty string.
+    - bodyHtml contains an allowed link with a relative href.
+    expectedSourceBehavior:
+    - The condition baseUri.isEmpty() && safelist.preserveRelativeLinks() is true,
+      so the method substitutes its internal DummyUri before parsing.
+    - The placeholder URI must not appear as leaked output according to the source
+      comment; the resulting link representation is checked for idempotence.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: RELATIVE_LINK_PRESERVATION_NONEMPTY_BASE
+    category: BOUNDARY
+    description: The same relative-link-preserving policy is used with a non-empty
+      base URI.
+    preconditions:
+    - safelist is configured with preserveRelativeLinks(true).
+    - baseUri equals https://example.test/base/.
+    - bodyHtml contains an allowed relative link.
+    expectedSourceBehavior:
+    - The DummyUri branch is not taken because baseUri is non-empty.
+    - Normal base-URI URL resolution and policy filtering are exercised, followed
+      by exact idempotence checking.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EMPTY_BASE_NONPRESERVING_POLICY
+    category: BOUNDARY
+    description: An empty base URI is paired with a policy whose preserveRelativeLinks
+      value is false.
+    preconditions:
+    - baseUri equals the empty string.
+    - safelist.preserveRelativeLinks() is false.
+    - bodyHtml contains at least one URL-bearing allowed element.
+    expectedSourceBehavior:
+    - The sentinel-assignment condition is false even though the base URI is empty.
+    - URL handling proceeds through the non-preserving policy path and the output
+      is stable on re-cleaning.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: NONHTTP_BASE_URI
+    category: EDGE
+    description: A URL-bearing fragment is cleaned with a non-HTTP absolute-looking
+      base URI.
+    preconditions:
+    - baseUri is non-empty and begins with a scheme other than http or https.
+    - bodyHtml contains an allowed URL-bearing element with a relative URL.
+    - safelist is Safelist.basic() or Safelist.basicWithImages().
+    expectedSourceBehavior:
+    - The non-empty base URI is passed to parseBodyFragment and URL normalization
+      is exercised without relying on an empty-base sentinel.
+    - The result, including any protocol-based filtering, must be idempotent.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: COPY_OF_BASIC_POLICY
+    category: NORMAL
+    description: A copied Safelist.basic() policy is used to verify that policy construction
+      through the supplied copy constructor reaches the same cleaner with an independent
+      policy instance.
+    preconditions:
+    - safelist is new Safelist(Safelist.basic()).
+    - bodyHtml contains an allowed element, a URL-bearing attribute, and an attribute
+      candidate subject to filtering.
+    - baseUri equals https://example.test/.
+    expectedSourceBehavior:
+    - Cleaning uses the copied policy object rather than the factory instance while
+      exercising tag, attribute, and URL handling together.
+    - The source result and the result of cleaning that result with the same copied
+      policy are exactly equal.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEW_EMPTY_SAFELIST_WITH_MIXED_MARKUP
+    category: NORMAL
+    description: The public no-argument Safelist constructor is used with mixed allowed-looking
+      and unsafe markup.
+    preconditions:
+    - safelist is created with new Safelist().
+    - bodyHtml contains at least one element, one attribute, and surrounding text.
+    - baseUri equals https://example.test/.
+    expectedSourceBehavior:
+    - The constructor-created policy exercises filtering independent of the named
+      built-in factory policies.
+    - The output may retain text while removing unsupported markup and must be unchanged
+      by the follow-up clean.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: MALFORMED_UNBALANCED_NESTING
+    category: EDGE
+    description: A malformed body fragment has unclosed and misnested tags but contains
+      visible text.
+    preconditions:
+    - bodyHtml contains at least one opening tag without a matching close or contains
+      crossing/misnested tags.
+    - bodyHtml contains non-whitespace text.
+    - safelist is Safelist.relaxed().
+    - baseUri is https://example.test/.
+    expectedSourceBehavior:
+    - parseBodyFragment's HTML normalization and Cleaner traversal are exercised before
+      the result is serialized.
+    - The normalized serialization returned by the first clean remains unchanged on
+      the second clean.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CHARACTER_REFERENCE_NORMALIZATION
+    category: EDGE
+    description: Text contains named and numeric character references adjacent to
+      markup.
+    preconditions:
+    - bodyHtml contains at least one named or numeric HTML character reference and
+      at least one element boundary.
+    - safelist is Safelist.none() or Safelist.simpleText().
+    - baseUri is empty.
+    expectedSourceBehavior:
+    - HTML parsing and output escaping are exercised even when element retention is
+      minimal.
+    - The escaped output representation is used as the follow-up source and must satisfy
+      exact String equality.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: COMMENTS_AND_METADATA_MARKUP
+    category: NORMAL
+    description: A fragment combines a comment or metadata-like element with visible
+      text and an allowed inline element.
+    preconditions:
+    - bodyHtml contains at least one comment or metadata-like construct and at least
+      one visible text node.
+    - bodyHtml also contains an element candidate covered by the selected policy.
+    - safelist is Safelist.basic().
+    - baseUri is https://example.test/.
+    expectedSourceBehavior:
+    - Filtering of non-content markup is combined with ordinary allowed-content cleaning.
+    - The complete returned body fragment is re-cleaned to test idempotence beyond
+      a single removed node.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SIBLING_ORDER_AND_DUPLICATE_NODES
+    category: NORMAL
+    description: Several sibling nodes alternate retained text, allowed elements,
+      and disallowed elements.
+    preconditions:
+    - bodyHtml contains at least five sibling-level nodes in a fixed order.
+    - At least two siblings are text nodes, at least one is allowed by the selected
+      policy, and at least one is not.
+    - safelist is Safelist.basic().
+    - baseUri is an absolute HTTPS URI.
+    expectedSourceBehavior:
+    - Cleaner traversal and output ordering are exercised across multiple siblings
+      rather than one isolated element.
+    - The complete ordered source output is stable under the generated follow-up.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NONASCII_AND_UTF16_TEXT
+    category: EDGE
+    description: A retained text fragment contains non-ASCII characters, combining
+      marks, and a supplementary Unicode code point.
+    preconditions:
+    - bodyHtml contains at least one non-ASCII code point and at least one supplementary
+      code point represented by a UTF-16 surrogate pair.
+    - bodyHtml contains no required external resource.
+    - safelist is Safelist.none().
+    - baseUri is empty.
+    expectedSourceBehavior:
+    - Text parsing and HTML serialization operate on the Java String value without
+      changing the follow-up relation.
+    - The returned HTML String is re-cleaned under the same text-only policy for exact
+      equality.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: URL_ATTRIBUTE_WITH_ENTITY_ENCODING
+    category: EDGE
+    description: An allowed URL-bearing element has an href or src value containing
+      an entity-encoded delimiter and a relative path.
+    preconditions:
+    - bodyHtml contains an allowed URL-bearing element whose URL includes an entity
+      reference or escaped query delimiter.
+    - baseUri equals https://example.test/root/.
+    - safelist is Safelist.basic() or Safelist.basicWithImages().
+    expectedSourceBehavior:
+    - Parsing, URL attribute protocol checking, relative resolution, and output escaping
+      are combined.
+    - The normalized URL attribute and surrounding markup remain unchanged after the
+      follow-up cleaning.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FULLY_FILTERED_STRUCTURAL_FRAGMENT
+    category: BOUNDARY
+    description: The fragment consists only of markup that the selected policy does
+      not retain and has no visible text.
+    preconditions:
+    - bodyHtml contains at least one element or comment but no non-whitespace text
+      outside attributes.
+    - safelist is Safelist.none() or new Safelist().
+    - baseUri is empty.
+    expectedSourceBehavior:
+    - The cleaner is required to process a fragment whose retained content may be
+      empty, avoiding an assumption that every valid call produces visible output.
+    - An empty or otherwise normalized result is cleaned again and must be exactly
+      idempotent.
+    targetCases: 1
+    emptyOutputAllowed: true
