@@ -1,0 +1,510 @@
+InputDomain:
+  summary: Non-null, detached jsoup Node roots and fresh-equivalent deterministic
+    NodeFilter policies; cases vary DOM shape, callback result, callback phase, sibling
+    position, and removal/termination path.
+  globalConstraints:
+  - arg0 is non-null and generateFollowUp(arg0, arg1) successfully creates a fresh
+    equivalent NodeFilter.
+  - The filter's decisions are deterministic functions of the visited node's clone-preserved
+    structure/type, sibling position, and depth; they do not depend on object identity,
+    time, randomness, prior mutable callback state, or external mutable state.
+  - The filter does not directly structurally mutate the DOM from head or tail; structural
+    changes are requested only by returning FilterResult.REMOVE, so both executions
+    have comparable terminal DOMs.
+  - 'arg1 is non-null and detached: root.parentNode() == null before the source invocation.'
+  - The source root and all descendants are cloneable such that root.clone().parentNode()
+    == null and clone-preserved outerHtml is defined.
+  - Null filter and null root inputs are excluded because the metamorphic follow-up
+    explicitly rejects them with Objects.requireNonNull rather than defining an output
+    relation.
+  diversity:
+    rootShape:
+    - distinct
+    - measurable
+    - leaf root; one-child root; chain of depth at least 3; branching root; three-or-more
+      siblings; mixed node kinds; detached document-like root
+    headResult:
+    - distinct
+    - measurable
+    - CONTINUE; SKIP_CHILDREN; SKIP_ENTIRELY; REMOVE; STOP
+    tailResult:
+    - distinct
+    - measurable
+    - CONTINUE; SKIP_CHILDREN; SKIP_ENTIRELY; REMOVE; STOP
+    cursorPosition:
+    - distinct
+    - measurable
+    - root; first child; middle sibling; last child; internal parent; deepest leaf
+    terminalPath:
+    - distinct
+    - measurable
+    - root completion; sibling advance; repeated ascent; head stop; tail stop; head
+      removal; tail removal
+  scenarios:
+  - id: LEAF_ROOT_CONTINUES
+    category: NORMAL
+    description: A detached leaf root whose head and tail both return CONTINUE.
+    preconditions:
+    - root.childNodeSize() == 0.
+    - head(root, 0) returns CONTINUE and tail(root, 0) returns CONTINUE.
+    expectedSourceBehavior:
+    - Exactly the root head and root tail are reached.
+    - The terminal result is CONTINUE and root.outerHtml() is unchanged.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SINGLE_CHILD_CONTINUE
+    category: NORMAL
+    description: A root with exactly one leaf child under an all-CONTINUE policy.
+    preconditions:
+    - root.childNodeSize() == 1 and root.childNode(0).childNodeSize() == 0.
+    - Every reached head and tail returns CONTINUE.
+    expectedSourceBehavior:
+    - Traversal descends from depth 0 to depth 1, tails the child, then tails the
+      root.
+    - The terminal result is CONTINUE with no DOM removal.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DEEP_CHAIN_REPEATED_ASCENT
+    category: BOUNDARY
+    description: A single-child chain with at least four nodes exercises repeated
+      no-sibling ascent.
+    preconditions:
+    - There is exactly one descendant path from root and its maximum depth is at least
+      3.
+    - Every reached head and tail returns CONTINUE.
+    expectedSourceBehavior:
+    - Each deepest-to-root tail is reached while the inner no-sibling loop repeatedly
+      ascends.
+    - The terminal result is CONTINUE.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BRANCHING_CONTINUE_ORDER
+    category: NORMAL
+    description: A root has a first child with a descendant and a later leaf sibling.
+    preconditions:
+    - root.childNodeSize() >= 2.
+    - root.childNode(0).childNodeSize() >= 1 and root.childNode(1).childNodeSize()
+      == 0.
+    - Every reached head and tail returns CONTINUE.
+    expectedSourceBehavior:
+    - The first child's descendants are completed before the second child head is
+      reached.
+    - The terminal result is CONTINUE and the DOM is unchanged.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WIDE_SIBLING_CONTINUE
+    category: BOUNDARY
+    description: A root with at least three leaf children exercises first, middle,
+      and last sibling transitions.
+    preconditions:
+    - root.childNodeSize() >= 3.
+    - Each direct child of root has childNodeSize() == 0.
+    - Every reached head and tail returns CONTINUE.
+    expectedSourceBehavior:
+    - All direct children are headed and tailed in sibling order.
+    - Only the last child takes the no-sibling ascent path.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MIXED_NODE_KINDS_CONTINUE
+    category: NORMAL
+    description: A detached composite root contains at least two distinct concrete
+      Node kinds among its descendants.
+    preconditions:
+    - root.childNodeSize() >= 2.
+    - At least two descendants have different runtime Node classes.
+    - Every reached head and tail returns CONTINUE.
+    expectedSourceBehavior:
+    - All node kinds are traversed by the same depth-first filter cursor.
+    - The terminal result is CONTINUE without structural change.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: HEAD_STOP_AT_ROOT
+    category: EDGE
+    description: The root head immediately requests STOP.
+    preconditions:
+    - head(root, 0) returns STOP.
+    expectedSourceBehavior:
+    - filter returns STOP immediately.
+    - No root tail or descendant callback is reached.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: HEAD_STOP_AT_DEEP_CHILD
+    category: EDGE
+    description: A non-root descendant head requests STOP after descent.
+    preconditions:
+    - root has a descendant at depth at least 2.
+    - Heads before the designated descendant return CONTINUE.
+    - head(designated descendant, designatedDepth) returns STOP.
+    expectedSourceBehavior:
+    - filter returns STOP at the designated head.
+    - No callback after that descendant head is reached.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: HEAD_STOP_AT_LATER_SIBLING
+    category: EDGE
+    description: The head of a later direct sibling requests STOP.
+    preconditions:
+    - root.childNodeSize() >= 2.
+    - All callbacks needed to finish root.childNode(0) return CONTINUE.
+    - head(root.childNode(1), 1) returns STOP.
+    expectedSourceBehavior:
+    - The first child is tailed before the second child head.
+    - filter returns STOP and does not tail the stopping sibling.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: HEAD_SKIP_CHILDREN_AT_ROOT
+    category: NORMAL
+    description: The root has descendants but its head returns SKIP_CHILDREN.
+    preconditions:
+    - root.childNodeSize() >= 1.
+    - head(root, 0) returns SKIP_CHILDREN.
+    - tail(root, 0) returns CONTINUE.
+    expectedSourceBehavior:
+    - No descendant head or tail is reached.
+    - The root tail is reached and the terminal result is CONTINUE.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: HEAD_SKIP_CHILDREN_AT_INTERNAL_NODE
+    category: NORMAL
+    description: An internal first child skips its own descendants while a later sibling
+      remains traversable.
+    preconditions:
+    - root.childNodeSize() >= 2.
+    - root.childNode(0).childNodeSize() >= 1.
+    - head(root.childNode(0), 1) returns SKIP_CHILDREN.
+    - tail(root.childNode(0), 1) and callbacks for root.childNode(1) return CONTINUE.
+    expectedSourceBehavior:
+    - No descendant of the first child is headed.
+    - The first child is tailed and traversal continues to the later sibling.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: HEAD_SKIP_CHILDREN_ON_LEAF
+    category: BOUNDARY
+    description: A leaf child head returns SKIP_CHILDREN.
+    preconditions:
+    - root has a leaf child at depth 1.
+    - head(the leaf, 1) returns SKIP_CHILDREN.
+    - tail(the leaf, 1) returns CONTINUE.
+    expectedSourceBehavior:
+    - The leaf still receives tail despite having no children.
+    - Traversal completes with terminal CONTINUE.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: HEAD_SKIP_ENTIRELY_AT_ROOT
+    category: EDGE
+    description: The root head requests SKIP_ENTIRELY.
+    preconditions:
+    - root.childNodeSize() >= 1.
+    - head(root, 0) returns SKIP_ENTIRELY.
+    expectedSourceBehavior:
+    - filter returns SKIP_ENTIRELY.
+    - Neither root tail nor any descendant callback is reached.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: HEAD_SKIP_ENTIRELY_AT_FIRST_CHILD
+    category: NORMAL
+    description: The first child has descendants and is skipped entirely, followed
+      by a traversed sibling.
+    preconditions:
+    - root.childNodeSize() >= 2.
+    - root.childNode(0).childNodeSize() >= 1.
+    - head(root.childNode(0), 1) returns SKIP_ENTIRELY.
+    - Callbacks for root.childNode(1) and root return CONTINUE.
+    expectedSourceBehavior:
+    - The skipped child receives no tail and none of its descendants are visited.
+    - Traversal advances to the second child and ultimately returns CONTINUE.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: HEAD_SKIP_ENTIRELY_AT_MIDDLE_SIBLING
+    category: BOUNDARY
+    description: A middle child of three siblings is skipped entirely.
+    preconditions:
+    - root.childNodeSize() >= 3.
+    - head(root.childNode(1), 1) returns SKIP_ENTIRELY.
+    - Callbacks for the first, third, and root nodes return CONTINUE.
+    expectedSourceBehavior:
+    - The first child completes before the middle child head.
+    - The middle child has no tail, and the third child is subsequently reached.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: HEAD_REMOVE_DETACHED_ROOT
+    category: EDGE
+    description: The detached root head requests REMOVE.
+    preconditions:
+    - root.parentNode() == null.
+    - head(root, 0) returns REMOVE.
+    expectedSourceBehavior:
+    - The root receives no tail and filter returns REMOVE.
+    - No descendant callback is reached.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: HEAD_REMOVE_FIRST_LEAF_CHILD
+    category: NORMAL
+    description: The first of at least two leaf children requests REMOVE from head.
+    preconditions:
+    - root.childNodeSize() >= 2 and root.childNode(0).childNodeSize() == 0.
+    - head(root.childNode(0), 1) returns REMOVE.
+    - Callbacks for later siblings and root return CONTINUE.
+    expectedSourceBehavior:
+    - The first child receives no tail and is removed after its next sibling is selected.
+    - The original next sibling is still traversed.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: HEAD_REMOVE_MIDDLE_CHILD
+    category: BOUNDARY
+    description: A middle child of three direct children requests REMOVE from head.
+    preconditions:
+    - root.childNodeSize() >= 3.
+    - head(root.childNode(1), 1) returns REMOVE.
+    - Callbacks before and after the middle child return CONTINUE.
+    expectedSourceBehavior:
+    - The middle child is absent from root's final children.
+    - The third original child is reached after removal.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: HEAD_REMOVE_LAST_CHILD
+    category: BOUNDARY
+    description: The last child requests REMOVE from head and has no sibling.
+    preconditions:
+    - root.childNodeSize() >= 1.
+    - head(root.childNode(root.childNodeSize() - 1), 1) returns REMOVE.
+    - Earlier callbacks and the root tail return CONTINUE.
+    expectedSourceBehavior:
+    - The last child is removed through the no-sibling ascent path.
+    - The parent root is subsequently tailed and terminal result is CONTINUE.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: HEAD_REMOVE_NONLEAF_SUBTREE
+    category: NORMAL
+    description: A non-leaf child requests REMOVE from head.
+    preconditions:
+    - root.childNodeSize() >= 2.
+    - root.childNode(0).childNodeSize() >= 1.
+    - head(root.childNode(0), 1) returns REMOVE.
+    - Callbacks for the later sibling and root return CONTINUE.
+    expectedSourceBehavior:
+    - The removed child and all of its descendants receive no further callbacks.
+    - The complete removed subtree is absent from final root.outerHtml().
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: TAIL_STOP_AT_ROOT
+    category: EDGE
+    description: Root head continues and root tail requests STOP.
+    preconditions:
+    - head(root, 0) returns CONTINUE.
+    - tail(root, 0) returns STOP.
+    expectedSourceBehavior:
+    - filter returns STOP from the root tail.
+    - No structural removal occurs.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: TAIL_STOP_AT_ONLY_CHILD
+    category: EDGE
+    description: The only leaf child tail requests STOP during ascent.
+    preconditions:
+    - root.childNodeSize() == 1 and root.childNode(0).childNodeSize() == 0.
+    - Heads through the child return CONTINUE.
+    - tail(root.childNode(0), 1) returns STOP.
+    expectedSourceBehavior:
+    - filter returns STOP before the root tail.
+    - The child remains attached.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: TAIL_STOP_BEFORE_NEXT_SIBLING
+    category: EDGE
+    description: The first child tail requests STOP despite an available next sibling.
+    preconditions:
+    - root.childNodeSize() >= 2.
+    - tail(root.childNode(0), 1) returns STOP.
+    - Heads through the first child return CONTINUE.
+    expectedSourceBehavior:
+    - filter returns STOP at the first child tail.
+    - The second child head is not reached.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: TAIL_REMOVE_FIRST_CHILD
+    category: NORMAL
+    description: The first leaf child tail requests REMOVE while a next sibling exists.
+    preconditions:
+    - root.childNodeSize() >= 2 and root.childNode(0).childNodeSize() == 0.
+    - head(root.childNode(0), 1) returns CONTINUE.
+    - tail(root.childNode(0), 1) returns REMOVE.
+    - Later callbacks return CONTINUE.
+    expectedSourceBehavior:
+    - The first child is removed after its next sibling is obtained.
+    - The next sibling is still traversed and the final result is CONTINUE.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: TAIL_REMOVE_LAST_CHILD
+    category: BOUNDARY
+    description: The last leaf child tail requests REMOVE and forces ascent.
+    preconditions:
+    - root.childNodeSize() >= 1.
+    - The designated last child is a leaf.
+    - tail(designated last child, 1) returns REMOVE.
+    - The root tail returns CONTINUE.
+    expectedSourceBehavior:
+    - The last child is removed after its parent is found.
+    - The removal result is reset to CONTINUE before the parent tail.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: TAIL_REMOVE_INTERNAL_PARENT
+    category: NORMAL
+    description: An internal child is removed from its tail after all of its descendants
+      complete.
+    preconditions:
+    - root.childNodeSize() >= 2.
+    - root.childNode(0).childNodeSize() >= 1.
+    - Descendant callbacks of root.childNode(0) return CONTINUE.
+    - tail(root.childNode(0), 1) returns REMOVE.
+    expectedSourceBehavior:
+    - The internal child's descendants are visited before the child is removed.
+    - The entire internal subtree is absent from final root.outerHtml().
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: TAIL_REMOVE_DETACHED_ROOT
+    category: EDGE
+    description: The detached root tail requests REMOVE.
+    preconditions:
+    - root.parentNode() == null.
+    - head(root, 0) returns CONTINUE.
+    - tail(root, 0) returns REMOVE.
+    expectedSourceBehavior:
+    - filter returns REMOVE at root completion.
+    - No descendant is visited when the root is a leaf, and no parent exists for root
+      removal.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: TAIL_SKIP_CHILDREN_AT_ROOT
+    category: EDGE
+    description: The root tail returns SKIP_CHILDREN after ordinary traversal.
+    preconditions:
+    - All reached heads return CONTINUE.
+    - All non-root tails return CONTINUE.
+    - tail(root, 0) returns SKIP_CHILDREN.
+    expectedSourceBehavior:
+    - All descendants complete before the root tail.
+    - filter returns SKIP_CHILDREN without removing nodes.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: TAIL_SKIP_ENTIRELY_AT_ROOT
+    category: EDGE
+    description: The root tail returns SKIP_ENTIRELY after ordinary traversal.
+    preconditions:
+    - All reached heads return CONTINUE.
+    - All non-root tails return CONTINUE.
+    - tail(root, 0) returns SKIP_ENTIRELY.
+    expectedSourceBehavior:
+    - All descendants complete before the root tail.
+    - filter returns SKIP_ENTIRELY without removing nodes.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: TAIL_SKIP_CHILDREN_WITH_NEXT_SIBLING
+    category: NORMAL
+    description: A first child tail returns SKIP_CHILDREN while a sibling follows.
+    preconditions:
+    - root.childNodeSize() >= 2.
+    - tail(root.childNode(0), 1) returns SKIP_CHILDREN.
+    - Callbacks for the second child and root return CONTINUE.
+    expectedSourceBehavior:
+    - The first child is not removed.
+    - Traversal still proceeds to the second child and terminates with CONTINUE.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: TAIL_SKIP_ENTIRELY_WITH_ASCENT
+    category: NORMAL
+    description: An only child tail returns SKIP_ENTIRELY and traversal ascends to
+      root.
+    preconditions:
+    - root.childNodeSize() == 1.
+    - tail(root.childNode(0), 1) returns SKIP_ENTIRELY.
+    - tail(root, 0) returns CONTINUE.
+    expectedSourceBehavior:
+    - The child is not removed.
+    - The non-CONTINUE child tail result is reset during ascent and the terminal result
+      is CONTINUE.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SELECTIVE_SKIP_AND_REMOVE
+    category: NORMAL
+    description: One branch is skipped by head and a distinct later leaf is removed
+      by head.
+    preconditions:
+    - root.childNodeSize() >= 3.
+    - root.childNode(0).childNodeSize() >= 1.
+    - head(root.childNode(0), 1) returns SKIP_CHILDREN.
+    - head(root.childNode(1), 1) returns REMOVE.
+    - Other reached callbacks return CONTINUE.
+    expectedSourceBehavior:
+    - The first branch's descendants remain attached but unvisited.
+    - The second child is removed and the later child remains traversed.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SELECTIVE_TAIL_REMOVE_AFTER_DESCENT
+    category: NORMAL
+    description: A branch is fully traversed and then removed by its tail, while a
+      later sibling remains.
+    preconditions:
+    - root.childNodeSize() >= 2.
+    - root.childNode(0).childNodeSize() >= 1.
+    - All callbacks in the first subtree except its root tail return CONTINUE.
+    - tail(root.childNode(0), 1) returns REMOVE.
+    expectedSourceBehavior:
+    - The first subtree's descendants are visited before subtree removal.
+    - The later sibling is visited after removal.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EMPTY_ELEMENT_ROOT
+    category: BOUNDARY
+    description: A detached Element root has zero children, distinct from a non-Element
+      leaf root.
+    preconditions:
+    - root is an Element.
+    - root.childNodeSize() == 0.
+    - head(root, 0) and tail(root, 0) return CONTINUE.
+    expectedSourceBehavior:
+    - The same leaf cursor path is used with an Element root.
+    - The terminal result is CONTINUE and outerHtml is unchanged.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NON_ELEMENT_LEAF_ROOT
+    category: BOUNDARY
+    description: A detached non-Element Node root is a leaf.
+    preconditions:
+    - root is not an Element.
+    - root.childNodeSize() == 0.
+    - head(root, 0) and tail(root, 0) return CONTINUE.
+    expectedSourceBehavior:
+    - filter invokes head and tail on the non-Element root.
+    - The terminal result is CONTINUE.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DOCUMENT_LIKE_DETACHED_ROOT
+    category: NORMAL
+    description: A detached non-leaf document-like root is traversed with ordinary
+      continuation.
+    preconditions:
+    - root.parentNode() == null and root.childNodeSize() >= 1.
+    - root is not an Element.
+    - Every reached head and tail returns CONTINUE.
+    expectedSourceBehavior:
+    - Traversal descends through the root's children and returns to tail the root.
+    - The terminal result is CONTINUE with clone-equivalent final outerHtml.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: TYPE_SELECTIVE_POLICY
+    category: NORMAL
+    description: A mixed-node tree uses a clone-preserved node-type predicate to select
+      a non-Element descendant.
+    preconditions:
+    - root has at least one Element descendant and at least one non-Element descendant.
+    - The policy returns SKIP_ENTIRELY or REMOVE for one designated runtime node class
+      and CONTINUE otherwise.
+    - The designated node is not root.
+    expectedSourceBehavior:
+    - The selected node follows its requested result path while other node kinds remain
+      traversable.
+    - The terminal result and final outerHtml are determined solely by clone-preserved
+      node structure.
+    targetCases: 1
+    emptyOutputAllowed: false

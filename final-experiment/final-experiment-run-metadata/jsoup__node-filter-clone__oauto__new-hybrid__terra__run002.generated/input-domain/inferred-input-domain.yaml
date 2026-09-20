@@ -1,0 +1,477 @@
+InputDomain:
+  summary: Detached jsoup Node roots paired with fresh, clone-equivalent NodeFilter
+    policies that deterministically return FilterResult values from clone-stable node
+    properties, exercising depth-first descent, sibling progression, ascent, callback
+    suppression, removal, stopping, and terminal-result paths.
+  globalConstraints:
+  - '{arg0 is non-null and implements NodeFilter; its class must be reproducibly copyable
+    by generateFollowUp=either it has an accessible declared zero-argument constructor,
+    or its non-static declared fields can be supplied in declared-field order to an
+    accessible declared constructor with compatible parameter types.}'
+  - arg0 must begin in the same behaviorally relevant state as a newly constructed
+    equivalent filter and must make callback decisions only from clone-stable observable
+    inputs such as node type, node name, text/data, attributes, depth, sibling index,
+    and immutable copied fields.
+  - arg0 must not depend on object identity, external mutable state, time, randomness,
+    prior executions, or references to the source DOM, because generateFollowUp invokes
+    a fresh filter on a deep clone.
+  - arg0 must not perform DOM mutations directly from head or tail; the only structural
+    mutation covered is NodeTraversor.filter's documented REMOVE handling.
+  - '{arg1 is non-null and detached before invocation=root.parentNode() == null, as
+    required by generateFollowUp.}'
+  - Attached roots are excluded because generateFollowUp explicitly rejects any root
+    whose parentNode() is non-null.
+  - Null filters and null roots are excluded because generateFollowUp explicitly requires
+    both arguments to be non-null; the metamorphic relation does not request invalid-input
+    testing.
+  diversity:
+    rootNodeKind:
+    - Element
+    - Document
+    - TextNode
+    - Comment
+    - DataNode
+    - DocumentType
+    - XmlDeclaration
+    rootTopology:
+    - leaf
+    - one-child chain
+    - depth-three chain
+    - multiple siblings
+    - nested siblings
+    - mixed node types
+    headResult:
+    - CONTINUE
+    - SKIP_CHILDREN
+    - SKIP_ENTIRELY
+    - REMOVE
+    - STOP
+    - 'null'
+    tailResult:
+    - CONTINUE
+    - SKIP_CHILDREN
+    - SKIP_ENTIRELY
+    - REMOVE
+    - STOP
+    - 'null'
+    removalPosition:
+    - root
+    - first child with sibling
+    - final child without sibling
+    - nested child
+    traversalBoundary:
+    - root terminal path
+    - descend path
+    - sibling path
+    - upward ascent path
+    - callback-suppression path
+  scenarios:
+  - id: ELEMENT_LEAF_CONTINUE
+    category: NORMAL
+    description: A detached Element root with no children and a filter returning CONTINUE
+      from both callbacks.
+    preconditions:
+    - root is an Element with childNodeSize() == 0 and parentNode() == null.
+    - filter.head(root, 0) returns CONTINUE.
+    - filter.tail(root, 0) returns CONTINUE.
+    expectedSourceBehavior:
+    - head and tail are each called exactly once for the root at depth 0.
+    - filter returns CONTINUE and root.outerHtml() is unchanged.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DOCUMENT_ROOT_WITH_SINGLE_ELEMENT_CHILD
+    category: NORMAL
+    description: A detached Document root exercises traversal where the root itself
+      has a child and traversal descends from depth 0.
+    preconditions:
+    - root is a Document with parentNode() == null and exactly one child Element.
+    - the child Element has childNodeSize() == 0.
+    - filter returns CONTINUE from every head and tail callback.
+    expectedSourceBehavior:
+    - '{callbacks occur in depth-first order=Document head, child head, child tail,
+      Document tail.}'
+    - filter returns CONTINUE without changing the document structure.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: TEXT_NODE_ROOT_LEAF
+    category: EDGE
+    description: A detached TextNode root verifies that a non-Element leaf is processed
+      through the root terminal path.
+    preconditions:
+    - root is a TextNode with parentNode() == null and childNodeSize() == 0.
+    - filter returns CONTINUE from head and tail.
+    expectedSourceBehavior:
+    - head and tail are called for the TextNode at depth 0.
+    - filter returns CONTINUE and the text node remains unchanged.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: COMMENT_NODE_ROOT_LEAF
+    category: EDGE
+    description: A detached Comment root provides a distinct non-Element Node subtype
+      on the no-children path.
+    preconditions:
+    - root is a Comment with parentNode() == null and childNodeSize() == 0.
+    - filter returns CONTINUE from head and tail.
+    expectedSourceBehavior:
+    - the Comment receives one head and one tail callback at depth 0.
+    - filter returns CONTINUE without changing comment data.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DATA_NODE_ROOT_LEAF
+    category: EDGE
+    description: A detached DataNode root verifies leaf traversal for raw data node
+      content.
+    preconditions:
+    - root is a DataNode with parentNode() == null and childNodeSize() == 0.
+    - filter returns CONTINUE from head and tail.
+    expectedSourceBehavior:
+    - filter invokes head then tail at depth 0 and returns CONTINUE.
+    - root.outerHtml() is unchanged.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DOCUMENT_TYPE_ROOT_LEAF
+    category: EDGE
+    description: A detached DocumentType root exercises another concrete Node subtype
+      with no descendants.
+    preconditions:
+    - root is a DocumentType with parentNode() == null and childNodeSize() == 0.
+    - filter returns CONTINUE from head and tail.
+    expectedSourceBehavior:
+    - head and tail each run once at depth 0.
+    - filter returns CONTINUE and does not alter the node.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: XML_DECLARATION_ROOT_LEAF
+    category: EDGE
+    description: A detached XmlDeclaration root covers declaration-node traversal
+      independently of Element and text-like nodes.
+    preconditions:
+    - root is an XmlDeclaration with parentNode() == null and childNodeSize() == 0.
+    - filter returns CONTINUE from head and tail.
+    expectedSourceBehavior:
+    - the declaration receives head followed by tail at depth 0.
+    - filter returns CONTINUE with unchanged outer HTML.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DEEP_SINGLE_CHILD_CHAIN_CONTINUE
+    category: BOUNDARY
+    description: A three-level Element chain exercises repeated descent and repeated
+      no-sibling ascent.
+    preconditions:
+    - root is a detached Element with exactly one child Element, which has exactly
+      one child Element, which is a leaf.
+    - filter returns CONTINUE from every callback.
+    expectedSourceBehavior:
+    - head callbacks occur at depths 0, 1, and 2 in order.
+    - tail callbacks occur at depths 2, 1, and 0 in order.
+    - filter returns CONTINUE and no node is removed.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LEAF_SIBLINGS_CONTINUE
+    category: NORMAL
+    description: Two leaf children under a detached Element root exercise the sibling-next
+      branch instead of immediate ascent.
+    preconditions:
+    - root is a detached Element with exactly two leaf child nodes.
+    - filter returns CONTINUE from every callback.
+    expectedSourceBehavior:
+    - after tailing the first child at depth 1, traversal heads the second child at
+      depth 1.
+    - both children are visited before the root tail callback.
+    - filter returns CONTINUE with unchanged child order.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MIXED_CHILD_NODE_TYPES
+    category: NORMAL
+    description: A detached Element root with Element, TextNode, and Comment children
+      tests document-order traversal across heterogeneous siblings.
+    preconditions:
+    - '{root is a detached Element with exactly three leaf children in order=Element,
+      TextNode, Comment.}'
+    - filter returns CONTINUE from every callback.
+    expectedSourceBehavior:
+    - each child receives head then tail at depth 1 in source child order.
+    - root tail occurs only after all three children complete.
+    - filter returns CONTINUE and preserves the mixed child sequence.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: HEAD_STOP_AT_ROOT
+    category: BOUNDARY
+    description: The root head callback immediately returns STOP.
+    preconditions:
+    - root is a detached Node with at least one child.
+    - filter.head(root, 0) returns STOP.
+    expectedSourceBehavior:
+    - filter returns STOP immediately.
+    - no tail callback and no descendant callback occurs.
+    - root DOM structure is unchanged.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: HEAD_STOP_AT_NESTED_CHILD
+    category: BOUNDARY
+    description: STOP returned by a non-root child head callback terminates traversal
+      before that child is tailed or its siblings are visited.
+    preconditions:
+    - root is a detached Element with at least two child nodes.
+    - filter returns CONTINUE for root head.
+    - filter.head(first child, 1) returns STOP.
+    expectedSourceBehavior:
+    - filter returns STOP from the child head callback.
+    - the stopped child receives no tail callback.
+    - later siblings and root tail are not visited.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: TAIL_STOP_AT_ROOT
+    category: BOUNDARY
+    description: The root tail callback returns STOP after a completed traversal.
+    preconditions:
+    - root is a detached Element with exactly one leaf child.
+    - all head callbacks and the child tail callback return CONTINUE.
+    - filter.tail(root, 0) returns STOP.
+    expectedSourceBehavior:
+    - root and child are fully visited before the root tail callback.
+    - filter returns STOP from the root tail callback.
+    - DOM structure is unchanged.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: TAIL_STOP_AT_CHILD_WITH_SIBLING
+    category: BOUNDARY
+    description: STOP from a child tail callback prevents traversal from advancing
+      to the child's next sibling.
+    preconditions:
+    - root is a detached Element with exactly two leaf children.
+    - all head callbacks return CONTINUE.
+    - filter.tail(first child, 1) returns STOP.
+    expectedSourceBehavior:
+    - filter returns STOP after the first child's tail callback.
+    - the second child is never headed or tailed.
+    - root tail is not called.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: HEAD_SKIP_CHILDREN_ON_ROOT
+    category: NORMAL
+    description: SKIP_CHILDREN at root suppresses descent but still permits root tail
+      processing.
+    preconditions:
+    - root is a detached Element with at least one descendant.
+    - filter.head(root, 0) returns SKIP_CHILDREN.
+    - filter.tail(root, 0) returns CONTINUE.
+    expectedSourceBehavior:
+    - no descendant head or tail callback occurs.
+    - root tail is called once at depth 0.
+    - filter returns CONTINUE and root DOM is unchanged.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: HEAD_SKIP_CHILDREN_ON_INTERNAL_NODE
+    category: NORMAL
+    description: SKIP_CHILDREN on a child with descendants skips only that child's
+      subtree and continues with its sibling.
+    preconditions:
+    - root is a detached Element with two children.
+    - the first child has at least one descendant and the second child is a leaf.
+    - filter.head(first child, 1) returns SKIP_CHILDREN and its tail returns CONTINUE.
+    - all other callbacks return CONTINUE.
+    expectedSourceBehavior:
+    - descendants of the first child receive no callbacks.
+    - the first child receives a tail callback, then the second child is visited.
+    - filter returns CONTINUE without structural change.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: HEAD_SKIP_ENTIRELY_ON_ROOT
+    category: BOUNDARY
+    description: SKIP_ENTIRELY at root suppresses both descendants and root tail and
+      becomes the terminal result.
+    preconditions:
+    - root is a detached Element with at least one child.
+    - filter.head(root, 0) returns SKIP_ENTIRELY.
+    expectedSourceBehavior:
+    - no descendant callback and no root tail callback occurs.
+    - filter returns SKIP_ENTIRELY.
+    - root DOM structure is unchanged.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: HEAD_SKIP_ENTIRELY_ON_FIRST_SIBLING
+    category: NORMAL
+    description: SKIP_ENTIRELY on a first child skips that node's tail and descendants
+      while allowing its sibling to be traversed.
+    preconditions:
+    - root is a detached Element with exactly two children.
+    - the first child has at least one descendant.
+    - filter.head(first child, 1) returns SKIP_ENTIRELY.
+    - callbacks for root and second child return CONTINUE.
+    expectedSourceBehavior:
+    - the first child's descendants and tail callback are skipped.
+    - the second child is visited normally.
+    - root tail runs and filter returns CONTINUE.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: HEAD_SKIP_ENTIRELY_ON_FINAL_CHILD
+    category: BOUNDARY
+    description: SKIP_ENTIRELY on the last child exercises the upward loop with no
+      tail callback for that child.
+    preconditions:
+    - root is a detached Element with exactly one child.
+    - the child has at least one descendant.
+    - filter.head(child, 1) returns SKIP_ENTIRELY.
+    - filter callbacks for root return CONTINUE.
+    expectedSourceBehavior:
+    - child descendants and child tail are not visited.
+    - traversal ascends to tail the root.
+    - filter returns CONTINUE and no node is removed.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: HEAD_REMOVE_ROOT
+    category: BOUNDARY
+    description: REMOVE returned from root head takes the root terminal path, where
+      there is no parent-relative removal step.
+    preconditions:
+    - root is a detached Element with at least one child.
+    - filter.head(root, 0) returns REMOVE.
+    expectedSourceBehavior:
+    - root descendants and root tail are not visited.
+    - filter returns REMOVE.
+    - the detached root remains available and its child structure is unchanged.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: HEAD_REMOVE_FIRST_CHILD_WITH_SIBLING
+    category: NORMAL
+    description: REMOVE from the first child head removes that child after locating
+      its next sibling.
+    preconditions:
+    - root is a detached Element with exactly two leaf children.
+    - filter.head(first child, 1) returns REMOVE.
+    - filter callbacks for root and second child return CONTINUE.
+    expectedSourceBehavior:
+    - the removed first child receives no tail callback.
+    - traversal continues with the original second child.
+    - after completion root has exactly one child, the original second child, and
+      returns CONTINUE.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: HEAD_REMOVE_FINAL_CHILD
+    category: BOUNDARY
+    description: REMOVE from the sole final child head exercises removal after ascending
+      to its parent.
+    preconditions:
+    - root is a detached Element with exactly one leaf child.
+    - filter.head(child, 1) returns REMOVE.
+    - root callbacks return CONTINUE.
+    expectedSourceBehavior:
+    - the child receives no tail callback.
+    - the child is removed after the parent is found during upward movement.
+    - root tail runs, root has childNodeSize() == 0, and filter returns CONTINUE.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: HEAD_REMOVE_NESTED_CHILD
+    category: NORMAL
+    description: REMOVE from a nested child removes only that node and permits traversal
+      of an uncle sibling.
+    preconditions:
+    - root is a detached Element with two children.
+    - the first child has exactly one leaf child and the second child is a leaf.
+    - filter.head(the depth-2 grandchild, 2) returns REMOVE.
+    - all other callbacks return CONTINUE.
+    expectedSourceBehavior:
+    - the depth-2 node is removed without receiving a tail callback.
+    - the first child is tailed after its child is removed.
+    - the root's second child is subsequently visited and filter returns CONTINUE.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: TAIL_REMOVE_FIRST_CHILD_WITH_SIBLING
+    category: NORMAL
+    description: REMOVE from a first child tail removes the child after selecting
+      its next sibling.
+    preconditions:
+    - root is a detached Element with exactly two leaf children.
+    - all head callbacks return CONTINUE.
+    - filter.tail(first child, 1) returns REMOVE.
+    - callbacks for the second child and root return CONTINUE.
+    expectedSourceBehavior:
+    - the first child head and tail both occur before it is removed.
+    - traversal continues with the original second child.
+    - root ends with only the second child and filter returns CONTINUE.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: TAIL_REMOVE_FINAL_CHILD
+    category: BOUNDARY
+    description: REMOVE from the final child tail exercises removal in the no-sibling
+      ascent loop.
+    preconditions:
+    - root is a detached Element with exactly one leaf child.
+    - all head callbacks return CONTINUE.
+    - filter.tail(child, 1) returns REMOVE.
+    - filter.tail(root, 0) returns CONTINUE.
+    expectedSourceBehavior:
+    - the child is tailed and then removed after its parent is found.
+    - root tail executes after the child removal.
+    - root has childNodeSize() == 0 and filter returns CONTINUE.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: TAIL_REMOVE_ROOT
+    category: BOUNDARY
+    description: REMOVE from root tail is returned directly because root reaches the
+      terminal check before any removal operation.
+    preconditions:
+    - root is a detached Element with no children.
+    - filter.head(root, 0) returns CONTINUE.
+    - filter.tail(root, 0) returns REMOVE.
+    expectedSourceBehavior:
+    - filter returns REMOVE.
+    - the detached root is not removed by this invocation.
+    - root.outerHtml() is unchanged.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: TAIL_SKIP_CHILDREN_AT_ROOT
+    category: EDGE
+    description: A tail callback returning SKIP_CHILDREN is propagated as the terminal
+      root result.
+    preconditions:
+    - root is a detached leaf Element.
+    - filter.head(root, 0) returns CONTINUE.
+    - filter.tail(root, 0) returns SKIP_CHILDREN.
+    expectedSourceBehavior:
+    - head and tail each occur once.
+    - filter returns SKIP_CHILDREN.
+    - root remains unchanged.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: TAIL_SKIP_ENTIRELY_AT_ROOT
+    category: EDGE
+    description: A tail callback returning SKIP_ENTIRELY is propagated as the terminal
+      root result.
+    preconditions:
+    - root is a detached leaf Element.
+    - filter.head(root, 0) returns CONTINUE.
+    - filter.tail(root, 0) returns SKIP_ENTIRELY.
+    expectedSourceBehavior:
+    - filter returns SKIP_ENTIRELY after the root tail callback.
+    - root remains unchanged.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: HEAD_NULL_RESULT_AT_ROOT
+    category: EDGE
+    description: A filter whose root head returns null reaches the source method's
+      non-CONTINUE, non-callback branch without an enum match.
+    preconditions:
+    - root is a detached Element with at least one child.
+    - filter.head(root, 0) returns null.
+    expectedSourceBehavior:
+    - no descendant head or tail callback occurs.
+    - no root tail callback occurs because null is neither CONTINUE nor SKIP_CHILDREN.
+    - filter returns null and root DOM is unchanged.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: TAIL_NULL_RESULT_AT_ROOT
+    category: EDGE
+    description: A root tail callback returning null reaches the root terminal return
+      with a null FilterResult reference.
+    preconditions:
+    - root is a detached leaf Element.
+    - filter.head(root, 0) returns CONTINUE.
+    - filter.tail(root, 0) returns null.
+    expectedSourceBehavior:
+    - root head and tail are each called once.
+    - filter returns null.
+    - root DOM is unchanged.
+    targetCases: 1
+    emptyOutputAllowed: false

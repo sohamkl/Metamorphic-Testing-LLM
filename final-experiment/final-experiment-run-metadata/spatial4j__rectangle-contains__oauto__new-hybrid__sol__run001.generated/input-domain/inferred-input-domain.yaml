@@ -1,0 +1,651 @@
+InputDomain:
+  summary: Non-null RectangleImpl and Point pairs in the same geographic SpatialContext,
+    covering ordinary, dateline-wrapping, world-width, degenerate, pole-touching,
+    boundary, empty-sentinel, and rotation-topology cases.
+  globalConstraints:
+  - The rectangle, point, and rectangle.getContext() are non-null.
+  - rectangle.getContext().isGeo() is true; non-geographic contexts are excluded because
+    the follow-up normalizes longitudes with normLonDEG, which is not a translation-preserving
+    operation on a non-geographic coordinate plane.
+  - The source point is constructed by rectangle.getContext().makePoint(x, y), so
+    the source rectangle and point use the same SpatialContext.
+  - Every source point has finite longitude in [-180, 180] and finite latitude in
+    [-90, 90].
+  - For every non-empty rectangle, minX and maxX are finite and in [-180, 180], minY
+    and maxY are finite and in [-90, 90], and minY <= maxY.
+  - For a non-empty rectangle, minX <= maxX denotes the inclusive longitude interval
+    [minX, maxX], while minX > maxX denotes the inclusive wrapped union [minX, 180]
+    and [-180, maxX].
+  - The supported empty sentinel is exactly the class-defined condition Double.isNaN(minX);
+    empty cases still require finite maxX, minY, and maxY with minY <= maxY.
+  - NaN is excluded from all point coordinates and from all rectangle coordinates
+    except minX in the explicit empty-sentinel scenarios; infinities are excluded
+    because the relation and follow-up are defined in terms of geographic degree coordinates.
+  - No null or otherwise invalid inputs are requested because the metamorphic relation
+    requires both inputs to be non-null and does not specify invalid-input behavior.
+  diversity:
+    rectangleLongitudeForm:
+    - ordinary
+    - dateline-wrapping
+    - full-world
+    - zero-width
+    - empty-sentinel
+    latitudePosition:
+    - below-minY
+    - at-minY
+    - strictly-inside
+    - at-maxY
+    - above-maxY
+    - south-pole
+    - north-pole
+    longitudePosition:
+    - ordinary-left
+    - ordinary-min-boundary
+    - ordinary-interior
+    - ordinary-max-boundary
+    - ordinary-right
+    - wrapped-east-segment
+    - wrapped-west-segment
+    - wrapped-gap
+    - dateline-alias
+    sourceLongitudeBranch:
+    - direct-short-circuit
+    - shift-plus-360
+    - shift-minus-360
+    - final-disjoint-after-shift
+    rotationTopology:
+    - ordinary-to-ordinary-no-endpoint-wrap
+    - ordinary-to-ordinary-both-endpoints-wrap
+    - ordinary-to-wrapped
+    - wrapped-to-ordinary
+    - wrapped-to-wrapped-no-endpoint-wrap
+    - wrapped-to-wrapped-both-endpoints-wrap
+    sourceRelation:
+    - CONTAINS
+    - DISJOINT
+    degeneracy:
+    - positive-area
+    - zero-height
+    - zero-width
+    - point-rectangle
+    - full-world-width
+  scenarios:
+  - id: LATITUDE_STRICTLY_ABOVE
+    category: NORMAL
+    description: A non-empty rectangle is probed at a latitude strictly above maxY.
+    preconditions:
+    - point.y > rectangle.maxY and point.y <= 90.
+    - rectangle.maxY < 90.
+    expectedSourceBehavior:
+    - relate(Point) returns DISJOINT at the first latitude comparison, independently
+      of longitude.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LATITUDE_STRICTLY_BELOW
+    category: NORMAL
+    description: A non-empty rectangle is probed at a latitude strictly below minY.
+    preconditions:
+    - point.y < rectangle.minY and point.y >= -90.
+    - rectangle.minY > -90.
+    expectedSourceBehavior:
+    - relate(Point) returns DISJOINT at the second latitude comparison, independently
+      of longitude.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LATITUDE_MIN_BOUNDARY
+    category: BOUNDARY
+    description: The point lies exactly on the rectangle's minimum latitude and at
+      a contained longitude.
+    preconditions:
+    - point.y == rectangle.minY.
+    - point.x belongs to the rectangle's inclusive represented longitude set.
+    expectedSourceBehavior:
+    - The minimum-latitude boundary is inclusive and relate(Point) returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LATITUDE_MAX_BOUNDARY
+    category: BOUNDARY
+    description: The point lies exactly on the rectangle's maximum latitude and at
+      a contained longitude.
+    preconditions:
+    - point.y == rectangle.maxY.
+    - point.x belongs to the rectangle's inclusive represented longitude set.
+    expectedSourceBehavior:
+    - The maximum-latitude boundary is inclusive and relate(Point) returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LATITUDE_STRICT_INTERIOR
+    category: NORMAL
+    description: The point is strictly inside both the latitude range and represented
+      longitude set.
+    preconditions:
+    - rectangle.minY < point.y and point.y < rectangle.maxY.
+    - point.x is strictly inside one represented longitude segment.
+    expectedSourceBehavior:
+    - relate(Point) returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_HEIGHT_LATITUDE_HIT
+    category: EDGE
+    description: A zero-height rectangle is probed exactly at its sole latitude.
+    preconditions:
+    - rectangle.minY == rectangle.maxY.
+    - point.y == rectangle.minY.
+    - point.x belongs to the rectangle's represented longitude set.
+    expectedSourceBehavior:
+    - The equal latitude boundaries are inclusive and relate(Point) returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NORTH_POLE_BOUNDARY
+    category: BOUNDARY
+    description: A rectangle reaching the north pole is probed at latitude 90.
+    preconditions:
+    - rectangle.maxY == 90 and point.y == 90.
+    - point.x belongs to the rectangle's represented longitude set.
+    expectedSourceBehavior:
+    - The north-pole latitude boundary is accepted and relate(Point) returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SOUTH_POLE_BOUNDARY
+    category: BOUNDARY
+    description: A rectangle reaching the south pole is probed at latitude -90.
+    preconditions:
+    - rectangle.minY == -90 and point.y == -90.
+    - point.x belongs to the rectangle's represented longitude set.
+    expectedSourceBehavior:
+    - The south-pole latitude boundary is accepted and relate(Point) returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_LONGITUDE_INTERIOR
+    category: NORMAL
+    description: An ordinary rectangle contains a point strictly between minX and
+      maxX.
+    preconditions:
+    - rectangle.minX < rectangle.maxX.
+    - rectangle.minX < point.x and point.x < rectangle.maxX.
+    - rectangle.minY <= point.y and point.y <= rectangle.maxY.
+    expectedSourceBehavior:
+    - The geographic direct-overlap short-circuit returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_MIN_X_BOUNDARY
+    category: BOUNDARY
+    description: An ordinary rectangle is probed exactly at minX.
+    preconditions:
+    - rectangle.minX < rectangle.maxX.
+    - point.x == rectangle.minX.
+    - rectangle.minY <= point.y and point.y <= rectangle.maxY.
+    expectedSourceBehavior:
+    - The minimum-longitude boundary is inclusive and the direct short-circuit returns
+      CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_MAX_X_BOUNDARY
+    category: BOUNDARY
+    description: An ordinary rectangle is probed exactly at maxX.
+    preconditions:
+    - rectangle.minX < rectangle.maxX.
+    - point.x == rectangle.maxX.
+    - rectangle.minY <= point.y and point.y <= rectangle.maxY.
+    expectedSourceBehavior:
+    - The maximum-longitude boundary is inclusive and the direct short-circuit returns
+      CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_LEFT_DISJOINT
+    category: NORMAL
+    description: A point lies west of an ordinary rectangle and remains outside after
+      the method's plus-360 shift.
+    preconditions:
+    - -180 < point.x and point.x < rectangle.minX.
+    - rectangle.minX <= rectangle.maxX and rectangle.maxX < 180.
+    - point.x + 360 > rectangle.maxX.
+    - rectangle.minY <= point.y and point.y <= rectangle.maxY.
+    expectedSourceBehavior:
+    - The pX < minX branch adds 360, after which the final range test returns DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_RIGHT_DISJOINT
+    category: NORMAL
+    description: A point lies east of an ordinary rectangle and remains outside after
+      the method's minus-360 shift.
+    preconditions:
+    - rectangle.minX < rectangle.maxX.
+    - rectangle.minX > -180 and point.x > rectangle.maxX.
+    - point.x - 360 < rectangle.minX.
+    - rectangle.minY <= point.y and point.y <= rectangle.maxY.
+    expectedSourceBehavior:
+    - The pX > maxX branch subtracts 360, after which the final range test returns
+      DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_DATELINE_ALIAS_TO_NEGATIVE_POINT
+    category: EDGE
+    description: An ordinary rectangle ending at +180 is probed with the equivalent
+      -180 longitude.
+    preconditions:
+    - rectangle.minX < rectangle.maxX and rectangle.maxX == 180.
+    - point.x == -180.
+    - rectangle.minY <= point.y and point.y <= rectangle.maxY.
+    expectedSourceBehavior:
+    - The plus-360 shift changes point.x to 180 and relate(Point) returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_DATELINE_ALIAS_TO_POSITIVE_POINT
+    category: EDGE
+    description: An ordinary rectangle starting at -180 is probed with the equivalent
+      +180 longitude.
+    preconditions:
+    - rectangle.minX == -180 and rectangle.minX < rectangle.maxX.
+    - point.x == 180.
+    - rectangle.minY <= point.y and point.y <= rectangle.maxY.
+    expectedSourceBehavior:
+    - The minus-360 shift changes point.x to -180 and relate(Point) returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WRAPPED_EAST_SEGMENT_INTERIOR
+    category: NORMAL
+    description: A dateline-wrapping rectangle contains a point strictly inside its
+      eastern segment.
+    preconditions:
+    - rectangle.minX > rectangle.maxX.
+    - rectangle.minX < point.x and point.x < 180.
+    - rectangle.minY <= point.y and point.y <= rectangle.maxY.
+    expectedSourceBehavior:
+    - After maxX is unwrapped above 180, the direct-overlap short-circuit returns
+      CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WRAPPED_WEST_SEGMENT_INTERIOR
+    category: NORMAL
+    description: A dateline-wrapping rectangle contains a point strictly inside its
+      western segment.
+    preconditions:
+    - rectangle.minX > rectangle.maxX.
+    - -180 < point.x and point.x < rectangle.maxX.
+    - rectangle.minY <= point.y and point.y <= rectangle.maxY.
+    expectedSourceBehavior:
+    - The pX < minX branch adds 360 and the final range test returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WRAPPED_MIN_X_BOUNDARY
+    category: BOUNDARY
+    description: A dateline-wrapping rectangle is probed exactly at its eastern minX
+      boundary.
+    preconditions:
+    - rectangle.minX > rectangle.maxX.
+    - point.x == rectangle.minX.
+    - rectangle.minY <= point.y and point.y <= rectangle.maxY.
+    expectedSourceBehavior:
+    - The unwrapped direct-overlap path treats minX as inclusive and returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WRAPPED_MAX_X_BOUNDARY
+    category: BOUNDARY
+    description: A dateline-wrapping rectangle is probed exactly at its western maxX
+      boundary.
+    preconditions:
+    - rectangle.minX > rectangle.maxX.
+    - point.x == rectangle.maxX.
+    - rectangle.minY <= point.y and point.y <= rectangle.maxY.
+    expectedSourceBehavior:
+    - The point is shifted by plus 360 to the unwrapped maximum boundary and relate(Point)
+      returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WRAPPED_GAP_INTERIOR
+    category: NORMAL
+    description: A point lies strictly in the non-represented longitude gap of a wrapping
+      rectangle.
+    preconditions:
+    - rectangle.minX > rectangle.maxX.
+    - rectangle.maxX < point.x and point.x < rectangle.minX.
+    - rectangle.minY <= point.y and point.y <= rectangle.maxY.
+    expectedSourceBehavior:
+    - The point is shifted by plus 360 beyond the unwrapped maxX and the final test
+      returns DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WRAPPED_POSITIVE_180
+    category: BOUNDARY
+    description: A wrapping rectangle is probed at +180 on its eastern represented
+      segment.
+    preconditions:
+    - rectangle.minX > rectangle.maxX.
+    - point.x == 180.
+    - rectangle.minY <= point.y and point.y <= rectangle.maxY.
+    expectedSourceBehavior:
+    - After rectangle unwrapping, +180 lies in the inclusive interval and relate(Point)
+      returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WRAPPED_NEGATIVE_180
+    category: BOUNDARY
+    description: A wrapping rectangle is probed at -180 on its western represented
+      segment.
+    preconditions:
+    - rectangle.minX > rectangle.maxX.
+    - point.x == -180.
+    - rectangle.minY <= point.y and point.y <= rectangle.maxY.
+    expectedSourceBehavior:
+    - The point shifts to +180 and relate(Point) returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FULL_WORLD_INTERIOR_LONGITUDE
+    category: EDGE
+    description: A full-world rectangle is probed at a longitude strictly between
+      -180 and 180.
+    preconditions:
+    - rectangle.minX == -180 and rectangle.maxX == 180.
+    - -180 < point.x and point.x < 180.
+    - rectangle.minY <= point.y and point.y <= rectangle.maxY.
+    expectedSourceBehavior:
+    - The direct-overlap short-circuit returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FULL_WORLD_NEGATIVE_180
+    category: EDGE
+    description: A full-world rectangle is probed at its -180 endpoint.
+    preconditions:
+    - rectangle.minX == -180 and rectangle.maxX == 180.
+    - point.x == -180.
+    - rectangle.minY <= point.y and point.y <= rectangle.maxY.
+    expectedSourceBehavior:
+    - The inclusive lower longitude endpoint produces CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FULL_WORLD_POSITIVE_180
+    category: EDGE
+    description: A full-world rectangle is probed at its +180 endpoint.
+    preconditions:
+    - rectangle.minX == -180 and rectangle.maxX == 180.
+    - point.x == 180.
+    - rectangle.minY <= point.y and point.y <= rectangle.maxY.
+    expectedSourceBehavior:
+    - The inclusive upper longitude endpoint produces CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_WIDTH_ORDINARY_HIT
+    category: EDGE
+    description: A zero-width vertical rectangle is probed at its sole non-dateline
+      longitude.
+    preconditions:
+    - rectangle.minX == rectangle.maxX.
+    - -180 < rectangle.minX and rectangle.minX < 180.
+    - point.x == rectangle.minX.
+    - rectangle.minY <= point.y and point.y <= rectangle.maxY.
+    expectedSourceBehavior:
+    - The direct-overlap short-circuit returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_WIDTH_ORDINARY_MISS
+    category: EDGE
+    description: A zero-width vertical rectangle is probed at a distinct non-alias
+      longitude.
+    preconditions:
+    - rectangle.minX == rectangle.maxX.
+    - -180 < rectangle.minX and rectangle.minX < 180.
+    - point.x != rectangle.minX.
+    - point.x is not the opposite signed representation of the same dateline.
+    - rectangle.minY <= point.y and point.y <= rectangle.maxY.
+    expectedSourceBehavior:
+    - After the applicable longitude shift, the final range test returns DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: VERTICAL_POSITIVE_DATELINE_ALIAS
+    category: EDGE
+    description: A vertical rectangle at +180 is probed at -180.
+    preconditions:
+    - rectangle.minX == 180 and rectangle.maxX == 180.
+    - point.x == -180.
+    - rectangle.minY <= point.y and point.y <= rectangle.maxY.
+    expectedSourceBehavior:
+    - The plus-360 shift maps the point to +180 and relate(Point) returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: VERTICAL_NEGATIVE_DATELINE_ALIAS
+    category: EDGE
+    description: A vertical rectangle at -180 is probed at +180.
+    preconditions:
+    - rectangle.minX == -180 and rectangle.maxX == -180.
+    - point.x == 180.
+    - rectangle.minY <= point.y and point.y <= rectangle.maxY.
+    expectedSourceBehavior:
+    - The minus-360 shift maps the point to -180 and relate(Point) returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POINT_RECTANGLE_EXACT_HIT
+    category: EDGE
+    description: Both rectangle dimensions are degenerate and the point exactly matches
+      them.
+    preconditions:
+    - rectangle.minX == rectangle.maxX.
+    - rectangle.minY == rectangle.maxY.
+    - point.x == rectangle.minX and point.y == rectangle.minY.
+    expectedSourceBehavior:
+    - Both inclusive coordinate checks succeed and relate(Point) returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POINT_RECTANGLE_LATITUDE_MISS
+    category: EDGE
+    description: A point rectangle is probed at the same longitude but a different
+      valid latitude.
+    preconditions:
+    - rectangle.minX == rectangle.maxX.
+    - rectangle.minY == rectangle.maxY.
+    - point.x == rectangle.minX and point.y != rectangle.minY.
+    expectedSourceBehavior:
+    - One of the initial latitude comparisons returns DISJOINT before longitude processing.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_ORDINARY_NO_ENDPOINT_WRAP_CONTAINS
+    category: NORMAL
+    description: An ordinary rectangle whose endpoints remain at or below 180 after
+      adding 150 contains the point.
+    preconditions:
+    - rectangle.minX < rectangle.maxX and rectangle.maxX <= 30.
+    - point.x belongs to [rectangle.minX, rectangle.maxX].
+    - rectangle.minY <= point.y and point.y <= rectangle.maxY.
+    expectedSourceBehavior:
+    - The source relation is CONTAINS.
+    - The follow-up rectangle remains ordinary because neither endpoint crosses +180.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_ORDINARY_NO_ENDPOINT_WRAP_DISJOINT
+    category: NORMAL
+    description: An ordinary rectangle with neither endpoint crossing +180 excludes
+      the point by longitude.
+    preconditions:
+    - rectangle.minX < rectangle.maxX and rectangle.maxX <= 30.
+    - point.x does not belong to [rectangle.minX, rectangle.maxX] or either endpoint's
+      dateline alias.
+    - rectangle.minY <= point.y and point.y <= rectangle.maxY.
+    expectedSourceBehavior:
+    - The source relation is DISJOINT.
+    - The follow-up rectangle remains ordinary because neither endpoint crosses +180.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_ORDINARY_BOTH_ENDPOINTS_WRAP_CONTAINS
+    category: NORMAL
+    description: An ordinary rectangle with both endpoints above 30 contains the point.
+    preconditions:
+    - 30 < rectangle.minX and rectangle.minX < rectangle.maxX.
+    - point.x belongs to [rectangle.minX, rectangle.maxX].
+    - rectangle.minY <= point.y and point.y <= rectangle.maxY.
+    expectedSourceBehavior:
+    - The source relation is CONTAINS.
+    - Both follow-up endpoints cross +180 and normalize by subtracting 360, leaving
+      an ordinary rectangle.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_ORDINARY_BOTH_ENDPOINTS_WRAP_DISJOINT
+    category: NORMAL
+    description: An ordinary rectangle with both endpoints above 30 excludes the point
+      by longitude.
+    preconditions:
+    - 30 < rectangle.minX and rectangle.minX < rectangle.maxX.
+    - point.x does not belong to [rectangle.minX, rectangle.maxX].
+    - rectangle.minY <= point.y and point.y <= rectangle.maxY.
+    expectedSourceBehavior:
+    - The source relation is DISJOINT.
+    - Both follow-up endpoints normalize past +180 while preserving ordinary endpoint
+      order.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_ORDINARY_TO_WRAPPED_CONTAINS
+    category: EDGE
+    description: Rotation sends only maxX past +180, converting an ordinary source
+      rectangle into a wrapping follow-up.
+    preconditions:
+    - rectangle.minX <= 30 and rectangle.maxX > 30 and rectangle.minX < rectangle.maxX.
+    - point.x belongs to [rectangle.minX, rectangle.maxX].
+    - rectangle.minY <= point.y and point.y <= rectangle.maxY.
+    expectedSourceBehavior:
+    - The source relation is CONTAINS.
+    - The normalized follow-up has minX > maxX and exercises the dateline-unwrapping
+      path.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_ORDINARY_TO_WRAPPED_DISJOINT
+    category: EDGE
+    description: An ordinary source excludes the point while rotation converts the
+      follow-up rectangle to wrapping form.
+    preconditions:
+    - rectangle.minX <= 30 and rectangle.maxX > 30 and rectangle.minX < rectangle.maxX.
+    - point.x does not belong to [rectangle.minX, rectangle.maxX] or a dateline-equivalent
+      endpoint.
+    - rectangle.minY <= point.y and point.y <= rectangle.maxY.
+    expectedSourceBehavior:
+    - The source relation is DISJOINT.
+    - The normalized follow-up has minX > maxX.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_WRAPPED_TO_ORDINARY_CONTAINS
+    category: EDGE
+    description: A wrapping source with minX above 30 and maxX at or below 30 becomes
+      ordinary after rotation.
+    preconditions:
+    - rectangle.minX > rectangle.maxX.
+    - rectangle.minX > 30 and rectangle.maxX <= 30.
+    - point.x belongs to [rectangle.minX, 180] or [-180, rectangle.maxX].
+    - rectangle.minY <= point.y and point.y <= rectangle.maxY.
+    expectedSourceBehavior:
+    - The source relation is CONTAINS.
+    - Only the eastern endpoint normalizes past +180, producing follow-up minX <=
+      maxX.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_WRAPPED_TO_ORDINARY_DISJOINT
+    category: EDGE
+    description: A point in a wrapping source's longitude gap remains a source disjoint
+      case while the follow-up becomes ordinary.
+    preconditions:
+    - rectangle.minX > rectangle.maxX.
+    - rectangle.minX > 30 and rectangle.maxX <= 30.
+    - rectangle.maxX < point.x and point.x < rectangle.minX.
+    - rectangle.minY <= point.y and point.y <= rectangle.maxY.
+    expectedSourceBehavior:
+    - The source relation is DISJOINT.
+    - The rotated endpoint ordering becomes ordinary.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_WRAPPED_NO_ENDPOINT_WRAP_CONTAINS
+    category: NORMAL
+    description: A wrapping rectangle with both endpoints at or below 30 remains wrapping
+      when rotated.
+    preconditions:
+    - rectangle.minX > rectangle.maxX and rectangle.minX <= 30.
+    - point.x belongs to [rectangle.minX, 180] or [-180, rectangle.maxX].
+    - rectangle.minY <= point.y and point.y <= rectangle.maxY.
+    expectedSourceBehavior:
+    - The source relation is CONTAINS.
+    - Neither endpoint crosses +180, so the follow-up remains wrapping.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_WRAPPED_NO_ENDPOINT_WRAP_DISJOINT
+    category: NORMAL
+    description: A wrapping rectangle with both endpoints at or below 30 excludes
+      a point in its gap.
+    preconditions:
+    - rectangle.minX > rectangle.maxX and rectangle.minX <= 30.
+    - rectangle.maxX < point.x and point.x < rectangle.minX.
+    - rectangle.minY <= point.y and point.y <= rectangle.maxY.
+    expectedSourceBehavior:
+    - The source relation is DISJOINT.
+    - The follow-up remains wrapping without endpoint normalization.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_WRAPPED_BOTH_ENDPOINTS_WRAP_CONTAINS
+    category: NORMAL
+    description: A wrapping rectangle with both endpoints above 30 remains wrapping
+      after both normalize.
+    preconditions:
+    - rectangle.minX > rectangle.maxX and rectangle.maxX > 30.
+    - point.x belongs to [rectangle.minX, 180] or [-180, rectangle.maxX].
+    - rectangle.minY <= point.y and point.y <= rectangle.maxY.
+    expectedSourceBehavior:
+    - The source relation is CONTAINS.
+    - Both endpoints cross +180 and subtract 360, preserving wrapped endpoint order.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_WRAPPED_BOTH_ENDPOINTS_WRAP_DISJOINT
+    category: NORMAL
+    description: A wrapping rectangle with both endpoints above 30 excludes a point
+      in its gap.
+    preconditions:
+    - rectangle.minX > rectangle.maxX and rectangle.maxX > 30.
+    - rectangle.maxX < point.x and point.x < rectangle.minX.
+    - rectangle.minY <= point.y and point.y <= rectangle.maxY.
+    expectedSourceBehavior:
+    - The source relation is DISJOINT.
+    - Both follow-up endpoints normalize while the rectangle remains wrapping.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EMPTY_SENTINEL_LATITUDE_INSIDE
+    category: EDGE
+    description: The class-defined empty rectangle sentinel is invoked through the
+      Point overload with latitude inside its stored Y range.
+    preconditions:
+    - Double.isNaN(rectangle.minX).
+    - rectangle.minY <= point.y and point.y <= rectangle.maxY.
+    expectedSourceBehavior:
+    - This overload does not call isEmpty; NaN makes all subsequent longitude comparisons
+      false, so the source method returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EMPTY_SENTINEL_LATITUDE_OUTSIDE
+    category: EDGE
+    description: The class-defined empty rectangle sentinel is probed outside its
+      stored Y range.
+    preconditions:
+    - Double.isNaN(rectangle.minX).
+    - point.y < rectangle.minY or point.y > rectangle.maxY.
+    expectedSourceBehavior:
+    - The initial latitude comparison returns DISJOINT before NaN longitude processing.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: IMMEDIATE_LONGITUDE_BELOW_MIN
+    category: BOUNDARY
+    description: An ordinary rectangle is probed at the greatest representable double
+      strictly below minX.
+    preconditions:
+    - -180 < rectangle.minX and rectangle.minX < rectangle.maxX and rectangle.maxX
+      < 180.
+    - point.x == Math.nextDown(rectangle.minX).
+    - rectangle.minY <= point.y and point.y <= rectangle.maxY.
+    expectedSourceBehavior:
+    - Despite being only one floating-point step outside, the plus-360 path ends beyond
+      maxX and returns DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: IMMEDIATE_LATITUDE_ABOVE_MAX
+    category: BOUNDARY
+    description: A rectangle is probed at the least representable double strictly
+      above maxY.
+    preconditions:
+    - rectangle.maxY < 90.
+    - point.y == Math.nextUp(rectangle.maxY).
+    expectedSourceBehavior:
+    - The strict point.y > maxY comparison returns DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false

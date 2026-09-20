@@ -1,0 +1,209 @@
+InputDomain:
+  summary: One IEEE-754 double longitude per source case. Coverage emphasizes the
+    in-range fast return, both signed-remainder normalization paths, exact-wrap antimeridian
+    handling, adjacent representable boundary values, large finite values, and IEEE-754
+    non-finite sentinel behavior.
+  globalConstraints:
+  - Each source input is exactly one Java double supplied directly to the static method;
+    no construction or auxiliary API calls are required.
+  - 'All Java double values are accepted by the method without a documented validation
+    exception: finite values, +0.0, -0.0, NaN, +Infinity, and -Infinity are reachable
+    source inputs.'
+  - For finite cases intended to be non-vacuous conformance checks of the supplied
+    MR, require Double.isFinite(x) and ((x + 360.0) - x == 360.0); finite values failing
+    this measurable condition are excluded from equality-conformance because Java
+    double addition may not represent the requested 360-degree shift at sufficiently
+    large magnitudes.
+  - NaN and infinities are retained only for target-method sentinel-path coverage.
+    normLonDEG produces NaN for them, and the supplied assertion does not throw when
+    its computed difference is NaN, so these cases cannot independently establish
+    the numeric periodicity relation.
+  diversity:
+    normalizationPath:
+    - '4'
+    - selected by the source comparisons and remainder tests
+    - direct in-range return; off < 0; off == 0 with positive source; final else including
+      off > 0 and NaN
+    boundaryPosition:
+    - '5'
+    - distance and representable adjacency relative to -180.0 and 180.0
+    - exact endpoints; Math.nextDown(-180.0); Math.nextUp(180.0); ordinary interior;
+      outside range
+    numericForm:
+    - '5'
+    - IEEE-754 source representation class
+    - integer; non-integer finite; signed zero; large finite exact-shift value; NaN/infinity
+  scenarios:
+  - id: IN_RANGE_INTERIOR
+    category: NORMAL
+    description: An ordinary finite longitude strictly inside the documented inclusive
+      range, such as 12.5.
+    preconditions:
+    - Double.isFinite(arg0)
+    - -180.0 < arg0 && arg0 < 180.0
+    - arg0 != 0.0
+    - ((arg0 + 360.0) - arg0) == 360.0
+    expectedSourceBehavior:
+    - Returns arg0 directly without evaluating the modulo normalization expression.
+    - The source output is strictly within -180.0..180.0 and equals the input value.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SIGNED_ZERO_IN_RANGE
+    category: EDGE
+    description: Both IEEE-754 zero signs are in range and exercise direct return
+      while preserving the supplied zero value.
+    preconditions:
+    - arg0 is exactly +0.0 or exactly -0.0
+    - ((arg0 + 360.0) - arg0) == 360.0
+    expectedSourceBehavior:
+    - Returns the source zero directly because both comparisons in the in-range guard
+      succeed.
+    - The returned double retains the source sign bit, so -0.0 remains distinguishable
+      from +0.0 by Double.doubleToRawLongBits.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: INCLUSIVE_ANTIMERIDIAN_ENDPOINTS
+    category: BOUNDARY
+    description: The two documented inclusive range endpoints, -180.0 and +180.0,
+      which denote the same meridian but are intentionally not merged.
+    preconditions:
+    - arg0 is exactly -180.0 or exactly 180.0
+    - ((arg0 + 360.0) - arg0) == 360.0
+    expectedSourceBehavior:
+    - Returns -180.0 unchanged for source -180.0 and +180.0 unchanged for source +180.0.
+    - The follow-up may use the opposite antimeridian spelling; the supplied relation
+      explicitly accepts outputs that are both within 1e-9 of an antimeridian endpoint.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: JUST_BELOW_NEGATIVE_BOUNDARY
+    category: BOUNDARY
+    description: The nearest representable double below -180.0, entering the negative-remainder
+      branch immediately outside the fast-path boundary.
+    preconditions:
+    - arg0 == Math.nextDown(-180.0)
+    - arg0 < -180.0
+    - ((arg0 + 360.0) - arg0) == 360.0
+    expectedSourceBehavior:
+    - Bypasses the in-range return.
+    - Produces a negative off value and returns 180.0 + off, yielding a value immediately
+      below +180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: JUST_ABOVE_POSITIVE_BOUNDARY
+    category: BOUNDARY
+    description: The nearest representable double above +180.0, entering the positive
+      nonzero-remainder final-else branch immediately outside the fast-path boundary.
+    preconditions:
+    - arg0 == Math.nextUp(180.0)
+    - arg0 > 180.0
+    - ((arg0 + 360.0) - arg0) == 360.0
+    expectedSourceBehavior:
+    - Bypasses the in-range return.
+    - Produces a positive nonzero off value and returns -180.0 + off, yielding a value
+      immediately above -180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_OUTSIDE_NONEXACT_WRAP
+    category: NORMAL
+    description: A negative integral longitude below -180.0 that is not an exact antimeridian
+      wrap, such as -181.0.
+    preconditions:
+    - arg0 == -181.0
+    - arg0 < -180.0
+    - ((arg0 + 180.0) % 360.0) < 0.0
+    expectedSourceBehavior:
+    - Takes the off < 0 branch.
+    - Returns 179.0 for -181.0, demonstrating wrap from just west of -180.0 to just
+      below +180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_OUTSIDE_NONEXACT_WRAP
+    category: NORMAL
+    description: A positive integral longitude above +180.0 that is not an exact antimeridian
+      wrap, such as 181.0.
+    preconditions:
+    - arg0 == 181.0
+    - arg0 > 180.0
+    - ((arg0 + 180.0) % 360.0) > 0.0
+    expectedSourceBehavior:
+    - Takes the final else branch because off is positive and nonzero.
+    - Returns -179.0 for 181.0, demonstrating wrap from just east of +180.0 to just
+      above -180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FRACTIONAL_OUTSIDE_WRAP
+    category: EDGE
+    description: Non-integral longitudes just beyond each side of the allowed interval,
+      such as -180.5 and 180.5.
+    preconditions:
+    - arg0 is exactly -180.5 or exactly 180.5
+    - Math.abs(arg0) > 180.0
+    - ((arg0 + 360.0) - arg0) == 360.0
+    expectedSourceBehavior:
+    - For -180.5, off is negative and the result is 179.5.
+    - For 180.5, off is positive and nonzero and the result is -179.5.
+    - Confirms that normalization preserves a fractional offset rather than only handling
+      integral degree values.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: NEGATIVE_EXACT_ANTIMERIDIAN_WRAP
+    category: EDGE
+    description: A negative longitude outside the range whose shifted remainder compares
+      equal to zero, such as -540.0.
+    preconditions:
+    - arg0 == -540.0
+    - ((arg0 + 180.0) % 360.0) == 0.0
+    - arg0 < 0.0
+    expectedSourceBehavior:
+    - Does not take off < 0 because a signed zero remainder still compares equal to
+      zero.
+    - Does not take the positive-source special case.
+    - Takes the final else branch and returns -180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_EXACT_ANTIMERIDIAN_WRAP
+    category: EDGE
+    description: A positive longitude outside the range whose shifted remainder is
+      exactly zero, such as 540.0.
+    preconditions:
+    - arg0 == 540.0
+    - ((arg0 + 180.0) % 360.0) == 0.0
+    - arg0 > 0.0
+    expectedSourceBehavior:
+    - Takes the off == 0 && lon_deg > 0 special case.
+    - Returns +180.0 rather than -180.0.
+    - Its follow-up output remains an antimeridian representation accepted by the
+      supplied relation.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LARGE_FINITE_EXACT_SHIFT
+    category: EDGE
+    description: Large positive and negative finite values at a magnitude where adding
+      360.0 is still representable as the requested shift, using +2^52 and -2^52.
+    preconditions:
+    - arg0 is exactly 4503599627370496.0 or exactly -4503599627370496.0
+    - Double.isFinite(arg0)
+    - ((arg0 + 360.0) - arg0) == 360.0
+    - Math.abs(arg0) > 180.0
+    expectedSourceBehavior:
+    - Bypasses the in-range fast path and evaluates the modulo expression on a large
+      finite dividend.
+    - Returns a finite normalized result in the inclusive range -180.0..180.0.
+    - Exercises periodic normalization without using values for which the follow-up
+      addition loses the intended 360-degree increment.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: NONFINITE_IEEE_SENTINELS
+    category: EDGE
+    description: NaN, positive infinity, and negative infinity reach the modulo-based
+      path because none satisfy the inclusive finite-range guard.
+    preconditions:
+    - arg0 is exactly Double.NaN, Double.POSITIVE_INFINITY, or Double.NEGATIVE_INFINITY
+    expectedSourceBehavior:
+    - For each input, (arg0 + 180.0) % 360.0 evaluates to NaN.
+    - Neither off < 0 nor off == 0 is true for NaN, so the final else expression returns
+      NaN.
+    - The supplied assertion is vacuous for these outputs because Math.abs(NaN - NaN)
+      is NaN and NaN > 1e-9 is false.
+    targetCases: 3
+    emptyOutputAllowed: false

@@ -1,0 +1,274 @@
+InputDomain:
+  summary: Finite Java double longitudes spanning the unchanged interval, all normalization
+    branches, antimeridian sentinels, multiple revolutions, fractional residues, and
+    numerically stable large magnitudes.
+  globalConstraints:
+  - 'The source longitude must be a finite Java double: !Double.isNaN(lon) && !Double.isInfinite(lon).
+    NaN and infinities are excluded because they are not finite longitudes and would
+    make the supplied assertion vacuous through NaN comparisons.'
+  - 'The generated follow-up must remain finite: Double.isFinite(lon + 360.0).'
+  - 'The floating-point follow-up must represent one full revolution: (lon + 360.0)
+    - lon == 360.0.'
+  - 'The shifted values used by the implementation must remain one revolution apart:
+    ((lon + 360.0) + 180.0) - (lon + 180.0) == 360.0. Inputs failing this are excluded
+    because floating-point absorption or rounding no longer implements the MR''s stated
+    addition of exactly 360 degrees.'
+  diversity:
+    sourceBranch:
+    - unchanged_interval
+    - negative_off
+    - positive_zero_sentinel
+    - nonnegative_off
+    followUpBranch:
+    - unchanged_interval
+    - negative_off
+    - positive_zero_sentinel
+    - nonnegative_off
+    boundaryRegion:
+    - below_minus_180
+    - minus_180
+    - inside_range
+    - plus_180
+    - above_plus_180
+    residueClass:
+    - antimeridian
+    - zero_meridian
+    - integral_non_sentinel
+    - fractional_non_sentinel
+    magnitudeClass:
+    - sub_revolution
+    - one_to_two_revolutions
+    - multiple_revolutions
+    - large_stable
+    assertionPath:
+    - ordinary_tolerance_comparison
+    - antimeridian_equivalence
+  scenarios:
+  - id: INTERIOR_UNCHANGED_VALUES
+    category: NORMAL
+    description: Source longitudes strictly inside the documented normalization interval
+      and away from zero and both antimeridians.
+    preconditions:
+    - -179.0 <= lon && lon <= 179.0
+    - Math.abs(lon) >= 1.0
+    expectedSourceBehavior:
+    - The initial range check succeeds and the source output is exactly the input
+      double.
+    - The source output is finite and lies strictly between -180 and 180.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: SIGNED_ZERO_PRESERVATION
+    category: EDGE
+    description: The two IEEE-754 zero encodings exercise the unchanged path while
+      making exact input preservation observable.
+    preconditions:
+    - lon is either +0.0 or -0.0, distinguished using Double.doubleToRawLongBits.
+    expectedSourceBehavior:
+    - The initial range check succeeds.
+    - The source output has the same raw IEEE-754 bits as the source, including the
+      sign of zero.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: EXACT_LOWER_BOUNDARY
+    category: BOUNDARY
+    description: The source is exactly the inclusive lower boundary, and its follow-up
+      is exactly the inclusive upper boundary.
+    preconditions:
+    - lon == -180.0
+    expectedSourceBehavior:
+    - The source output is exactly -180.0 without modulo normalization.
+    - The generated follow-up is 180.0, causing the relation to use antimeridian equivalence.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EXACT_UPPER_BOUNDARY
+    category: BOUNDARY
+    description: The source is exactly the inclusive upper boundary.
+    preconditions:
+    - lon == 180.0
+    expectedSourceBehavior:
+    - The source output is exactly 180.0 without modulo normalization.
+    - The generated follow-up is 540.0, whose positive zero-offset sentinel normalizes
+      to 180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WITHIN_ANTIMERIDIAN_TOLERANCE
+    category: EDGE
+    description: Values immediately inside or outside either antimeridian produce
+      outputs within the relation's 1e-9 antimeridian tolerance.
+    preconditions:
+    - lon is one of -180.0 - epsilon, -180.0 + epsilon, 180.0 - epsilon, or 180.0
+      + epsilon.
+    - epsilon is a representable positive double satisfying 0.0 < epsilon && epsilon
+      <= 1e-9.
+    - lon is not exactly -180.0 or 180.0 after floating-point evaluation.
+    expectedSourceBehavior:
+    - The source output is finite and its absolute value differs from 180.0 by at
+      most 1e-9.
+    - Inside values are returned directly, while outside values take a modulo-normalization
+      branch.
+    - The source and follow-up outputs qualify for the assertion's antimeridian-equivalence
+      path.
+    targetCases: 4
+    emptyOutputAllowed: false
+  - id: INSIDE_BOUNDARIES_OUTSIDE_TOLERANCE
+    category: BOUNDARY
+    description: Values just inside both inclusive boundaries but farther away than
+      the relation's antimeridian tolerance.
+    preconditions:
+    - lon is either -180.0 + delta or 180.0 - delta.
+    - 1e-6 <= delta && delta <= 0.5
+    expectedSourceBehavior:
+    - The source output is exactly the input because the initial range check succeeds.
+    - The output is not classified as an antimeridian by the supplied assertion.
+    targetCases: 4
+    emptyOutputAllowed: false
+  - id: JUST_BELOW_LOWER_BOUNDARY
+    category: BOUNDARY
+    description: Negative values just below -180 enter the off-less-than-zero branch,
+      while their follow-ups lie inside the unchanged interval.
+    preconditions:
+    - -181.0 < lon && lon < -180.0
+    - Math.abs(Math.abs(lon) - 180.0) > 1e-9
+    expectedSourceBehavior:
+    - The initial range check fails and (lon + 180.0) % 360.0 is negative.
+    - The source output equals 180.0 + ((lon + 180.0) % 360.0) and lies strictly below
+      180.0.
+    - The generated follow-up lies strictly between 179.0 and 180.0 and is returned
+      unchanged.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: NEGATIVE_WRAP_TO_DIRECT_FOLLOW_UP
+    category: NORMAL
+    description: A negative source between -540 and -180 wraps once, while adding
+      360 moves the follow-up into the direct-return interval.
+    preconditions:
+    - -539.0 <= lon && lon <= -181.0
+    - (lon + 180.0) % 360.0 != 0.0
+    expectedSourceBehavior:
+    - The source takes the negative-offset branch.
+    - The source output equals lon + 360.0 and lies in [-179.0, 179.0].
+    - The follow-up input lies in [-179.0, 179.0] and is returned unchanged.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: EXACT_NEGATIVE_ONE_REVOLUTION_SENTINEL
+    category: BOUNDARY
+    description: The source -540 has a signed-zero modulo offset and its follow-up
+      is the direct lower boundary.
+    preconditions:
+    - lon == -540.0
+    expectedSourceBehavior:
+    - The modulo offset compares equal to zero, but lon > 0 is false.
+    - The source output is exactly -180.0.
+    - The follow-up input is exactly -180.0 and is returned unchanged.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_SOURCE_AND_FOLLOW_UP_BOTH_WRAP
+    category: NORMAL
+    description: Sources below -540 and not on an antimeridian require modulo normalization
+      for both source and follow-up.
+    preconditions:
+    - -899.0 <= lon && lon <= -541.0
+    - (lon + 180.0) % 360.0 != 0.0
+    expectedSourceBehavior:
+    - Both the source and generated follow-up are below -180.0.
+    - Both invocations take the negative-offset branch.
+    - The source output equals lon + 720.0 and lies in [-179.0, 179.0].
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: NEGATIVE_ANTIMERIDIAN_FAMILY
+    category: EDGE
+    description: Negative antimeridian representations below the normal range exercise
+      the zero-offset path without satisfying the positive-longitude sentinel.
+    preconditions:
+    - lon == -180.0 - 360.0 * k for an integer k >= 2.
+    - The resulting lon satisfies all global floating-point stability constraints.
+    expectedSourceBehavior:
+    - The modulo offset compares equal to zero.
+    - Because lon > 0 is false, the source output is exactly -180.0.
+    - The normalized follow-up is also an antimeridian representation accepted by
+      the relation.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: JUST_ABOVE_UPPER_BOUNDARY
+    category: BOUNDARY
+    description: Positive values just above 180 enter the ordinary nonnegative-offset
+      branch.
+    preconditions:
+    - 180.0 < lon && lon < 181.0
+    - Math.abs(Math.abs(lon) - 180.0) > 1e-9
+    expectedSourceBehavior:
+    - The initial range check fails.
+    - The offset is positive, so neither the negative-offset branch nor the zero-offset
+      sentinel is taken.
+    - The source output equals lon - 360.0 and lies strictly above -180.0.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: POSITIVE_GENERAL_WRAP
+    category: NORMAL
+    description: Ordinary positive out-of-range sources wrap through the final nonnegative-offset
+      branch.
+    preconditions:
+    - 181.0 <= lon && lon <= 539.0
+    - (lon + 180.0) % 360.0 != 0.0
+    expectedSourceBehavior:
+    - The source offset is positive.
+    - The source output equals lon - 360.0 and lies in [-179.0, 179.0].
+    - The follow-up remains above 180.0 and normalizes to the same result.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: POSITIVE_ANTIMERIDIAN_FAMILY
+    category: EDGE
+    description: Positive out-of-range antimeridian representations exercise the explicit
+      off-equals-zero and lon-greater-than-zero sentinel.
+    preconditions:
+    - lon == 180.0 + 360.0 * k for an integer k >= 1.
+    - The resulting lon satisfies all global floating-point stability constraints.
+    expectedSourceBehavior:
+    - The modulo offset compares equal to zero.
+    - Because lon > 0 is true, the source output is exactly 180.0.
+    - The normalized follow-up is also exactly 180.0.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: WHOLE_REVOLUTIONS_NORMALIZE_TO_ZERO
+    category: EDGE
+    description: Nonzero positive and negative whole revolutions exercise both signs
+      while sharing the zero-meridian residue.
+    preconditions:
+    - lon == 360.0 * k for an integer k in {-2, -1, 1, 2}.
+    expectedSourceBehavior:
+    - The source is outside the direct-return interval.
+    - The source output is exactly 0.0.
+    - The follow-up is another whole revolution and also normalizes to zero.
+    targetCases: 4
+    emptyOutputAllowed: false
+  - id: FRACTIONAL_MULTI_REVOLUTION_RESIDUES
+    category: NORMAL
+    description: Fractional longitudes several revolutions from the normal range verify
+      that modulo normalization preserves a nonintegral residue.
+    preconditions:
+    - Math.abs(lon) >= 720.0 && Math.abs(lon) <= 10000.0
+    - lon != Math.rint(lon)
+    - (lon + 180.0) % 360.0 != 0.0
+    expectedSourceBehavior:
+    - The source output is finite and lies in [-180.0, 180.0].
+    - The source output is computed by the negative-offset or final nonnegative-offset
+      formula according to the sign of the modulo offset.
+    - The fractional longitude residue is retained rather than rounded to an integer
+      or sentinel.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: LARGE_NUMERICALLY_STABLE_MAGNITUDES
+    category: EDGE
+    description: Large positive and negative finite longitudes exercise many-revolution
+      modulo reduction while still satisfying the MR's exact-shift preconditions.
+    preconditions:
+    - 1.0e9 <= Math.abs(lon)
+    - The source satisfies all global floating-point stability constraints.
+    - (lon + 180.0) % 360.0 != 0.0
+    expectedSourceBehavior:
+    - The source bypasses the direct-return interval and is reduced using modulo 360.
+    - The source output is finite and lies in [-180.0, 180.0].
+    - The follow-up also requires modulo normalization and yields the same normalized
+      longitude within 1e-9.
+    targetCases: 4
+    emptyOutputAllowed: false

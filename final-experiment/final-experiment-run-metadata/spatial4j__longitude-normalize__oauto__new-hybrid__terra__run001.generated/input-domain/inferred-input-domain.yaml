@@ -1,0 +1,461 @@
+InputDomain:
+  summary: One source input is any IEEE-754 Java double longitude. Coverage includes
+    direct-return inputs, each modulo/remainder return path, antimeridian representations,
+    source/follow-up branch crossings caused by adding 360.0, finite precision limits,
+    and non-finite doubles.
+  globalConstraints:
+  - Invoke static normLonDEG once per source case with exactly one Java double arg0;
+    no object construction, auxiliary arguments, or prior normalization is applicable.
+  - Generate the follow-up only as Java double addition arg0 + 360.0; do not substitute
+    an algebraically equivalent value or pre-normalize either input.
+  - All IEEE-754 double values are in scope, including signed zero, finite values,
+    NaN, and positive and negative infinity; the supplied API specifies no rejection
+    behavior for any double.
+  - For finite source values, observe the returned double before applying the supplied
+    relation, including its antimeridian value and signed-zero representation where
+    relevant.
+  diversity:
+    normalizationPath:
+    - distinct
+    - measurable
+    - direct return for -180.0 <= lon <= 180.0; negative remainder return when (lon
+      + 180.0) % 360.0 < 0; positive exact-cycle sentinel when remainder is 0 and
+      lon > 0; ordinary non-negative remainder return otherwise
+    sourceFollowUpPath:
+    - distinct
+    - measurable
+    - direct-to-direct, direct-to-modulo, modulo-to-direct, modulo-to-modulo, and
+      addition-rounded-to-identical-input
+    boundaryAndRepresentation:
+    - distinct
+    - measurable
+    - signed zero, exact endpoints, nextUp/nextDown endpoint neighbors, values within
+      and outside the MR antimeridian tolerance, exact 360-degree cycles, subnormals,
+      large finite values, NaN, and infinities
+  scenarios:
+  - id: NEGATIVE_ZERO_DIRECT_RETURN
+    category: EDGE
+    description: Source is negative zero, which is inside the direct-return interval
+      while the follow-up is positive 360.0.
+    preconditions:
+    - arg0 is exactly -0.0, verified by Double.doubleToRawLongBits(arg0) == 0x8000000000000000L
+    expectedSourceBehavior:
+    - Source output is returned directly and preserves negative-zero bits.
+    - The follow-up normalizes through modulo arithmetic to zero, so the relation
+      compares numerically equal signed zeros.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_ZERO_DIRECT_TO_MODULO
+    category: NORMAL
+    description: Source zero takes the direct path and its 360-degree follow-up takes
+      the ordinary non-negative remainder path.
+    preconditions:
+    - arg0 is exactly +0.0
+    expectedSourceBehavior:
+    - Source output is exactly +0.0.
+    - The follow-up 360.0 normalizes to +0.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: INTERIOR_NEGATIVE_DIRECT_TO_MODULO
+    category: NORMAL
+    description: A typical strictly interior negative longitude is returned unchanged,
+      while adding 360.0 moves it outside the direct interval.
+    preconditions:
+    - arg0 is exactly -73.25
+    - -180.0 < arg0 < 0.0
+    expectedSourceBehavior:
+    - Source output is exactly -73.25 by direct return.
+    - Follow-up 286.75 is normalized through the ordinary non-negative remainder path.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: INTERIOR_POSITIVE_DIRECT_TO_MODULO
+    category: NORMAL
+    description: A typical strictly interior positive longitude is returned unchanged
+      and its follow-up is outside the direct interval.
+    preconditions:
+    - arg0 is exactly 73.25
+    - 0.0 < arg0 < 180.0
+    expectedSourceBehavior:
+    - Source output is exactly 73.25 by direct return.
+    - Follow-up 433.25 normalizes through modulo arithmetic.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DIRECT_NEGATIVE_FRACTION_NEAR_ZERO
+    category: BOUNDARY
+    description: A small negative finite longitude checks direct-return preservation
+      near zero without being signed zero.
+    preconditions:
+    - arg0 is exactly -1.0E-12
+    - -1.0E-9 < arg0 < 0.0
+    expectedSourceBehavior:
+    - Source output is exactly arg0 without arithmetic shifting.
+    - Any small rounding introduced by the follow-up shift is evaluated by the supplied
+      1.0E-9 tolerance.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DIRECT_POSITIVE_FRACTION_NEAR_ZERO
+    category: BOUNDARY
+    description: A small positive finite longitude checks direct-return preservation
+      near zero.
+    preconditions:
+    - arg0 is exactly 1.0E-12
+    - 0.0 < arg0 < 1.0E-9
+    expectedSourceBehavior:
+    - Source output is exactly arg0 without arithmetic shifting.
+    - Follow-up is outside the direct interval and exercises modulo normalization.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LOWER_ENDPOINT_MINUS_180
+    category: BOUNDARY
+    description: The inclusive lower endpoint is returned unchanged, but its follow-up
+      is the inclusive upper endpoint.
+    preconditions:
+    - arg0 is exactly -180.0
+    expectedSourceBehavior:
+    - Source output is exactly -180.0 by direct return.
+    - Follow-up is exactly 180.0 by direct return; the MR must use its antimeridian
+      exception.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UPPER_ENDPOINT_PLUS_180
+    category: BOUNDARY
+    description: The inclusive upper endpoint is returned unchanged and its follow-up
+      reaches the positive exact-cycle sentinel.
+    preconditions:
+    - arg0 is exactly 180.0
+    expectedSourceBehavior:
+    - Source output is exactly 180.0 by direct return.
+    - Follow-up 540.0 has zero remainder with a positive input and returns 180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: JUST_INSIDE_LOWER_ENDPOINT
+    category: BOUNDARY
+    description: The representable value immediately greater than -180.0 remains on
+      the direct-return path.
+    preconditions:
+    - arg0 is Math.nextUp(-180.0)
+    - -180.0 < arg0 < -179.0
+    expectedSourceBehavior:
+    - Source output is bitwise equal to arg0.
+    - Follow-up is greater than 180.0 and therefore uses modulo normalization.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: JUST_INSIDE_UPPER_ENDPOINT
+    category: BOUNDARY
+    description: The representable value immediately less than 180.0 remains on the
+      direct-return path.
+    preconditions:
+    - arg0 is Math.nextDown(180.0)
+    - 179.0 < arg0 < 180.0
+    expectedSourceBehavior:
+    - Source output is bitwise equal to arg0.
+    - Follow-up is outside the direct interval and normalizes through modulo arithmetic.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: JUST_OUTSIDE_LOWER_ENDPOINT
+    category: BOUNDARY
+    description: The representable value immediately below -180.0 enters the negative-remainder
+      branch, while its follow-up becomes directly valid.
+    preconditions:
+    - arg0 is Math.nextDown(-180.0)
+    - arg0 < -180.0
+    expectedSourceBehavior:
+    - Source computes a negative remainder and returns a longitude just below 180.0.
+    - Follow-up is Math.nextUp(180.0) and is normalized through modulo arithmetic
+      rather than direct return.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: JUST_OUTSIDE_UPPER_ENDPOINT
+    category: BOUNDARY
+    description: The representable value immediately above 180.0 enters the ordinary
+      non-negative remainder branch.
+    preconditions:
+    - arg0 is Math.nextUp(180.0)
+    - arg0 > 180.0
+    expectedSourceBehavior:
+    - Source output is a longitude just above -180.0.
+    - Follow-up remains outside the direct interval and also uses modulo normalization.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LOWER_ANTIMERIDIAN_TOLERANCE_BAND
+    category: EDGE
+    description: A direct-return value within the MR's 1.0E-9 antimeridian classification
+      band above -180.0.
+    preconditions:
+    - arg0 is exactly -180.0 + 5.0E-10
+    - Math.abs(Math.abs(arg0) - 180.0) <= 1.0E-9
+    expectedSourceBehavior:
+    - Source output is exactly arg0 by direct return.
+    - The source output qualifies as antimeridian under the relation's tolerance.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UPPER_ANTIMERIDIAN_TOLERANCE_BAND
+    category: EDGE
+    description: A direct-return value within the MR antimeridian band below 180.0.
+    preconditions:
+    - arg0 is exactly 180.0 - 5.0E-10
+    - Math.abs(Math.abs(arg0) - 180.0) <= 1.0E-9
+    expectedSourceBehavior:
+    - Source output is exactly arg0 by direct return.
+    - The relation may classify both normalized outputs as antimeridian rather than
+      compare their numerical difference.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: OUTSIDE_ANTIMERIDIAN_TOLERANCE_BAND
+    category: EDGE
+    description: A longitude near but measurably outside the MR antimeridian band
+      must use the normal numerical comparison unless both outputs independently qualify.
+    preconditions:
+    - arg0 is exactly 180.0 - 2.0E-9
+    - Math.abs(Math.abs(arg0) - 180.0) > 1.0E-9
+    expectedSourceBehavior:
+    - Source output is exactly arg0 by direct return.
+    - This case distinguishes the relation's 1.0E-9 antimeridian threshold from the
+      API's exact 180.0 boundary.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_OUTSIDE_TO_DIRECT_FOLLOW_UP
+    category: NORMAL
+    description: A negative out-of-range source normalizes via a negative remainder,
+      while adding 360.0 places the follow-up inside the direct interval.
+    preconditions:
+    - arg0 is exactly -270.0
+    - -540.0 < arg0 < -180.0
+    expectedSourceBehavior:
+    - Source output is exactly 90.0 from the off < 0 branch.
+    - Follow-up is exactly 90.0 and is returned directly.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_NEAR_LOWER_WRAP_TO_DIRECT_FOLLOW_UP
+    category: BOUNDARY
+    description: A source just below -180.0 wraps near positive 180.0 and its follow-up
+      is directly valid.
+    preconditions:
+    - arg0 is exactly -180.25
+    - -181.0 < arg0 < -180.0
+    expectedSourceBehavior:
+    - Source output is exactly 179.75 through the negative-remainder branch.
+    - Follow-up is exactly 179.75 and is returned directly.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_NEAR_FULL_REVOLUTION_WRAP
+    category: NORMAL
+    description: A negative longitude near -360.0 exercises a negative remainder whose
+      normalized result is near zero.
+    preconditions:
+    - arg0 is exactly -359.75
+    - -360.0 < arg0 < -180.0
+    expectedSourceBehavior:
+    - Source output is exactly 0.25 through the off < 0 branch.
+    - Follow-up 0.25 is returned directly.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_OUTSIDE_NONNEGATIVE_REMAINDER
+    category: NORMAL
+    description: A positive out-of-range longitude uses the ordinary non-negative
+      remainder return.
+    preconditions:
+    - arg0 is exactly 270.0
+    - 180.0 < arg0 < 540.0
+    expectedSourceBehavior:
+    - Source output is exactly -90.0.
+    - Follow-up remains outside the direct interval and normalizes to the same longitude.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_NEAR_UPPER_WRAP
+    category: BOUNDARY
+    description: A source just above 180.0 wraps to a value just above -180.0.
+    preconditions:
+    - arg0 is exactly 180.25
+    - 180.0 < arg0 < 181.0
+    expectedSourceBehavior:
+    - Source output is exactly -179.75.
+    - Follow-up also takes modulo normalization.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_EXACT_FULL_REVOLUTION
+    category: BOUNDARY
+    description: Positive 360.0 produces zero through the ordinary non-negative remainder
+      path, not the exact-cycle 180 sentinel.
+    preconditions:
+    - arg0 is exactly 360.0
+    expectedSourceBehavior:
+    - Source computes off == 180.0 and returns exactly 0.0.
+    - Follow-up 720.0 also normalizes to exactly 0.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_EXACT_FULL_REVOLUTION
+    category: BOUNDARY
+    description: Negative -360.0 produces zero through the negative-remainder branch.
+    preconditions:
+    - arg0 is exactly -360.0
+    expectedSourceBehavior:
+    - Source computes a negative remainder and returns exactly 0.0.
+    - Follow-up is exactly +0.0 and is returned directly.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_EXACT_ANTIMERIDIAN_CYCLE
+    category: EDGE
+    description: Positive 540.0 reaches the explicit off == 0 and lon > 0 sentinel
+      path.
+    preconditions:
+    - arg0 is exactly 540.0
+    expectedSourceBehavior:
+    - Source output is exactly 180.0 via the positive exact-cycle sentinel.
+    - Follow-up 900.0 also returns 180.0 through that sentinel.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_EXACT_ANTIMERIDIAN_CYCLE
+    category: EDGE
+    description: Negative -540.0 reaches a zero remainder without satisfying the positive-input
+      sentinel condition.
+    preconditions:
+    - arg0 is exactly -540.0
+    expectedSourceBehavior:
+    - Source output is exactly -180.0 from the final return path.
+    - Follow-up is exactly -180.0 and is returned directly; both outputs are antimeridian.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_MULTI_REVOLUTION_NONINTEGRAL
+    category: NORMAL
+    description: A positive longitude several full revolutions away checks modulo
+      behavior beyond one revolution without an exact-cycle remainder.
+    preconditions:
+    - arg0 is exactly 1092.5
+    - arg0 > 3.0 * 360.0
+    - (arg0 + 180.0) % 360.0 != 0.0
+    expectedSourceBehavior:
+    - Source output is exactly 12.5.
+    - Follow-up remains modulo-normalized and represents the same normalized longitude.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_MULTI_REVOLUTION_NONINTEGRAL
+    category: NORMAL
+    description: A negative longitude several full revolutions away checks the negative-remainder
+      branch at larger magnitude.
+    preconditions:
+    - arg0 is exactly -1092.5
+    - arg0 < -3.0 * 360.0
+    - (arg0 + 180.0) % 360.0 < 0.0
+    expectedSourceBehavior:
+    - Source output is exactly -12.5.
+    - Follow-up remains modulo-normalized and represents the same normalized longitude.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LARGE_FINITE_POSITIVE_WITH_EFFECTIVE_SHIFT
+    category: EDGE
+    description: A large finite positive value where adding 360.0 remains distinguishable
+      tests remainder arithmetic at a large binary64 magnitude.
+    preconditions:
+    - arg0 is exactly Math.scalb(1.0, 52)
+    - Double.isFinite(arg0)
+    - arg0 + 360.0 != arg0
+    expectedSourceBehavior:
+    - Source takes a modulo path because arg0 is greater than 180.0.
+    - The follow-up differs as a double from the source, so this is not an addition-no-op
+      case.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LARGE_FINITE_NEGATIVE_WITH_EFFECTIVE_SHIFT
+    category: EDGE
+    description: A large finite negative value where adding 360.0 remains distinguishable
+      tests negative modulo behavior at a large magnitude.
+    preconditions:
+    - arg0 is exactly -Math.scalb(1.0, 52)
+    - Double.isFinite(arg0)
+    - arg0 + 360.0 != arg0
+    expectedSourceBehavior:
+    - Source takes a modulo path because arg0 is less than -180.0.
+    - The follow-up differs as a double from the source.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MAX_FINITE_POSITIVE_ADDITION_NO_OP
+    category: EDGE
+    description: The largest finite positive double is valid and adding 360.0 rounds
+      back to the identical source input.
+    preconditions:
+    - arg0 is exactly Double.MAX_VALUE
+    - arg0 + 360.0 == arg0
+    expectedSourceBehavior:
+    - Source takes modulo normalization and returns a finite normalized result.
+    - Source and follow-up invocations receive identical double inputs because the
+      addition is rounded away.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MAX_FINITE_NEGATIVE_ADDITION_NO_OP
+    category: EDGE
+    description: The largest-magnitude finite negative double is valid and adding
+      360.0 rounds back to the identical source input.
+    preconditions:
+    - arg0 is exactly -Double.MAX_VALUE
+    - arg0 + 360.0 == arg0
+    expectedSourceBehavior:
+    - Source takes modulo normalization and returns a finite normalized result.
+    - Source and follow-up invocations receive identical double inputs because the
+      addition is rounded away.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_MIN_SUBNORMAL
+    category: EDGE
+    description: The smallest positive subnormal is inside the direct interval but
+      is lost when 360.0 is added.
+    preconditions:
+    - arg0 is exactly Double.MIN_VALUE
+    - 0.0 < arg0 < 180.0
+    - arg0 + 360.0 == 360.0
+    expectedSourceBehavior:
+    - Source output is exactly the positive subnormal arg0 by direct return.
+    - Follow-up is exactly 360.0 and normalizes to zero; the numerical difference
+      is far below 1.0E-9.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_MIN_SUBNORMAL
+    category: EDGE
+    description: The smallest negative subnormal is inside the direct interval but
+      is lost when 360.0 is added.
+    preconditions:
+    - arg0 is exactly -Double.MIN_VALUE
+    - -180.0 < arg0 < 0.0
+    - arg0 + 360.0 == 360.0
+    expectedSourceBehavior:
+    - Source output is exactly the negative subnormal arg0 by direct return.
+    - Follow-up is exactly 360.0 and normalizes to zero; the numerical difference
+      is far below 1.0E-9.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_INFINITY
+    category: EDGE
+    description: Positive infinity is a Java double accepted by the method and produces
+      NaN through remainder arithmetic.
+    preconditions:
+    - arg0 is exactly Double.POSITIVE_INFINITY
+    expectedSourceBehavior:
+    - Source bypasses the range return, computes a NaN remainder, and returns NaN.
+    - Follow-up remains positive infinity and also returns NaN; the supplied difference
+      comparison with NaN does not throw.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_INFINITY
+    category: EDGE
+    description: Negative infinity is a Java double accepted by the method and produces
+      NaN through remainder arithmetic.
+    preconditions:
+    - arg0 is exactly Double.NEGATIVE_INFINITY
+    expectedSourceBehavior:
+    - Source bypasses the range return, computes a NaN remainder, and returns NaN.
+    - Follow-up remains negative infinity and also returns NaN; the supplied difference
+      comparison with NaN does not throw.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NAN_INPUT
+    category: EDGE
+    description: NaN fails both range comparisons and propagates through modulo arithmetic.
+    preconditions:
+    - Double.isNaN(arg0)
+    expectedSourceBehavior:
+    - Source output is NaN because all comparisons are false and the final arithmetic
+      result is NaN.
+    - Follow-up is NaN and output is NaN; the supplied relation's difference comparison
+      is non-throwing for NaN.
+    targetCases: 1
+    emptyOutputAllowed: false

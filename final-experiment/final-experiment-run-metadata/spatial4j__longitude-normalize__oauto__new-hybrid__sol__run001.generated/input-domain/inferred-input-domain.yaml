@@ -1,0 +1,546 @@
+InputDomain:
+  summary: Finite primitive double longitudes for which Java double arithmetic represents
+    the +360-degree follow-up and the SUT's +180 modulo operands exactly one revolution
+    apart; cases cover every normLonDEG branch, range boundaries, signed zero, antimeridian
+    sentinels, repeated revolutions, fractions, and large magnitudes.
+  globalConstraints:
+  - 'longitudeDeg must be finite: Double.isFinite(longitudeDeg) == true. NaN and infinities
+    are excluded because the API specifies longitude normalization rather than invalid-input
+    behavior, and NaN would make the supplied difference assertion vacuously pass.'
+  - 'The computed follow-up must represent exactly one revolution: ((longitudeDeg
+    + 360.0) - longitudeDeg) == 360.0.'
+  - 'The modulo operands used by source and follow-up executions must remain exactly
+    one revolution apart: ((((longitudeDeg + 360.0) + 180.0) - (longitudeDeg + 180.0))
+    == 360.0). This excludes finite magnitudes whose double spacing distorts the developer-provided
+    +360 transformation.'
+  - For every case, invoke normLonDEG(longitudeDeg), invoke normLonDEG(longitudeDeg
+    + 360.0), and apply LongitudeNormalizeMetamorphicSpec.assertRelation to the two
+    outputs.
+  diversity:
+    sourceControlFlow:
+    - inclusive common-case return
+    - negative off branch
+    - positive antimeridian sentinel branch
+    - general modulo branch
+    sourceRegion:
+    - inside -180..180
+    - immediately adjacent to boundaries
+    - one to two revolutions away
+    - multiple revolutions away
+    - large admissible magnitude
+    normalizedResult:
+    - negative interior
+    - positive interior
+    - positive zero
+    - negative zero
+    - -180 sentinel
+    - +180 sentinel
+    - within antimeridian tolerance
+    numericForm:
+    - integer
+    - fractional
+    - signed zero
+    - subnormal
+    - adjacent representable double
+    - large exact binary integer
+    followUpPath:
+    - common-case to common-case
+    - common-case to modulo
+    - modulo to common-case
+    - modulo to modulo
+  scenarios:
+  - id: POSITIVE_ZERO_COMMON_CASE
+    category: EDGE
+    description: Positive zero takes the inclusive common-case return.
+    preconditions:
+    - longitudeDeg == +0.0 and Double.doubleToRawLongBits(longitudeDeg) == 0x0000000000000000L
+    expectedSourceBehavior:
+    - The returned value is positive zero with the same raw bits because the input
+      is returned as-is.
+    - The follow-up is 360.0 and normalizes to zero, so the asserted difference is
+      zero.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_ZERO_COMMON_CASE
+    category: EDGE
+    description: Negative zero exercises preservation of the input sign in the common-case
+      return.
+    preconditions:
+    - longitudeDeg == -0.0 and Double.doubleToRawLongBits(longitudeDeg) == 0x8000000000000000L
+    expectedSourceBehavior:
+    - The returned value retains the negative-zero raw bits because normLonDEG returns
+      the input directly.
+    - The follow-up normalizes to numerical zero, which compares equal under the supplied
+      relation.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LEAST_POSITIVE_SUBNORMAL
+    category: EDGE
+    description: The least positive nonzero double is inside the direct-return interval
+      but is lost when added to 360.
+    preconditions:
+    - longitudeDeg == Double.MIN_VALUE
+    expectedSourceBehavior:
+    - The source output equals Double.MIN_VALUE exactly.
+    - The follow-up rounds to 360.0 and normalizes to 0.0; the difference is far below
+      1e-9.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LEAST_NEGATIVE_SUBNORMAL
+    category: EDGE
+    description: The least-magnitude negative nonzero double is directly returned.
+    preconditions:
+    - longitudeDeg == -Double.MIN_VALUE
+    expectedSourceBehavior:
+    - The source output equals -Double.MIN_VALUE exactly.
+    - Any loss of the subnormal during follow-up addition remains far below the relation
+      tolerance.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_QUADRANT_INTERIOR
+    category: NORMAL
+    description: A representative negative longitude well inside the accepted interval.
+    preconditions:
+    - longitudeDeg == -90.0
+    expectedSourceBehavior:
+    - The source output is exactly -90.0 via the common-case return.
+    - The 270.0 follow-up takes modulo normalization and also produces -90.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_QUADRANT_INTERIOR
+    category: NORMAL
+    description: A representative positive longitude well inside the accepted interval.
+    preconditions:
+    - longitudeDeg == 90.0
+    expectedSourceBehavior:
+    - The source output is exactly 90.0 via the common-case return.
+    - The 450.0 follow-up takes modulo normalization and also produces 90.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_INTERIOR_NEAR_BOUNDARY
+    category: BOUNDARY
+    description: An ordinary in-range negative value close to the lower longitude
+      boundary.
+    preconditions:
+    - longitudeDeg == -179.0
+    expectedSourceBehavior:
+    - The source output is exactly -179.0 without modulo arithmetic.
+    - The follow-up is outside the range and normalizes to -179.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_INTERIOR_NEAR_BOUNDARY
+    category: BOUNDARY
+    description: An ordinary in-range positive value close to the upper longitude
+      boundary.
+    preconditions:
+    - longitudeDeg == 179.0
+    expectedSourceBehavior:
+    - The source output is exactly 179.0 without modulo arithmetic.
+    - The follow-up is outside the range and normalizes to 179.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EXACT_NEGATIVE_ANTIMERIDIAN
+    category: BOUNDARY
+    description: The inclusive lower boundary is returned as -180 while its follow-up
+      is represented as +180.
+    preconditions:
+    - longitudeDeg == -180.0
+    expectedSourceBehavior:
+    - The source output is exactly -180.0 via the common-case return.
+    - The follow-up is 180.0 and is returned as +180.0; the relation accepts both
+      as antimeridian representations.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: JUST_INSIDE_NEGATIVE_BOUNDARY
+    category: BOUNDARY
+    description: The next representable double above -180 remains in the direct-return
+      branch.
+    preconditions:
+    - longitudeDeg == Math.nextUp(-180.0)
+    expectedSourceBehavior:
+    - The source output equals the input exactly and is greater than -180.0.
+    - The follow-up normalizes to the same longitude within the supplied tolerance.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: JUST_OUTSIDE_NEGATIVE_BOUNDARY
+    category: BOUNDARY
+    description: The next representable double below -180 enters the negative-remainder
+      branch.
+    preconditions:
+    - longitudeDeg == Math.nextDown(-180.0)
+    expectedSourceBehavior:
+    - The source output is close to +180.0 and lies within [-180.0, 180.0].
+    - The source and follow-up outputs satisfy the antimeridian-aware relation.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EXACT_POSITIVE_ANTIMERIDIAN
+    category: BOUNDARY
+    description: The inclusive upper boundary is returned unchanged.
+    preconditions:
+    - longitudeDeg == 180.0
+    expectedSourceBehavior:
+    - The source output is exactly +180.0 via the common-case return.
+    - The 540.0 follow-up reaches the positive off==0 sentinel and also returns +180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: JUST_INSIDE_POSITIVE_BOUNDARY
+    category: BOUNDARY
+    description: The next representable double below +180 remains in the direct-return
+      branch.
+    preconditions:
+    - longitudeDeg == Math.nextDown(180.0)
+    expectedSourceBehavior:
+    - The source output equals the input exactly and is less than 180.0.
+    - The follow-up takes modulo normalization and agrees within 1e-9.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: JUST_OUTSIDE_POSITIVE_BOUNDARY
+    category: BOUNDARY
+    description: The next representable double above +180 enters the general modulo
+      branch.
+    preconditions:
+    - longitudeDeg == Math.nextUp(180.0)
+    expectedSourceBehavior:
+    - The source output is close to -180.0 and remains in the documented normalized
+      range.
+    - The follow-up output agrees under the antimeridian-aware relation.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_ANTIMERIDIAN_TOLERANCE_INTERIOR
+    category: EDGE
+    description: An in-range value lies within the assertion's 1e-9 antimeridian tolerance.
+    preconditions:
+    - longitudeDeg == -180.0 + 5e-10
+    expectedSourceBehavior:
+    - The source is returned unchanged and is recognized as antimeridian-adjacent
+      by the supplied assertion.
+    - The follow-up normalizes to the same meridian within tolerance.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_ANTIMERIDIAN_TOLERANCE_INTERIOR
+    category: EDGE
+    description: A positive in-range value lies within the assertion's antimeridian
+      tolerance.
+    preconditions:
+    - longitudeDeg == 180.0 - 5e-10
+    expectedSourceBehavior:
+    - The source is returned unchanged and is recognized as antimeridian-adjacent.
+    - The follow-up remains equivalent under the supplied assertion.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FIRST_DEGREE_ABOVE_POSITIVE_RANGE
+    category: BOUNDARY
+    description: A value one degree above +180 exercises ordinary positive modulo
+      normalization.
+    preconditions:
+    - longitudeDeg == 181.0
+    expectedSourceBehavior:
+    - The source output is exactly -179.0 through the general modulo branch.
+    - The 541.0 follow-up also normalizes to -179.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FIRST_DEGREE_BELOW_NEGATIVE_RANGE
+    category: BOUNDARY
+    description: A value one degree below -180 exercises the negative-remainder branch.
+    preconditions:
+    - longitudeDeg == -181.0
+    expectedSourceBehavior:
+    - The source output is exactly 179.0 through the off < 0 branch.
+    - The 179.0 follow-up is returned directly with the same result.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_NEAR_ONE_REVOLUTION
+    category: NORMAL
+    description: A positive out-of-range value just below one full revolution normalizes
+      to a negative interior longitude.
+    preconditions:
+    - longitudeDeg == 359.0
+    expectedSourceBehavior:
+    - The source output is exactly -1.0.
+    - The 719.0 follow-up also normalizes to -1.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_NEAR_ONE_REVOLUTION
+    category: NORMAL
+    description: A negative out-of-range value just above minus one full revolution
+      normalizes through a negative remainder.
+    preconditions:
+    - longitudeDeg == -359.0
+    expectedSourceBehavior:
+    - The source output is exactly 1.0.
+    - The 1.0 follow-up uses the common-case return with the same output.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EXACT_POSITIVE_REVOLUTION
+    category: EDGE
+    description: One positive full revolution normalizes to the prime meridian.
+    preconditions:
+    - longitudeDeg == 360.0
+    expectedSourceBehavior:
+    - The source output is exactly 0.0 through the general modulo branch.
+    - The 720.0 follow-up also normalizes to 0.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EXACT_NEGATIVE_REVOLUTION
+    category: EDGE
+    description: One negative full revolution normalizes to the prime meridian via
+      a negative modulo operand.
+    preconditions:
+    - longitudeDeg == -360.0
+    expectedSourceBehavior:
+    - The source output is exactly 0.0.
+    - The follow-up is 0.0 and is returned directly.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: JUST_BELOW_POSITIVE_ANTIMERIDIAN_SENTINEL
+    category: BOUNDARY
+    description: A value below 540 approaches the positive off==0 sentinel from the
+      general modulo branch.
+    preconditions:
+    - longitudeDeg == 539.0
+    expectedSourceBehavior:
+    - The source output is exactly 179.0.
+    - The follow-up also normalizes to 179.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: JUST_ABOVE_NEGATIVE_ANTIMERIDIAN_SENTINEL
+    category: BOUNDARY
+    description: A value above -540 exercises the negative-remainder branch near its
+      zero-remainder transition.
+    preconditions:
+    - longitudeDeg == -539.0
+    expectedSourceBehavior:
+    - The source output is exactly -179.0.
+    - The -179.0 follow-up is returned directly.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_ANTIMERIDIAN_SENTINEL
+    category: EDGE
+    description: The first positive out-of-range value whose modulo offset is zero
+      reaches the explicit positive sentinel branch.
+    preconditions:
+    - longitudeDeg == 540.0
+    expectedSourceBehavior:
+    - off == 0 and longitudeDeg > 0, so the source output is exactly +180.0.
+    - The follow-up also reaches a positive antimeridian sentinel.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_ANTIMERIDIAN_ZERO_REMAINDER
+    category: EDGE
+    description: The corresponding negative zero-remainder value bypasses the positive
+      sentinel condition.
+    preconditions:
+    - longitudeDeg == -540.0
+    expectedSourceBehavior:
+    - The remainder compares equal to zero, longitudeDeg > 0 is false, and the source
+      output is exactly -180.0.
+    - The follow-up is -180.0 and is returned directly.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: REPRESENTABLE_BELOW_POSITIVE_SENTINEL
+    category: BOUNDARY
+    description: The representable predecessor of 540 tests the transition into the
+      positive antimeridian sentinel.
+    preconditions:
+    - longitudeDeg == Math.nextDown(540.0)
+    expectedSourceBehavior:
+    - The source takes the general modulo branch and produces a value just below +180.0.
+    - The follow-up remains equivalent within the relation tolerance.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: REPRESENTABLE_ABOVE_POSITIVE_SENTINEL
+    category: BOUNDARY
+    description: The representable successor of 540 tests the other side of the positive
+      sentinel.
+    preconditions:
+    - longitudeDeg == Math.nextUp(540.0)
+    expectedSourceBehavior:
+    - The source takes the general modulo branch and produces a value just above -180.0.
+    - The follow-up remains equivalent under the antimeridian-aware assertion.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: REPRESENTABLE_BELOW_NEGATIVE_SENTINEL
+    category: BOUNDARY
+    description: The representable predecessor of -540 approaches its zero-remainder
+      point from the negative-remainder side.
+    preconditions:
+    - longitudeDeg == Math.nextDown(-540.0)
+    expectedSourceBehavior:
+    - The source takes the off < 0 branch and produces a value just below +180.0.
+    - The follow-up normalizes to the same meridian within tolerance.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: REPRESENTABLE_ABOVE_NEGATIVE_SENTINEL
+    category: BOUNDARY
+    description: The representable successor of -540 leaves the zero-remainder point
+      through the negative-remainder branch.
+    preconditions:
+    - longitudeDeg == Math.nextUp(-540.0)
+    expectedSourceBehavior:
+    - The source output is just above -180.0.
+    - The follow-up lies just above -180.0 and is returned directly.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: TWO_POSITIVE_REVOLUTIONS
+    category: NORMAL
+    description: Two positive full revolutions exercise repeated positive wrapping.
+    preconditions:
+    - longitudeDeg == 720.0
+    expectedSourceBehavior:
+    - The source output is exactly 0.0.
+    - Adding another revolution leaves the normalized result at 0.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: TWO_NEGATIVE_REVOLUTIONS
+    category: NORMAL
+    description: Two negative full revolutions exercise repeated negative wrapping.
+    preconditions:
+    - longitudeDeg == -720.0
+    expectedSourceBehavior:
+    - The source output is exactly 0.0 through the negative-side modulo calculation.
+    - The follow-up -360.0 also normalizes to 0.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LATER_POSITIVE_ANTIMERIDIAN_SENTINEL
+    category: EDGE
+    description: A positive antimeridian after multiple revolutions verifies repeated
+      entry to the explicit sentinel branch.
+    preconditions:
+    - longitudeDeg == 900.0
+    expectedSourceBehavior:
+    - The source output is exactly +180.0 because off == 0 and the source is positive.
+    - The follow-up also normalizes to +180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LATER_NEGATIVE_ANTIMERIDIAN_SENTINEL
+    category: EDGE
+    description: A negative antimeridian after multiple revolutions verifies the nonpositive
+      zero-remainder path.
+    preconditions:
+    - longitudeDeg == -900.0
+    expectedSourceBehavior:
+    - The source output is exactly -180.0 because the positive sentinel condition
+      is false.
+    - The follow-up -540.0 also normalizes to -180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_MULTIWRAP_FRACTION
+    category: NORMAL
+    description: A fractional longitude several positive revolutions from the normalized
+      interval checks residue preservation.
+    preconditions:
+    - longitudeDeg == 1083.456
+    expectedSourceBehavior:
+    - The source takes the general modulo branch and returns a finite value in [-180.0,
+      180.0].
+    - The follow-up preserves the same fractional normalized longitude within 1e-9.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_MULTIWRAP_FRACTION
+    category: NORMAL
+    description: A fractional longitude several negative revolutions away checks the
+      negative-remainder calculation.
+    preconditions:
+    - longitudeDeg == -1083.456
+    expectedSourceBehavior:
+    - The source takes the off < 0 branch and returns a finite value in [-180.0, 180.0].
+    - The follow-up preserves the normalized fractional longitude within 1e-9.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LARGE_POSITIVE_FRACTIONAL_LONGITUDE
+    category: EDGE
+    description: A large positive longitude with an exactly representable quarter-degree
+      component exercises many wraps.
+    preconditions:
+    - longitudeDeg == 1000000.25
+    expectedSourceBehavior:
+    - The source uses the general modulo branch and returns a finite normalized longitude.
+    - The exactly represented +360 follow-up produces an output within 1e-9 of the
+      source output.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LARGE_NEGATIVE_FRACTIONAL_LONGITUDE
+    category: EDGE
+    description: A large negative longitude with an exactly representable quarter-degree
+      component exercises many negative wraps.
+    preconditions:
+    - longitudeDeg == -1000000.25
+    expectedSourceBehavior:
+    - The source uses the negative-remainder branch and returns a finite normalized
+      longitude.
+    - The exactly represented +360 follow-up preserves the normalized result within
+      tolerance.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LARGE_POSITIVE_POWER_OF_TWO_52
+    category: EDGE
+    description: A large exact binary integer tests modulo normalization where the
+      double unit in the last place is 0.5 degree.
+    preconditions:
+    - longitudeDeg == 0x1.0p52
+    expectedSourceBehavior:
+    - The source bypasses the common case and returns a finite value in [-180.0, 180.0].
+    - The admissibility constraints ensure the follow-up and modulo operands remain
+      exactly 360 degrees apart.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LARGE_NEGATIVE_POWER_OF_TWO_52
+    category: EDGE
+    description: The negative 2^52 case tests the large-magnitude negative-remainder
+      path.
+    preconditions:
+    - longitudeDeg == -0x1.0p52
+    expectedSourceBehavior:
+    - The source returns a finite normalized longitude through the negative-side path.
+    - The follow-up output satisfies the supplied 1e-9 relation.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LARGE_POSITIVE_POWER_OF_TWO_54
+    category: EDGE
+    description: An exact 2^54-degree input tests repeated wrapping with a two-degree
+      double spacing.
+    preconditions:
+    - longitudeDeg == 0x1.0p54
+    expectedSourceBehavior:
+    - The source takes an out-of-range modulo path and returns a finite value in [-180.0,
+      180.0].
+    - Adding 360.0 remains exact and preserves the normalized result.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LARGE_NEGATIVE_POWER_OF_TWO_54
+    category: EDGE
+    description: An exact -2^54-degree input tests the corresponding coarse negative
+      representation.
+    preconditions:
+    - longitudeDeg == -0x1.0p54
+    expectedSourceBehavior:
+    - The source takes the negative-side modulo path and returns a finite normalized
+      value.
+    - The follow-up remains exactly one represented revolution away and satisfies
+      the relation.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LARGE_POSITIVE_POWER_OF_TWO_55
+    category: EDGE
+    description: An exact 2^55-degree source approaches the largest spacing class
+      covered by the exact-shift constraints.
+    preconditions:
+    - longitudeDeg == 0x1.0p55
+    expectedSourceBehavior:
+    - The source normalizes through a modulo branch to the documented output range.
+    - Both the +360 transformation and the SUT's shifted modulo operands meet the
+      global exactness checks.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LARGE_NEGATIVE_POWER_OF_TWO_55
+    category: EDGE
+    description: An exact -2^55-degree source covers the high-magnitude negative-remainder
+      counterpart.
+    preconditions:
+    - longitudeDeg == -0x1.0p55
+    expectedSourceBehavior:
+    - The source normalizes to a finite value in [-180.0, 180.0].
+    - The exact represented revolution permits a nonvacuous application of the supplied
+      output relation.
+    targetCases: 1
+    emptyOutputAllowed: false

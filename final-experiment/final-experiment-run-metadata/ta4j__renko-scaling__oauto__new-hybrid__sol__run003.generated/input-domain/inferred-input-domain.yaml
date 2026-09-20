@@ -1,0 +1,599 @@
+InputDomain:
+  summary: Valid Renko receivers and chronological, contiguous, evenly spaced source-bar
+    lists covering empty and non-emitting inputs, exact and overshooting brick thresholds,
+    both trend directions, reversals, pending metrics, multiple bricks per source
+    bar, synthetic brick times, nullable non-close fields, varied numeric scales,
+    and compatible Num factories.
+  globalConstraints:
+  - 'The receiver is constructed only with one of the supplied constructors: RenkoBarAggregator(boxSize)
+    or RenkoBarAggregator(boxSize, reversalAmount).'
+  - boxSize is non-null, finite, and strictly greater than zero, as required by validatedConfig.
+  - boxSize.doubleValue() and 2.0 * boxSize.doubleValue() are finite and strictly
+    positive, and boxSize is chosen so conversion through double in generateFollowUp
+    preserves exactly twice the resolved source box size; this is required because
+    the follow-up reconstructs the receiver from boxSize.doubleValue() * 2.0.
+  - For the two-argument constructor, reversalAmount is an integer greater than zero;
+    the one-argument constructor uses the documented value 2.
+  - The bars argument is non-null and every list element is non-null, because aggregate
+    rejects a null list and generateFollowUp rejects null elements.
+  - Every source bar has a non-null close price, because aggregate explicitly rejects
+    a null close price and invalid-input testing was not requested.
+  - For every non-empty list, there is a measurable Duration P greater than zero such
+    that every bar has time period P, endTime minus beginTime equals P, and each bar
+    after the first has beginTime equal to the preceding bar's endTime; this satisfies
+    the documented chronological, contiguous, evenly spaced requirement.
+  - All timestamps are chosen so every source end time and every computed next brick
+    end time obtained by repeatedly adding P remains within the Instant range.
+  - All Num values and NumFactory combinations used in a case support the comparisons,
+    addition, subtraction, multiplication, min, and max operations executed by aggregate
+    and generateFollowUp without arithmetic overflow or loss of the exact factor-of-two
+    scaling asserted by the relation.
+  - Close prices, boxSize multiples, accumulated amount values, and their factor-two
+    follow-ups remain representable in their Num implementations.
+  - Volume, amount, and trades are chosen so pending additions do not overflow their
+    respective Num representations or the long pendingTrades accumulator.
+  - Open, high, and low prices may be null because neither aggregate nor its documented
+    validity conditions require them; when non-null, they remain representable after
+    multiplication by 2. Close prices are never null.
+  - Volume and amount may independently be null because aggregate explicitly treats
+    each null value as contributing nothing to its pending accumulator.
+  - 'No restriction is imposed that market prices be positive: the supplied source
+    compares close-price differences and supports zero-crossing and negative close
+    sequences.'
+  - Within scenario preconditions, B denotes the resolved box size, R denotes reversalAmount,
+    P denotes the common source period, and close sequences are expressed relative
+    to the first close A.
+  diversity:
+    listCardinality:
+    - '0'
+    - '1'
+    - '2'
+    - 3-5
+    - at least 8
+    constructorPath:
+    - RenkoBarAggregator(boxSize)
+    - RenkoBarAggregator(boxSize, reversalAmount)
+    boxSizeClass:
+    - exact binary fraction below 1
+    - '1'
+    - integer greater than 1
+    - large exactly representable power of two
+    reversalAmount:
+    - '1'
+    - '2'
+    - '3'
+    - Integer.MAX_VALUE
+    initialMovement:
+    - none
+    - up
+    - down
+    thresholdRelation:
+    - strictly below one box
+    - exactly one box
+    - between one and two boxes
+    - exactly multiple boxes
+    - beyond multiple boxes
+    trendState:
+    - NONE
+    - UP
+    - DOWN
+    reversalRelation:
+    - below reversal distance
+    - exactly reversal distance
+    - beyond reversal distance
+    emissionMultiplicity:
+    - zero bricks
+    - one brick
+    - multiple bricks from one source bar
+    - bricks from multiple source bars
+    metricState:
+    - positive
+    - zero
+    - null volume
+    - null amount
+    - pending across non-emitting bars
+    brickTimeResolution:
+    - source end after scheduled end
+    - source end equal to scheduled end
+    - source end before scheduled end
+    priceRegion:
+    - strictly positive
+    - contains zero
+    - crosses zero
+    - strictly negative
+    numFactoryLayout:
+    - one compatible factory
+    - multiple mutually compatible factories
+  scenarios:
+  - id: EMPTY_SOURCE_LIST
+    category: BOUNDARY
+    description: Aggregate an empty, non-null source list.
+    preconditions:
+    - bars.size() equals 0.
+    expectedSourceBehavior:
+    - aggregate returns a non-null empty list through its early-return path.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: SINGLE_BAR_BASELINE_ONLY
+    category: BOUNDARY
+    description: A single source bar establishes lastBrickClose but cannot move away
+      from itself.
+    preconditions:
+    - bars.size() equals 1 and its close is A.
+    expectedSourceBehavior:
+    - No Renko brick is emitted.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: MULTIPLE_FLAT_CLOSES
+    category: NORMAL
+    description: Several contiguous bars all close at the initial close.
+    preconditions:
+    - There are at least 3 bars and every close equals A.
+    expectedSourceBehavior:
+    - No brick is emitted, while source metrics are accumulated internally as pending
+      values.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: INITIAL_UP_MOVE_JUST_BELOW_BOX
+    category: BOUNDARY
+    description: The first upward movement remains strictly below one box.
+    preconditions:
+    - The close sequence is [A, A + 0.999 * B] using exactly representable values
+      with a positive gap below A + B.
+    expectedSourceBehavior:
+    - The upward while-condition is false and output is empty.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: INITIAL_UP_MOVE_EXACT_BOX
+    category: BOUNDARY
+    description: The initial upward movement lands exactly on the inclusive one-box
+      threshold.
+    preconditions:
+    - The close sequence is [A, A + B].
+    expectedSourceBehavior:
+    - Exactly one upward brick is emitted from A to A + B.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: INITIAL_UP_MOVE_BETWEEN_ONE_AND_TWO_BOXES
+    category: NORMAL
+    description: The first upward movement exceeds one box but does not reach two.
+    preconditions:
+    - The close sequence is [A, A + 1.5 * B].
+    expectedSourceBehavior:
+    - Exactly one upward brick is emitted and its close is A + B.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: INITIAL_UP_MULTI_BRICK_JUMP
+    category: EDGE
+    description: One source close crosses several upward box boundaries.
+    preconditions:
+    - The close sequence is [A, A + 3 * B].
+    expectedSourceBehavior:
+    - Exactly three consecutive upward bricks are emitted from the second source bar.
+    - Only the first of those bricks receives pending volume, amount, and trades;
+      the other two receive zero metrics.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: INITIAL_DOWN_MOVE_EXACT_BOX
+    category: BOUNDARY
+    description: With direction NONE, the first downward movement lands exactly one
+      box below the baseline.
+    preconditions:
+    - The close sequence is [A, A - B].
+    expectedSourceBehavior:
+    - Exactly one downward brick is emitted from A to A - B.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: INITIAL_DOWN_MULTI_BRICK_JUMP
+    category: EDGE
+    description: One source close crosses several downward box boundaries while direction
+      is initially NONE.
+    preconditions:
+    - The close sequence is [A, A - 3 * B].
+    expectedSourceBehavior:
+    - Exactly three consecutive downward bricks are emitted.
+    - Only the first brick from the jumping source bar carries pending metrics.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ESTABLISHED_UP_CONTINUATION
+    category: NORMAL
+    description: An established upward trend emits another brick on a later source
+      bar.
+    preconditions:
+    - The close sequence is [A, A + B, A + 2 * B].
+    expectedSourceBehavior:
+    - Two upward bricks are emitted in order, one from each moving source bar.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ESTABLISHED_DOWN_CONTINUATION
+    category: NORMAL
+    description: An established downward trend emits another brick on a later source
+      bar.
+    preconditions:
+    - The close sequence is [A, A - B, A - 2 * B].
+    expectedSourceBehavior:
+    - Two downward bricks are emitted in order, one from each moving source bar.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UP_TREND_PULLBACK_BELOW_REVERSAL
+    category: BOUNDARY
+    description: An upward trend receives a pullback that does not reach its reversal
+      distance.
+    preconditions:
+    - R equals 2 and the close sequence is [A, A + B, A - 0.5 * B].
+    - The final close is strictly greater than the reversal threshold A - B.
+    expectedSourceBehavior:
+    - Only the original upward brick is present; the pullback emits no downward brick.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UP_TREND_EXACT_REVERSAL
+    category: BOUNDARY
+    description: An upward trend lands exactly on its inclusive downward reversal
+      threshold.
+    preconditions:
+    - R equals 2 and the close sequence is [A, A + B, A - B].
+    expectedSourceBehavior:
+    - The final source bar emits exactly two downward bricks and direction becomes
+      DOWN.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UP_TREND_REVERSAL_OVERSHOOT
+    category: EDGE
+    description: An upward trend overshoots the required downward reversal by additional
+      boxes.
+    preconditions:
+    - R equals 2 and the close sequence is [A, A + B, A - 3 * B].
+    expectedSourceBehavior:
+    - The reversal source bar emits four downward bricks from A + B through A - 3
+      * B.
+    - Only the first reversal brick carries that source bar's pending metrics.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DOWN_TREND_PULLBACK_BELOW_REVERSAL
+    category: BOUNDARY
+    description: A downward trend receives an upward pullback that remains below the
+      reversal distance.
+    preconditions:
+    - R equals 2 and the close sequence is [A, A - B, A + 0.5 * B].
+    - The final close is strictly less than the reversal threshold A + B.
+    expectedSourceBehavior:
+    - Only the original downward brick is emitted; the pullback emits no upward brick.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DOWN_TREND_EXACT_REVERSAL
+    category: BOUNDARY
+    description: A downward trend lands exactly on its inclusive upward reversal threshold.
+    preconditions:
+    - R equals 2 and the close sequence is [A, A - B, A + B].
+    expectedSourceBehavior:
+    - The final source bar emits exactly two upward bricks and direction becomes UP.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DOWN_TREND_REVERSAL_OVERSHOOT
+    category: EDGE
+    description: A downward trend overshoots the required upward reversal by additional
+      boxes.
+    preconditions:
+    - R equals 2 and the close sequence is [A, A - B, A + 3 * B].
+    expectedSourceBehavior:
+    - The reversal source bar emits four upward bricks from A - B through A + 3 *
+      B.
+    - Additional bricks from that source bar have zero metrics.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ONE_BOX_REVERSAL_AMOUNT
+    category: BOUNDARY
+    description: The minimum valid reversal amount permits reversal after a one-box
+      opposite move.
+    preconditions:
+    - R equals 1 and the close sequence is [A, A + B, A].
+    expectedSourceBehavior:
+    - One upward brick followed by one downward brick is emitted.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: THREE_BOX_REVERSAL_JUST_SHORT
+    category: BOUNDARY
+    description: A reversalAmount greater than the default is approached but not reached.
+    preconditions:
+    - R equals 3 and the close sequence is [A, A + B, A - 1.5 * B].
+    - The final close is strictly above the exact reversal threshold A - 2 * B.
+    expectedSourceBehavior:
+    - The final pullback emits no reversal brick.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: THREE_BOX_EXACT_REVERSAL
+    category: BOUNDARY
+    description: A three-box reversal lands exactly on its threshold.
+    preconditions:
+    - R equals 3 and the close sequence is [A, A + B, A - 2 * B].
+    expectedSourceBehavior:
+    - The final source bar emits exactly three downward bricks.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BIDIRECTIONAL_WHIPSAW
+    category: EDGE
+    description: The sequence establishes UP, reverses to DOWN, and then reverses
+      back to UP.
+    preconditions:
+    - R equals 2 and the close sequence is [A, A + B, A - B, A + B].
+    expectedSourceBehavior:
+    - Output directions are upward, then two downward bricks, then two upward bricks.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ALTERNATING_SUB_BOX_MOVEMENTS
+    category: NORMAL
+    description: Closes alternate around the baseline without reaching either initial
+      brick threshold.
+    preconditions:
+    - The close sequence is [A, A + 0.5 * B, A - 0.5 * B, A + 0.75 * B, A - 0.75 *
+      B].
+    expectedSourceBehavior:
+    - Direction remains NONE and no brick is emitted.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: PENDING_METRICS_ACROSS_NON_EMITTING_BARS
+    category: NORMAL
+    description: Several non-emitting bars accumulate metrics before an exact threshold
+      is reached.
+    preconditions:
+    - The close sequence is [A, A + 0.25 * B, A + 0.75 * B, A + B].
+    - Every bar has positive, non-null volume and amount and a positive trade count.
+    expectedSourceBehavior:
+    - Exactly one upward brick is emitted.
+    - Its volume, amount, and trades equal the sums from all four source bars.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NULL_VOLUME_CONTRIBUTIONS
+    category: EDGE
+    description: Some source bars have null volume while close movement eventually
+      emits a brick.
+    preconditions:
+    - The close sequence is [A, A + 0.5 * B, A + B].
+    - At least one source volume is null and at least one is non-null.
+    expectedSourceBehavior:
+    - Exactly one upward brick is emitted.
+    - Its volume equals the sum of only the non-null source volumes.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NULL_AMOUNT_CONTRIBUTIONS
+    category: EDGE
+    description: Some source bars have null amount while close movement eventually
+      emits a brick.
+    preconditions:
+    - The close sequence is [A, A - 0.5 * B, A - B].
+    - At least one source amount is null and at least one is non-null.
+    expectedSourceBehavior:
+    - Exactly one downward brick is emitted.
+    - Its amount equals the sum of only the non-null source amounts.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ALL_NULL_VOLUME_AND_AMOUNT
+    category: EDGE
+    description: All source volume and amount values are null.
+    preconditions:
+    - The close sequence is [A, A + B].
+    - Every source bar has null volume and null amount.
+    expectedSourceBehavior:
+    - One upward brick is emitted with zero volume and zero amount from the initialized
+      pending accumulators.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_METRICS
+    category: BOUNDARY
+    description: All source metrics are explicit zeros rather than null.
+    preconditions:
+    - The close sequence is [A, A - B].
+    - Every source bar has zero volume, zero amount, and zero trades.
+    expectedSourceBehavior:
+    - One downward brick is emitted with zero volume, amount, and trades.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MULTI_BRICK_METRIC_SENTINELS
+    category: EDGE
+    description: A source bar with positive metrics emits multiple bricks and exercises
+      zero sentinels on later bricks.
+    preconditions:
+    - The close sequence is [A, A + 4 * B].
+    - Both bars have positive volume, amount, and trades.
+    expectedSourceBehavior:
+    - Four upward bricks are emitted.
+    - The first brick has the summed pending metrics and the remaining three have
+      zero volume, amount, and trades.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SOURCE_END_AFTER_SCHEDULED_END
+    category: NORMAL
+    description: A later source bar emits one brick when its end time is after nextBrickEndTime.
+    preconditions:
+    - The close sequence is [A, A + B].
+    - The second source end is firstEnd + P and therefore after the initial nextBrickEndTime
+      of firstEnd.
+    expectedSourceBehavior:
+    - The emitted brick end time equals the second source bar's end time.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SOURCE_END_EQUALS_SCHEDULED_END
+    category: BOUNDARY
+    description: A continuation brick is emitted when sourceBarEndTime equals nextBrickEndTime.
+    preconditions:
+    - The close sequence is [A, A + B, A + 2 * B].
+    - After the first brick, the third source end equals the scheduled next brick
+      end.
+    expectedSourceBehavior:
+    - The second brick uses that equal instant as its end time through the non-isAfter
+      branch.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SOURCE_END_BEFORE_SYNTHETIC_SCHEDULE
+    category: EDGE
+    description: A multi-brick jump advances the schedule beyond subsequent contiguous
+      source-bar end times.
+    preconditions:
+    - The close sequence begins [A, A + 3 * B, A + 4 * B].
+    - Bars are spaced by P, so after the three-brick jump the scheduled next end is
+      later than the third source bar's end.
+    expectedSourceBehavior:
+    - The continuation brick uses nextBrickEndTime rather than the third source bar's
+      earlier end time.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MULTI_BRICK_SYNTHETIC_TIME_SEQUENCE
+    category: EDGE
+    description: Several bricks from one source bar require monotonically advanced
+      synthetic end times.
+    preconditions:
+    - The close sequence is [A, A + 4 * B].
+    expectedSourceBehavior:
+    - Four brick end times are separated by exactly P.
+    - Only the first end can be selected from the moving source bar's end; later ends
+      follow the synthetic schedule.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DEFAULT_CONSTRUCTOR_REVERSAL
+    category: NORMAL
+    description: Use the one-argument constructor and exercise its documented two-brick
+      reversal.
+    preconditions:
+    - The receiver is constructed as RenkoBarAggregator(B).
+    - The close sequence is [A, A + B, A - B].
+    expectedSourceBehavior:
+    - One upward brick and then exactly two downward bricks are emitted, demonstrating
+      the default reversalAmount of 2.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FRACTIONAL_BOX_SIZE
+    category: NORMAL
+    description: Use an exactly representable positive box size below one.
+    preconditions:
+    - B equals 0.5 and the close sequence is [A, A + 0.5, A + 1.0].
+    expectedSourceBehavior:
+    - Two upward bricks of size 0.5 are emitted.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LARGE_EXACT_BOX_SIZE
+    category: EDGE
+    description: Use a large exactly representable box while keeping all arithmetic
+      finite.
+    preconditions:
+    - B equals 2^40 and the close sequence is [A, A - B, A - 2 * B].
+    expectedSourceBehavior:
+    - Two finite downward bricks are emitted with price differences exactly equal
+      to B.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MAXIMUM_REVERSAL_AMOUNT
+    category: EDGE
+    description: Use Integer.MAX_VALUE as the reversal amount without reaching the
+      enormous reversal distance.
+    preconditions:
+    - R equals Integer.MAX_VALUE, B is finite, and multiplication R * B remains representable.
+    - The close sequence is [A, A + B, A - 100 * B].
+    expectedSourceBehavior:
+    - The first upward brick is emitted.
+    - The later opposite move emits no reversal because it is strictly smaller than
+      R * B.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UPWARD_ZERO_CROSSING
+    category: EDGE
+    description: An upward brick crosses from a negative open to a non-negative close.
+    preconditions:
+    - A equals -B and the close sequence is [-B, 0, B].
+    expectedSourceBehavior:
+    - Two upward bricks are emitted, including one whose close is exactly zero.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DOWNWARD_ZERO_CROSSING
+    category: EDGE
+    description: A downward brick crosses from a positive open to a non-positive close.
+    preconditions:
+    - A equals B and the close sequence is [B, 0, -B].
+    expectedSourceBehavior:
+    - Two downward bricks are emitted, including one whose close is exactly zero.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: STRICTLY_NEGATIVE_PRICE_REGION
+    category: EDGE
+    description: All closes and emitted brick prices remain strictly negative.
+    preconditions:
+    - A is less than -3 * B and the close sequence is [A, A + B, A + 2 * B].
+    expectedSourceBehavior:
+    - Two upward bricks are emitted even though every brick price is negative.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NULL_UNUSED_OHL_FIELDS
+    category: EDGE
+    description: Non-close OHLC fields are null even though closes and timing remain
+      valid.
+    preconditions:
+    - The close sequence is [A, A + B].
+    - At least one source bar has null open, high, or low price, while every close
+      is non-null.
+    expectedSourceBehavior:
+    - One upward brick is emitted from close movement.
+    - The emitted brick receives non-null open, high, low, and close values computed
+      by buildBrick.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EXTREME_UNUSED_OHL_RANGES
+    category: NORMAL
+    description: Source open, high, and low values differ greatly from closes but
+      remain finite and scalable.
+    preconditions:
+    - The close sequence is [A, A - B].
+    - At least one source bar's high-low range exceeds 10 * B without changing its
+      close.
+    expectedSourceBehavior:
+    - Exactly one downward brick is emitted because aggregation is driven by close-price
+      movement.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: REPEATED_EXACT_THRESHOLD_CLOSE
+    category: BOUNDARY
+    description: A close repeats the current brick close before the next exact threshold
+      is reached.
+    preconditions:
+    - The close sequence is [A, A + B, A + B, A + 2 * B].
+    expectedSourceBehavior:
+    - Exactly two upward bricks are emitted.
+    - Metrics from the repeated non-emitting bar remain pending and are attached to
+      the second brick.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LONG_MIXED_PATH_SEQUENCE
+    category: EDGE
+    description: A longer sequence combines sub-box movement, upward continuation,
+      non-reversing pullback, exact reversal, downward continuation, and upward reversal.
+    preconditions:
+    - R equals 2.
+    - There are at least 8 bars with close sequence [A, A + 0.5 * B, A + B, A + 2
+      * B, A + 1.5 * B, A, A - B, A + B].
+    expectedSourceBehavior:
+    - The output is non-empty and contains both upward and downward bricks.
+    - At least one source bar emits no brick, at least one emits one brick, and at
+      least one reversal source bar emits multiple bricks.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MIXED_COMPATIBLE_NUM_FACTORIES
+    category: EDGE
+    description: Source bars use more than one NumFactory implementation whose Num
+      values interoperate for every operation exercised by the supplied code.
+    preconditions:
+    - At least two bars have different NumFactory identities.
+    - The close sequence is numerically [A, A + B, A + 2 * B], and all cross-factory
+      comparisons and arithmetic are supported exactly.
+    expectedSourceBehavior:
+    - Two upward bricks are emitted using the first bar's NumFactory for resolved
+      box values and built bricks.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MINIMUM_TIME_PERIOD
+    category: BOUNDARY
+    description: Use a one-nanosecond common source period with safe Instant values.
+    preconditions:
+    - P equals Duration.ofNanos(1), the close sequence is [A, A + 3 * B], and all
+      required Instant additions remain in range.
+    expectedSourceBehavior:
+    - Three upward bricks are emitted with end times separated by exactly one nanosecond.
+    targetCases: 1
+    emptyOutputAllowed: false

@@ -1,0 +1,322 @@
+InputDomain:
+  summary: One primitive Java double longitude per source case, spanning the in-range
+    fast path, all remainder-normalization branches, wrap boundaries, floating-point
+    precision regimes, and IEEE-754 non-finite values accepted by the double parameter.
+  globalConstraints:
+  - Each source input is exactly one Java primitive double supplied to DistanceUtils.normLonDEG(double);
+    no SUT construction, object state, or auxiliary arguments are required.
+  - Named adjacent values must be evaluated with Java Math.nextUp or Math.nextDown
+    on the stated double literal.
+  - The domain includes finite values, Double.NaN, Double.POSITIVE_INFINITY, and Double.NEGATIVE_INFINITY
+    because the public signature accepts double and the supplied source defines execution
+    behavior for them.
+  - For each source value x, the follow-up is exactly the developer relation expression
+    x + 360.0 using Java double arithmetic.
+  diversity:
+    sourcePath:
+    - distinct
+    - source fast-path versus off < 0, off == 0 && lon_deg > 0, and final else normalization
+      paths
+    - in-range values; negative out-of-range values; positive exact-wrap values; positive
+      non-exact-wrap values
+    boundaryPosition:
+    - distinct
+    - position relative to -180, 180, 360, and 540
+    - exact boundaries; immediately adjacent representable doubles; first values outside
+      range; multiple-revolution values
+    numericRepresentation:
+    - distinct
+    - IEEE-754 magnitude and special-value class
+    - signed zero; subnormal; minimum normal; ordinary finite; powers with increasing
+      ULP; maximum finite; infinities; NaN
+    followUpPrecision:
+    - distinct
+    - whether adding 360.0 is exact, rounded to a different increment, or has no representable
+      effect
+    - ordinary values; 2^52; 2^53; 2^59; 2^60; 2^61; Double.MAX_VALUE
+  scenarios:
+  - id: SIGNED_ZERO_FAST_PATH
+    category: BOUNDARY
+    description: The two IEEE-754 zero encodings are already within the documented
+      longitude range.
+    preconditions:
+    - Source input is either +0.0 or -0.0.
+    expectedSourceBehavior:
+    - The inclusive range guard returns the source value directly without modulo arithmetic.
+    - The follow-up is 360.0 for either zero encoding and normalizes through the final
+      else path to zero.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ORDINARY_INTEGER_INTERIOR_FAST_PATH
+    category: NORMAL
+    description: Ordinary non-boundary integral longitudes exercise the common in-range
+      return path.
+    preconditions:
+    - Source input is either -90.0 or 90.0.
+    expectedSourceBehavior:
+    - The source output equals the source input exactly because -180.0 <= lon_deg
+      <= 180.0.
+    - The follow-up is outside the inclusive range and is reduced by the remainder
+      logic.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ORDINARY_FRACTIONAL_INTERIOR_FAST_PATH
+    category: NORMAL
+    description: Fractional in-range longitudes ensure the common path preserves a
+      non-integral double rather than applying a precision-changing shift.
+    preconditions:
+    - Source input is either -45.5 or 45.5.
+    expectedSourceBehavior:
+    - The source output is returned unchanged by the inclusive range guard.
+    - The follow-up is normalized after adding one revolution.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: EXACT_ANTIMERIDIAN_FAST_PATH
+    category: BOUNDARY
+    description: Both accepted endpoint spellings of the antimeridian are returned
+      unchanged.
+    preconditions:
+    - Source input is either -180.0 or 180.0.
+    expectedSourceBehavior:
+    - The source output is exactly the supplied endpoint because both endpoints satisfy
+      the inclusive guard.
+    - For -180.0, the follow-up is 180.0; for 180.0, the follow-up reaches the positive
+      exact-wrap branch and returns 180.0.
+    - The supplied relation explicitly permits the two antimeridian representations.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ADJACENT_INSIDE_RANGE_ENDPOINTS
+    category: BOUNDARY
+    description: The closest representable values still inside each endpoint test
+      inclusive fast-path behavior next to the antimeridian.
+    preconditions:
+    - Source input is either Math.nextUp(-180.0) or Math.nextDown(180.0).
+    expectedSourceBehavior:
+    - The source output is returned unchanged by the inclusive range guard.
+    - Adding 360.0 can round the adjacent value when represented near 180.0 or 540.0,
+      so this also exercises the relation tolerance and antimeridian tolerance.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ADJACENT_OUTSIDE_RANGE_ENDPOINTS
+    category: BOUNDARY
+    description: The closest representable values just beyond each allowed endpoint
+      enter remainder normalization.
+    preconditions:
+    - Source input is either Math.nextDown(-180.0) or Math.nextUp(180.0).
+    expectedSourceBehavior:
+    - Math.nextDown(-180.0) enters the off < 0 branch and returns 180.0 + off.
+    - Math.nextUp(180.0) enters the final else branch and returns -180.0 + off.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: FIRST_WHOLE_DEGREE_OUTSIDE_ENDPOINTS
+    category: EDGE
+    description: The first whole-degree values outside the legal interval provide
+      simple negative- and positive-remainder normalization cases.
+    preconditions:
+    - Source input is either -181.0 or 181.0.
+    expectedSourceBehavior:
+    - For -181.0, off is negative and the method returns 179.0.
+    - For 181.0, off is positive and the method returns -179.0.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: EXACT_ONE_REVOLUTION_FROM_ZERO
+    category: EDGE
+    description: Exact positive and negative full revolutions normalize to zero through
+      different remainder signs.
+    preconditions:
+    - Source input is either -360.0 or 360.0.
+    expectedSourceBehavior:
+    - For -360.0, off is -180.0 and the off < 0 branch returns 0.0.
+    - For 360.0, off is 180.0 and the final else branch returns 0.0.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ADJACENT_TO_ONE_REVOLUTION
+    category: BOUNDARY
+    description: Representable neighbors around positive and negative 360 degrees
+      test remainder behavior immediately around a wrap-to-zero point.
+    preconditions:
+    - Source input is one of Math.nextDown(-360.0), Math.nextUp(-360.0), Math.nextDown(360.0),
+      or Math.nextUp(360.0).
+    expectedSourceBehavior:
+    - All source values bypass the in-range guard.
+    - Negative values use a negative remainder and the off < 0 branch; positive values
+      use the final else branch.
+    - Outputs are near zero but are determined by the actual Java double remainder.
+    targetCases: 4
+    emptyOutputAllowed: false
+  - id: EXACT_OUTER_ANTIMERIDIAN_WRAP
+    category: BOUNDARY
+    description: Exact outer antimeridian equivalents reach the distinct zero-remainder
+      sentinel behavior.
+    preconditions:
+    - Source input is either -540.0 or 540.0.
+    expectedSourceBehavior:
+    - For -540.0, off compares equal to zero but lon_deg is not positive, so the final
+      else branch returns -180.0.
+    - For 540.0, off == 0 and lon_deg > 0, so the dedicated sentinel branch returns
+      180.0.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ADJACENT_TO_OUTER_ANTIMERIDIAN_WRAP
+    category: BOUNDARY
+    description: Representable neighbors around ±540 degrees distinguish exact zero
+      remainder from remainders infinitesimally above or below it.
+    preconditions:
+    - Source input is one of Math.nextDown(-540.0), Math.nextUp(-540.0), Math.nextDown(540.0),
+      or Math.nextUp(540.0).
+    expectedSourceBehavior:
+    - No case satisfies the exact off == 0 sentinel condition.
+    - Negative sources use the off < 0 branch; positive sources use the final else
+      branch.
+    - The normalized results lie immediately adjacent to one of the antimeridian endpoint
+      representations.
+    targetCases: 4
+    emptyOutputAllowed: false
+  - id: FRACTIONAL_MULTI_REVOLUTION_VALUES
+    category: EDGE
+    description: Fractional values beyond multiple complete revolutions exercise nonzero
+      remainders away from endpoint sentinels.
+    preconditions:
+    - Source input is either -900.25 or 900.25.
+    expectedSourceBehavior:
+    - The source output for -900.25 is 179.75 via the off < 0 branch.
+    - The source output for 900.25 is -179.75 via the final else branch.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LARGE_MODERATE_MAGNITUDE_FRACTIONAL_VALUES
+    category: EDGE
+    description: Moderately large finite fractional longitudes exercise modulo reduction
+      after many revolutions while 360.0 remains a meaningful increment.
+    preconditions:
+    - Source input is either -1000000.25 or 1000000.25.
+    expectedSourceBehavior:
+    - Both values bypass the range guard and use finite remainder arithmetic.
+    - The negative source takes off < 0; the positive source takes the final else
+      branch.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: SUBNORMAL_IN_RANGE_VALUES
+    category: EDGE
+    description: The smallest positive and negative subnormal values are valid in-range
+      doubles whose follow-up addition discards their tiny magnitude.
+    preconditions:
+    - Source input is either Double.MIN_VALUE or -Double.MIN_VALUE.
+    expectedSourceBehavior:
+    - The source output is returned unchanged by the fast path.
+    - The follow-up addition produces 360.0 at Java double precision, which normalizes
+      to zero.
+    - The supplied 1e-9 relation tolerance covers the tiny source-to-follow-up normalized
+      difference.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: MINIMUM_NORMAL_IN_RANGE_VALUES
+    category: EDGE
+    description: The smallest positive and negative normal doubles complement the
+      subnormal cases while remaining in the fast path.
+    preconditions:
+    - Source input is either Double.MIN_NORMAL or -Double.MIN_NORMAL.
+    expectedSourceBehavior:
+    - The source output is returned unchanged by the inclusive range guard.
+    - Adding 360.0 loses this magnitude at double precision, and the follow-up normalizes
+      to zero.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LARGE_FINITE_EXACT_360_INCREMENT_AT_2_POW_52
+    category: EDGE
+    description: At magnitude 2^52 the double ULP is 1 degree, so adding 360.0 remains
+      exactly representable.
+    preconditions:
+    - Source input is either 4503599627370496.0 or -4503599627370496.0, representing
+      ±2^52.
+    expectedSourceBehavior:
+    - Both values bypass the range guard and normalize using Java remainder arithmetic.
+    - The follow-up changes the representable source by exactly 360.0 before normalization.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LARGE_FINITE_EXACT_360_INCREMENT_AT_2_POW_53
+    category: EDGE
+    description: At magnitude 2^53 the ULP is 2 degrees; 360.0 is still an exactly
+      representable multiple of that spacing.
+    preconditions:
+    - Source input is either 9007199254740992.0 or -9007199254740992.0, representing
+      ±2^53.
+    expectedSourceBehavior:
+    - Both values bypass the fast path and use finite remainder reduction.
+    - The follow-up increment remains exactly representable as 360.0 at this spacing.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ROUNDED_FOLLOW_UP_INCREMENT_AT_2_POW_59
+    category: EDGE
+    description: At magnitude 2^59 the ULP is 128 degrees, so the developer transformation
+      cannot retain an exact 360-degree increment.
+    preconditions:
+    - Source input is either 576460752303423488.0 or -576460752303423488.0, representing
+      ±2^59.
+    expectedSourceBehavior:
+    - The source is finite and is normalized by the remainder path.
+    - Java double addition rounds the intended 360.0 shift to a representable increment
+      determined by the 128-degree ULP.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ROUNDED_FOLLOW_UP_INCREMENT_AT_2_POW_60
+    category: EDGE
+    description: At magnitude 2^60 the ULP is 256 degrees, producing a follow-up shift
+      that differs from the mathematical 360-degree revolution.
+    preconditions:
+    - Source input is either 1152921504606846976.0 or -1152921504606846976.0, representing
+      ±2^60.
+    expectedSourceBehavior:
+    - The source normalizes through finite remainder arithmetic.
+    - The Java expression source + 360.0 rounds at this magnitude, making this a measurable
+      precision limit of the supplied metamorphic transformation.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ROUNDED_FOLLOW_UP_INCREMENT_AT_2_POW_61
+    category: EDGE
+    description: At magnitude 2^61 the ULP is 512 degrees, larger than one revolution.
+    preconditions:
+    - Source input is either 2305843009213693952.0 or -2305843009213693952.0, representing
+      ±2^61.
+    expectedSourceBehavior:
+    - The source remains finite and reaches the modulo normalization path.
+    - Adding 360.0 is rounded to the local 512-degree spacing, so the generated follow-up
+      is not mathematically one full revolution away.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: MAXIMUM_FINITE_MAGNITUDE_VALUES
+    category: EDGE
+    description: The largest finite positive and negative doubles test finite modulo
+      behavior when adding 360.0 cannot change the source representation.
+    preconditions:
+    - Source input is either Double.MAX_VALUE or -Double.MAX_VALUE.
+    expectedSourceBehavior:
+    - The source bypasses the range guard and produces a finite normalized result
+      through the remainder branches.
+    - For each sign, source + 360.0 equals the source at Java double precision.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: INFINITE_SOURCE_VALUES
+    category: EDGE
+    description: Infinite doubles are accepted by the primitive signature and reach
+      the non-fast-path arithmetic behavior defined by Java.
+    preconditions:
+    - Source input is either Double.POSITIVE_INFINITY or Double.NEGATIVE_INFINITY.
+    expectedSourceBehavior:
+    - The range guard is false for either infinity.
+    - The expression (lon_deg + 180.0) % 360.0 is NaN for either infinity.
+    - Both comparisons on NaN are false, so the final else expression returns NaN.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: NAN_SOURCE_VALUE
+    category: EDGE
+    description: NaN reaches the remainder path because all ordered comparisons against
+      NaN are false.
+    preconditions:
+    - Source input is Double.NaN.
+    expectedSourceBehavior:
+    - The range guard, off < 0, and off == 0 conditions are all false.
+    - The final else expression returns NaN because off is NaN.
+    - The follow-up remains NaN, and the supplied assertion's numeric difference comparison
+      is false for NaN.
+    targetCases: 1
+    emptyOutputAllowed: false

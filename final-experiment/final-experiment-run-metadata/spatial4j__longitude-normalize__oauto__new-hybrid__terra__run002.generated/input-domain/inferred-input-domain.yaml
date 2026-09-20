@@ -1,0 +1,353 @@
+InputDomain:
+  summary: All Java double longitude values are in scope. The domain covers the in-range
+    fast return, all three modulo-return outcomes, antimeridian representations, floating-point
+    precision limits, and IEEE-754 non-finite values.
+  globalConstraints:
+  - Each source case supplies exactly one Java primitive double to DistanceUtils.normLonDEG(double);
+    no object construction is required.
+  - The follow-up must be computed as the Java double expression sourceLongitude +
+    360.0, without pre-normalizing or replacing the source value.
+  - 'No input values are excluded: finite values, +0.0, -0.0, NaN, +Infinity, and
+    -Infinity are all representable double inputs and the target method has no documented
+    input validation or rejection behavior.'
+  - For finite source values, observe both source and follow-up outputs before applying
+    LongitudeNormalizeMetamorphicSpec.assertRelation; do not substitute a separately
+    calculated normalization oracle for the supplied relation.
+  diversity:
+    targetControlFlow:
+    - distinct
+    - 6 observable outcomes
+    - in-range return; off < 0 return; off == 0 with positive input return; general
+      modulo return; NaN propagation from NaN; NaN propagation from infinities
+    boundaryLocation:
+    - distinct
+    - 12 boundary-oriented values
+    - -180; +180; adjacent in-range values; adjacent out-of-range values; exact nonzero-wrap
+      endpoints; tolerance-near antimeridian values
+    floatingPointArithmetic:
+    - distinct
+    - 8 IEEE-754 situations
+    - +0.0; -0.0; subnormals; exact binary large finite values; follow-up rounding
+      at large magnitude; maximum finite magnitudes; NaN; infinities
+    wrapDistance:
+    - distinct
+    - 4 wrap distances
+    - no wrap; first wrap outside either boundary; exact one-or-more-revolution endpoint;
+      multiple-revolution non-endpoint
+  scenarios:
+  - id: NEGATIVE_ANTIMERIDIAN_IN_RANGE
+    category: BOUNDARY
+    description: The inclusive lower longitude boundary is already normalized.
+    preconditions:
+    - source input equals -180.0
+    expectedSourceBehavior:
+    - Returns -180.0 through the inclusive in-range fast-return branch.
+    - The follow-up is +180.0, so the relation's antimeridian equivalence exception
+      is applicable.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_ANTIMERIDIAN_IN_RANGE
+    category: BOUNDARY
+    description: The inclusive upper longitude boundary is already normalized.
+    preconditions:
+    - source input equals +180.0
+    expectedSourceBehavior:
+    - Returns +180.0 through the inclusive in-range fast-return branch.
+    - The follow-up is +540.0, whose exact positive-wrap endpoint returns +180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: JUST_INSIDE_NEGATIVE_BOUNDARY
+    category: BOUNDARY
+    description: The closest representable value above -180 remains in the fast-return
+      interval.
+    preconditions:
+    - source input equals Math.nextUp(-180.0)
+    - source input is greater than -180.0 and less than or equal to +180.0
+    expectedSourceBehavior:
+    - Returns the source double unchanged through the in-range branch.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: JUST_INSIDE_POSITIVE_BOUNDARY
+    category: BOUNDARY
+    description: The closest representable value below +180 remains in the fast-return
+      interval.
+    preconditions:
+    - source input equals Math.nextDown(+180.0)
+    - source input is greater than or equal to -180.0 and less than +180.0
+    expectedSourceBehavior:
+    - Returns the source double unchanged through the in-range branch.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_ZERO_FAST_RETURN
+    category: NORMAL
+    description: Positive zero exercises the common in-range return without a sign-changing
+      source computation.
+    preconditions:
+    - source input equals +0.0
+    - Double.doubleToRawLongBits(source input) equals Double.doubleToRawLongBits(+0.0)
+    expectedSourceBehavior:
+    - Returns +0.0 directly from the in-range branch.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_ZERO_FAST_RETURN
+    category: EDGE
+    description: Negative zero is numerically in range but has a distinct IEEE-754
+      sign bit.
+    preconditions:
+    - source input equals -0.0
+    - Double.doubleToRawLongBits(source input) equals Double.doubleToRawLongBits(-0.0)
+    expectedSourceBehavior:
+    - Returns the source value directly from the in-range branch, preserving the source
+      signed-zero representation.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SUBNORMAL_VALUES_IN_RANGE
+    category: EDGE
+    description: The smallest positive and negative nonzero doubles are both within
+      the fast-return interval.
+    preconditions:
+    - source inputs are Double.MIN_VALUE and -Double.MIN_VALUE
+    - Each source input is nonzero and has absolute value less than 180.0
+    expectedSourceBehavior:
+    - Each source output equals its source input because the in-range branch avoids
+      modulo arithmetic.
+    - Adding 360.0 may lose the subnormal magnitude in follow-up arithmetic, making
+      this a measurable tolerance-oriented relation case.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ORDINARY_FRACTIONAL_IN_RANGE_VALUES
+    category: NORMAL
+    description: Ordinary positive and negative fractional longitudes use the fast
+      path while their follow-ups require normalization.
+    preconditions:
+    - source inputs are 12.5 and -12.5
+    - Each source input is strictly between -180.0 and +180.0
+    expectedSourceBehavior:
+    - Each source output equals its source input.
+    - Each follow-up is outside the in-range interval and exercises the general nonzero
+      modulo return.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ANTIMERIDIAN_WITHIN_RELATION_TOLERANCE
+    category: EDGE
+    description: In-range values within the relation's 1e-9 antimeridian tolerance
+      exercise the relation's special equivalence classification.
+    preconditions:
+    - source inputs are 180.0 - 5.0e-10 and -180.0 + 5.0e-10
+    - For each source input, abs(abs(source input) - 180.0) is less than or equal
+      to 1.0e-9
+    expectedSourceBehavior:
+    - Each source output equals its source input through the in-range branch.
+    - Each source output is classified as antimeridian by the supplied relation's
+      tolerance predicate.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ANTIMERIDIAN_OUTSIDE_RELATION_TOLERANCE
+    category: EDGE
+    description: Nearby in-range values just beyond the relation's special antimeridian
+      tolerance must use normal numeric comparison.
+    preconditions:
+    - source inputs are 180.0 - 2.0e-9 and -180.0 + 2.0e-9
+    - For each source input, abs(abs(source input) - 180.0) is greater than 1.0e-9
+    expectedSourceBehavior:
+    - Each source output equals its source input through the in-range branch.
+    - Neither source output is classified as antimeridian by the supplied relation's
+      tolerance predicate.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: JUST_BELOW_NEGATIVE_RANGE
+    category: BOUNDARY
+    description: The closest representable value below -180 enters the negative-remainder
+      modulo branch.
+    preconditions:
+    - source input equals Math.nextDown(-180.0)
+    - source input is less than -180.0
+    expectedSourceBehavior:
+    - Computes a negative off value and returns 180.0 + off.
+    - The returned value is just below +180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: JUST_ABOVE_POSITIVE_RANGE
+    category: BOUNDARY
+    description: The closest representable value above +180 enters the general positive-remainder
+      modulo branch.
+    preconditions:
+    - source input equals Math.nextUp(+180.0)
+    - source input is greater than +180.0
+    expectedSourceBehavior:
+    - Computes a positive nonzero off value and returns -180.0 + off.
+    - The returned value is just above -180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FIRST_NEGATIVE_WRAP_NON_ENDPOINT
+    category: NORMAL
+    description: A small negative overflow produces a negative remainder and wraps
+      near the positive antimeridian.
+    preconditions:
+    - source input equals -181.0
+    expectedSourceBehavior:
+    - Takes the off < 0 branch.
+    - Returns +179.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FIRST_POSITIVE_WRAP_NON_ENDPOINT
+    category: NORMAL
+    description: A small positive overflow produces a positive remainder and wraps
+      near the negative antimeridian.
+    preconditions:
+    - source input equals +181.0
+    expectedSourceBehavior:
+    - Takes the general modulo branch with positive nonzero off.
+    - Returns -179.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_EXACT_WRAP_ENDPOINT
+    category: BOUNDARY
+    description: A negative exact multiple-of-revolution endpoint reaches the general
+      else return rather than the positive-endpoint special case.
+    preconditions:
+    - source input equals -540.0
+    - (source input + 180.0) % 360.0 equals zero
+    - source input is less than zero
+    expectedSourceBehavior:
+    - off compares as zero, but lon_deg > 0 is false.
+    - Returns -180.0 from the final else branch.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_EXACT_WRAP_ENDPOINT
+    category: BOUNDARY
+    description: A positive exact multiple-of-revolution endpoint reaches the dedicated
+      positive-endpoint branch.
+    preconditions:
+    - source input equals +540.0
+    - (source input + 180.0) % 360.0 equals zero
+    - source input is greater than zero
+    expectedSourceBehavior:
+    - off equals zero and lon_deg > 0 is true.
+    - Returns +180.0 through the explicit positive-wrap endpoint branch.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MULTIPLE_NEGATIVE_REVOLUTIONS_NON_ENDPOINT
+    category: EDGE
+    description: A negative longitude beyond more than one revolution has a nonzero
+      negative remainder.
+    preconditions:
+    - source input equals -901.25
+    - source input is less than -180.0
+    - (source input + 180.0) % 360.0 is less than zero
+    expectedSourceBehavior:
+    - Takes the off < 0 branch.
+    - Returns +178.75.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MULTIPLE_POSITIVE_REVOLUTIONS_NON_ENDPOINT
+    category: EDGE
+    description: A positive longitude beyond more than one revolution has a nonzero
+      positive remainder.
+    preconditions:
+    - source input equals +901.25
+    - source input is greater than +180.0
+    - (source input + 180.0) % 360.0 is greater than zero
+    expectedSourceBehavior:
+    - Takes the final else branch with positive nonzero off.
+    - Returns -178.75.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LARGE_FINITE_EXACT_INCREMENT
+    category: EDGE
+    description: A large exactly representable finite value checks modulo normalization
+      before follow-up addition becomes coarser than unit precision.
+    preconditions:
+    - source input equals 0x1.0p52
+    - source input is finite and greater than +180.0
+    expectedSourceBehavior:
+    - Bypasses the in-range branch and normalizes using a finite positive modulo remainder.
+    - The source output is in the documented closed interval from -180.0 through +180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LARGE_POSITIVE_FOLLOW_UP_ROUNDING
+    category: EDGE
+    description: A very large positive finite input makes source + 360.0 subject to
+      coarse IEEE-754 rounding.
+    preconditions:
+    - source input equals 0x1.0p60
+    - Math.ulp(source input) is greater than 360.0
+    expectedSourceBehavior:
+    - Bypasses the in-range branch and uses a finite positive modulo remainder.
+    - The computed follow-up need not differ from the source by exactly 360.0 because
+      the addition is performed in double precision.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LARGE_NEGATIVE_FOLLOW_UP_ROUNDING
+    category: EDGE
+    description: A very large negative finite input makes source + 360.0 subject to
+      coarse IEEE-754 rounding and uses the negative-remainder branch.
+    preconditions:
+    - source input equals -0x1.0p60
+    - Math.ulp(source input) is greater than 360.0
+    expectedSourceBehavior:
+    - Bypasses the in-range branch and takes the off < 0 branch.
+    - The computed follow-up need not differ from the source by exactly 360.0 because
+      the addition is performed in double precision.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MAXIMUM_POSITIVE_FINITE
+    category: EDGE
+    description: The largest finite positive double checks finite modulo behavior
+      when adding 360.0 cannot change the representable value.
+    preconditions:
+    - source input equals Double.MAX_VALUE
+    - source input is finite
+    - source input + 360.0 equals source input
+    expectedSourceBehavior:
+    - Bypasses the in-range branch and returns a finite normalized value through positive-remainder
+      handling.
+    - The follow-up expression evaluates to the same representable double as the source.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MAXIMUM_NEGATIVE_FINITE
+    category: EDGE
+    description: The largest-magnitude negative finite double checks finite negative-remainder
+      behavior when adding 360.0 cannot change the representable value.
+    preconditions:
+    - source input equals -Double.MAX_VALUE
+    - source input is finite
+    - source input + 360.0 equals source input
+    expectedSourceBehavior:
+    - Bypasses the in-range branch and takes the off < 0 branch.
+    - The follow-up expression evaluates to the same representable double as the source.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NAN_INPUT
+    category: EDGE
+    description: NaN causes every ordered range and remainder comparison to be false.
+    preconditions:
+    - source input is Double.NaN
+    expectedSourceBehavior:
+    - The in-range comparison is false.
+    - off is NaN and both off < 0 and off == 0 are false.
+    - Returns NaN from -180.0 + off.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_INFINITY_INPUT
+    category: EDGE
+    description: Positive infinity reaches modulo arithmetic whose remainder is NaN.
+    preconditions:
+    - source input equals Double.POSITIVE_INFINITY
+    expectedSourceBehavior:
+    - The in-range comparison is false.
+    - (source input + 180.0) % 360.0 is NaN.
+    - Returns NaN from the final else branch.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_INFINITY_INPUT
+    category: EDGE
+    description: Negative infinity reaches modulo arithmetic whose remainder is NaN.
+    preconditions:
+    - source input equals Double.NEGATIVE_INFINITY
+    expectedSourceBehavior:
+    - The in-range comparison is false.
+    - (source input + 180.0) % 360.0 is NaN.
+    - Returns NaN from the final else branch.
+    targetCases: 1
+    emptyOutputAllowed: false

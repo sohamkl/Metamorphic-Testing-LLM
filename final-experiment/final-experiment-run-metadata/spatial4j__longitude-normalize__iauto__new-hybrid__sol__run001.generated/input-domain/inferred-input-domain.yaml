@@ -1,0 +1,303 @@
+InputDomain:
+  summary: Finite Java double longitudes for which adding 360.0 produces a distinct
+    finite follow-up, covering the direct-return interval, all normalization branches,
+    antimeridian sentinels, wrap discontinuities, multiple revolutions, and large-magnitude
+    precision effects.
+  globalConstraints:
+  - 'The source input longitudeDeg must be a finite Java double: Double.isFinite(longitudeDeg)
+    is true.'
+  - 'The follow-up computed by the supplied transformation must be finite: Double.isFinite(longitudeDeg
+    + 360.0) is true.'
+  - 'The follow-up must be representably distinct from the source: longitudeDeg +
+    360.0 != longitudeDeg. Inputs failing this are excluded because binary64 rounding
+    would erase the supplied transformation and make the test compare the SUT on an
+    unchanged input.'
+  - NaN and infinities are excluded because the source's remainder calculation can
+    produce NaN and the supplied assertion's comparison with NaN cannot detect a violation.
+  - Every selected source must satisfy one listed scenario's preconditions; no geographic
+    restriction to the conventional [-180, 180] interval is imposed.
+  diversity:
+    sourceRegion:
+    - inside [-180,180]
+    - just outside either endpoint
+    - first wrapped revolution
+    - multiple wrapped revolutions
+    - large finite magnitude
+    sourceBranch:
+    - direct return
+    - off < 0
+    - off == 0 and longitudeDeg > 0
+    - remaining else branch
+    normalizedResultRegion:
+    - -180 sentinel
+    - near -180
+    - negative interior
+    - signed zero or zero
+    - positive interior
+    - near +180
+    - +180 sentinel
+    followUpPath:
+    - direct source to direct follow-up
+    - direct source to normalized follow-up
+    - normalized source to direct follow-up
+    - normalized source to normalized follow-up
+    precisionScale:
+    - unit scale
+    - hundreds
+    - thousands through one million
+    - 2^40 through below 2^61
+  scenarios:
+  - id: SIGNED_ZERO_DIRECT_RETURN
+    category: EDGE
+    description: Exercise both Java signed-zero encodings in the direct-return branch.
+    preconditions:
+    - longitudeDeg is exactly +0.0 or exactly -0.0, distinguished with Double.doubleToRawLongBits.
+    expectedSourceBehavior:
+    - The condition longitudeDeg >= -180 && longitudeDeg <= 180 is true.
+    - The method returns longitudeDeg as-is, including its raw zero sign.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ORDINARY_INTERIOR_LONGITUDES
+    category: NORMAL
+    description: Exercise ordinary finite longitudes strictly inside the documented
+      interval.
+    preconditions:
+    - -180.0 < longitudeDeg && longitudeDeg < 180.0.
+    - longitudeDeg is neither +0.0 nor -0.0.
+    - Select values spanning negative, positive, integral, and non-integral inputs.
+    expectedSourceBehavior:
+    - The direct-return condition is true.
+    - The source output is exactly equal to longitudeDeg without remainder arithmetic.
+    targetCases: 4
+    emptyOutputAllowed: false
+  - id: LOWER_ANTIMERIDIAN_ENDPOINT
+    category: BOUNDARY
+    description: Exercise the inclusive lower endpoint retained by the direct-return
+      path.
+    preconditions:
+    - longitudeDeg == -180.0.
+    expectedSourceBehavior:
+    - The source output is exactly -180.0.
+    - The follow-up input is 180.0, so the supplied relation must use its explicit
+      antimeridian equivalence.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UPPER_ANTIMERIDIAN_ENDPOINT
+    category: BOUNDARY
+    description: Exercise the inclusive upper endpoint retained by the direct-return
+      path.
+    preconditions:
+    - longitudeDeg == 180.0.
+    expectedSourceBehavior:
+    - The source output is exactly 180.0.
+    - The source avoids modulo normalization even though its follow-up requires it.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: REPRESENTABLE_VALUES_JUST_INSIDE_ENDPOINTS
+    category: BOUNDARY
+    description: Exercise the nearest representable interior values on both sides
+      of the direct-return interval.
+    preconditions:
+    - longitudeDeg is Math.nextUp(-180.0) or Math.nextDown(180.0).
+    expectedSourceBehavior:
+    - The direct-return condition is true.
+    - The output equals the source exactly and lies strictly between -180.0 and 180.0.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: REPRESENTABLE_VALUES_JUST_OUTSIDE_ENDPOINTS
+    category: BOUNDARY
+    description: Cross each inclusive endpoint by one binary64 step and force modulo
+      normalization.
+    preconditions:
+    - longitudeDeg is Math.nextDown(-180.0) or Math.nextUp(180.0).
+    expectedSourceBehavior:
+    - The direct-return condition is false.
+    - Math.nextDown(-180.0) takes the off < 0 path and normalizes near +180.0.
+    - Math.nextUp(180.0) takes the final else path and normalizes near -180.0.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: POSITIVE_FIRST_WRAP_ORDINARY
+    category: NORMAL
+    description: Exercise ordinary positive inputs in the first interval above +180.
+    preconditions:
+    - 180.0 < longitudeDeg && longitudeDeg < 540.0.
+    - longitudeDeg is not 360.0.
+    - longitudeDeg is not an antimeridian value of the form 180.0 + 360.0 * k for
+      an integer k.
+    - Exclude Math.nextUp(180.0) because it is covered by the immediate-boundary scenario.
+    expectedSourceBehavior:
+    - The direct-return condition is false.
+    - off = (longitudeDeg + 180.0) % 360.0 is positive and nonzero.
+    - The source output is -180.0 + off and lies in (-180.0, 180.0).
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: NEGATIVE_FIRST_WRAP_ORDINARY
+    category: NORMAL
+    description: Exercise ordinary negative inputs whose +360 follow-up enters the
+      direct-return interval.
+    preconditions:
+    - -540.0 < longitudeDeg && longitudeDeg < -180.0.
+    - longitudeDeg is not -360.0.
+    - longitudeDeg is not an antimeridian value of the form -180.0 - 360.0 * k for
+      an integer k.
+    - Exclude Math.nextDown(-180.0) because it is covered by the immediate-boundary
+      scenario.
+    expectedSourceBehavior:
+    - The direct-return condition is false.
+    - off = (longitudeDeg + 180.0) % 360.0 is negative.
+    - The source output is 180.0 + off and lies in (-180.0, 180.0).
+    - The follow-up lies strictly inside [-180.0, 180.0], exercising normalized-source
+      versus direct-follow-up behavior.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: POSITIVE_WRAPPED_ANTIMERIDIAN_SENTINELS
+    category: EDGE
+    description: Exercise positive out-of-range antimeridians that trigger the explicit
+      off == 0 and positive-input branch.
+    preconditions:
+    - longitudeDeg == 180.0 + 360.0 * k for an exactly represented positive integer
+      k.
+    - k >= 1.
+    - Select three distinct k values, including k == 1 and at least one k > 1.
+    expectedSourceBehavior:
+    - off == 0.0 and longitudeDeg > 0.0.
+    - The source output is exactly +180.0.
+    - The supplied assertion may compare +180.0 with -180.0 or +180.0 using its antimeridian
+      exception.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: NEGATIVE_WRAPPED_ANTIMERIDIAN_SENTINELS
+    category: EDGE
+    description: Exercise negative out-of-range antimeridians, including Java's possible
+      negative-zero remainder.
+    preconditions:
+    - longitudeDeg == -180.0 - 360.0 * k for an exactly represented positive integer
+      k.
+    - k >= 1.
+    - Select three distinct k values, including k == 1 and at least one k > 1.
+    expectedSourceBehavior:
+    - The remainder off compares equal to 0.0 but longitudeDeg > 0.0 is false.
+    - The final else branch returns an output numerically equal to -180.0.
+    - The result exercises the negative antimeridian representation rather than the
+      positive sentinel branch.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: POSITIVE_FULL_REVOLUTION_MULTIPLES
+    category: EDGE
+    description: Exercise positive whole-revolution inputs that normalize to the prime
+      meridian.
+    preconditions:
+    - longitudeDeg == 360.0 * k for an exactly represented positive integer k.
+    - Select two distinct k values with k >= 1.
+    expectedSourceBehavior:
+    - off = (longitudeDeg + 180.0) % 360.0 is 180.0.
+    - The final else branch returns 0.0.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: NEGATIVE_FULL_REVOLUTION_MULTIPLES
+    category: EDGE
+    description: Exercise negative whole-revolution inputs that reach zero through
+      the off < 0 branch.
+    preconditions:
+    - longitudeDeg == -360.0 * k for an exactly represented positive integer k.
+    - Select two distinct k values with k >= 1.
+    expectedSourceBehavior:
+    - off = (longitudeDeg + 180.0) % 360.0 is -180.0.
+    - The off < 0 branch returns 0.0.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: POSITIVE_MULTI_REVOLUTION_ORDINARY
+    category: NORMAL
+    description: Exercise positive longitudes several revolutions outside the normal
+      interval without landing on a sentinel.
+    preconditions:
+    - 540.0 < longitudeDeg && longitudeDeg < 1000000.0.
+    - (longitudeDeg + 180.0) % 360.0 is strictly between 0.0 and 360.0.
+    - The resulting -180.0 + ((longitudeDeg + 180.0) % 360.0) is not 0.0 and is more
+      than 1.0e-9 from either antimeridian.
+    expectedSourceBehavior:
+    - Both source and follow-up require normalization.
+    - The final else branch returns a finite value strictly inside (-180.0, 180.0).
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: NEGATIVE_MULTI_REVOLUTION_ORDINARY
+    category: NORMAL
+    description: Exercise negative longitudes several revolutions outside the normal
+      interval without landing on a sentinel.
+    preconditions:
+    - -1000000.0 < longitudeDeg && longitudeDeg < -540.0.
+    - (longitudeDeg + 180.0) % 360.0 is strictly between -360.0 and 0.0.
+    - The resulting 180.0 + ((longitudeDeg + 180.0) % 360.0) is not 0.0 and is more
+      than 1.0e-9 from either antimeridian.
+    expectedSourceBehavior:
+    - Both source and follow-up require normalization.
+    - The off < 0 branch returns a finite value strictly inside (-180.0, 180.0).
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: POSITIVE_REMOTE_ANTIMERIDIAN_NEIGHBORS
+    category: BOUNDARY
+    description: Exercise representable values immediately on both sides of remote
+      positive antimeridian discontinuities.
+    preconditions:
+    - Choose exactly represented anchors a = 180.0 + 360.0 * k with integer k >= 2.
+    - longitudeDeg is Math.nextDown(a) or Math.nextUp(a).
+    - Select both sides of at least two distinct anchors.
+    - Verify longitudeDeg + 180.0 does not round to the same remainder as the anchor.
+    expectedSourceBehavior:
+    - The source does not take the off == 0 sentinel branch.
+    - Values on opposite sides normalize near opposite numeric representations of
+      the antimeridian.
+    - Each output remains within [-180.0, 180.0].
+    targetCases: 4
+    emptyOutputAllowed: false
+  - id: NEGATIVE_REMOTE_ANTIMERIDIAN_NEIGHBORS
+    category: BOUNDARY
+    description: Exercise representable values immediately on both sides of remote
+      negative antimeridian discontinuities.
+    preconditions:
+    - Choose exactly represented anchors a = -180.0 - 360.0 * k with integer k >=
+      2.
+    - longitudeDeg is Math.nextDown(a) or Math.nextUp(a).
+    - Select both sides of at least two distinct anchors.
+    - Verify longitudeDeg + 180.0 does not round to the same remainder as the anchor.
+    expectedSourceBehavior:
+    - The source does not return the exact -180.0 sentinel.
+    - The negative remainder path produces outputs near opposite numeric representations
+      of the antimeridian.
+    - Each output remains within [-180.0, 180.0].
+    targetCases: 4
+    emptyOutputAllowed: false
+  - id: LARGE_POSITIVE_FINITE_PRECISION
+    category: EDGE
+    description: Exercise large positive finite values where binary64 spacing can
+      affect both addition and remainder arithmetic.
+    preconditions:
+    - 2^40 <= longitudeDeg && longitudeDeg < 2^61.
+    - longitudeDeg + 360.0 is finite and differs from longitudeDeg.
+    - The source normalized output is more than 1.0e-9 from 0.0, -180.0, and +180.0.
+    - Select one source from each magnitude band [2^40,2^45), [2^45,2^50), [2^50,2^55),
+      and [2^55,2^61).
+    expectedSourceBehavior:
+    - The source bypasses the direct-return branch and produces a finite output in
+      [-180.0, 180.0].
+    - The case exposes whether rounding in longitudeDeg + 360.0 preserves the supplied
+      relation within 1.0e-9.
+    targetCases: 4
+    emptyOutputAllowed: false
+  - id: LARGE_NEGATIVE_FINITE_PRECISION
+    category: EDGE
+    description: Exercise large negative finite values where binary64 spacing can
+      affect the shift and negative remainder path.
+    preconditions:
+    - -2^61 < longitudeDeg && longitudeDeg <= -2^40.
+    - longitudeDeg + 360.0 is finite and differs from longitudeDeg.
+    - The source normalized output is more than 1.0e-9 from 0.0, -180.0, and +180.0.
+    - Select one source by absolute magnitude from each band [2^40,2^45), [2^45,2^50),
+      [2^50,2^55), and [2^55,2^61).
+    expectedSourceBehavior:
+    - The source bypasses the direct-return branch and produces a finite output in
+      [-180.0, 180.0].
+    - The case exercises negative Java remainder behavior and exposes shift-rounding
+      differences at large magnitudes.
+    targetCases: 4
+    emptyOutputAllowed: false

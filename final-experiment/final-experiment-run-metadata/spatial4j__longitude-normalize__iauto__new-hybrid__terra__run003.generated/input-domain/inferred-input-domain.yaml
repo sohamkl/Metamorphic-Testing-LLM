@@ -1,0 +1,361 @@
+InputDomain:
+  summary: Finite IEEE-754 double longitude values, covering the in-range fast return,
+    all three out-of-range normalization returns, antimeridian handling, modulus residues,
+    signed zero, subnormal values, large-cycle values, and floating-point precision
+    limits of the supplied +360 follow-up.
+  globalConstraints:
+  - Double.isFinite(arg0) must be true. NaN and infinities are excluded because the
+    source has no defined longitude-normalization behavior for them (they produce
+    NaN through %), and the supplied assertion's comparison with NaN is vacuous.
+  diversity:
+    sourceControlFlow:
+    - '4'
+    - in-range return; off < 0; off == 0 && lon_deg > 0; final else return
+    - '[-180,180], negative residues, positive exact antimeridian residues, positive
+      nonzero residues'
+    boundaryPosition:
+    - '8'
+    - exact bounds, immediately inside bounds, immediately outside bounds, tolerance-band
+      antimeridian values
+    - -180, 180, Math.nextUp(-180), Math.nextDown(180), Math.nextDown(-180), Math.nextUp(180),
+      180 +/- 5e-10, -180 +/- 5e-10
+    followUpArithmetic:
+    - '5'
+    - ordinary +360 shift, branch-crossing shift, antimeridian equivalent outputs,
+      absorbed shift, rounded non-360 effective shift
+    - 17.25, -181, -180, Double.MAX_VALUE, Math.scalb(1.0,61)
+    numericMagnitude:
+    - '5'
+    - zero, subnormal, ordinary, many-revolution, extreme finite
+    - 0.0, Double.MIN_VALUE, 181.0, 360000181.0, Double.MAX_VALUE
+  scenarios:
+  - id: POSITIVE_ZERO_FAST_RETURN
+    category: BOUNDARY
+    description: Positive zero is within the documented closed longitude range.
+    preconditions:
+    - arg0 == 0.0 and Double.doubleToRawLongBits(arg0) == Double.doubleToRawLongBits(0.0)
+    expectedSourceBehavior:
+    - Returns the input directly through lon_deg >= -180 && lon_deg <= 180.
+    - The source output is +0.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_ZERO_FAST_RETURN
+    category: EDGE
+    description: Negative zero satisfies both inclusive range comparisons but retains
+      its input representation on the direct return path.
+    preconditions:
+    - arg0 == 0.0 and Double.doubleToRawLongBits(arg0) == Double.doubleToRawLongBits(-0.0)
+    expectedSourceBehavior:
+    - Returns the input directly through the in-range branch.
+    - The source output has the raw-bit representation of -0.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: INTERIOR_FRACTIONAL_LONGITUDE
+    category: NORMAL
+    description: A non-integral longitude strictly inside the normal range.
+    preconditions:
+    - arg0 == 17.25
+    expectedSourceBehavior:
+    - Returns 17.25 unchanged through the in-range branch.
+    - The generated follow-up is outside the in-range fast path.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MINIMUM_POSITIVE_SUBNORMAL
+    category: EDGE
+    description: The smallest positive finite double is still an in-range longitude.
+    preconditions:
+    - arg0 == Double.MIN_VALUE
+    expectedSourceBehavior:
+    - Returns Double.MIN_VALUE unchanged through the in-range branch.
+    - This distinguishes direct return of a subnormal input from arithmetic normalization.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MINIMUM_NEGATIVE_SUBNORMAL
+    category: EDGE
+    description: The smallest-magnitude negative subnormal longitude is within range.
+    preconditions:
+    - arg0 == -Double.MIN_VALUE
+    expectedSourceBehavior:
+    - Returns -Double.MIN_VALUE unchanged through the in-range branch.
+    - The follow-up addition may lose the subnormal component, exercising the relation
+      tolerance.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: JUST_INSIDE_NEGATIVE_BOUND
+    category: BOUNDARY
+    description: The representable value immediately greater than -180 remains on
+      the fast path.
+    preconditions:
+    - arg0 == Math.nextUp(-180.0)
+    expectedSourceBehavior:
+    - Returns arg0 exactly because it is greater than -180 and less than 180.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: JUST_INSIDE_POSITIVE_BOUND
+    category: BOUNDARY
+    description: The representable value immediately less than +180 remains on the
+      fast path.
+    preconditions:
+    - arg0 == Math.nextDown(180.0)
+    expectedSourceBehavior:
+    - Returns arg0 exactly because it is within the inclusive range.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EXACT_NEGATIVE_ANTIMERIDIAN
+    category: BOUNDARY
+    description: -180 is an explicitly preserved endpoint whose follow-up is +180.
+    preconditions:
+    - arg0 == -180.0
+    expectedSourceBehavior:
+    - Returns -180.0 unchanged through the in-range branch.
+    - The generated follow-up is 180.0, so the supplied relation uses its antimeridian
+      exception.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EXACT_POSITIVE_ANTIMERIDIAN
+    category: BOUNDARY
+    description: +180 is an explicitly preserved endpoint whose follow-up reaches
+      the positive exact-residue branch.
+    preconditions:
+    - arg0 == 180.0
+    expectedSourceBehavior:
+    - Returns 180.0 unchanged through the in-range branch.
+    - The generated follow-up is 540.0, for which off == 0 and lon_deg > 0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: JUST_OUTSIDE_NEGATIVE_BOUND
+    category: BOUNDARY
+    description: The representable value immediately below -180 enters the negative-remainder
+      normalization path.
+    preconditions:
+    - arg0 == Math.nextDown(-180.0)
+    expectedSourceBehavior:
+    - Does not take the in-range return.
+    - Its computed off is negative, so the source returns 180 + off, just below +180.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: JUST_OUTSIDE_POSITIVE_BOUND
+    category: BOUNDARY
+    description: The representable value immediately above +180 enters the positive
+      nonzero-remainder normalization path.
+    preconditions:
+    - arg0 == Math.nextUp(180.0)
+    expectedSourceBehavior:
+    - Does not take the in-range return.
+    - Its computed off is positive and nonzero, so the source returns -180 + off,
+      just above -180.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_ONE_DEGREE_WRAP
+    category: NORMAL
+    description: A negative longitude one degree below the normal range.
+    preconditions:
+    - arg0 == -181.0
+    expectedSourceBehavior:
+    - Computes off == -1.0.
+    - Takes off < 0 and returns 179.0.
+    - The follow-up 179.0 is handled by the in-range fast path.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_ONE_DEGREE_WRAP
+    category: NORMAL
+    description: A positive longitude one degree above the normal range.
+    preconditions:
+    - arg0 == 181.0
+    expectedSourceBehavior:
+    - Computes off == 1.0.
+    - Takes the final else branch and returns -179.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_FULL_REVOLUTION
+    category: EDGE
+    description: A negative full revolution produces a negative nonzero modulus residue.
+    preconditions:
+    - arg0 == -360.0
+    expectedSourceBehavior:
+    - Computes off == -180.0.
+    - Takes off < 0 and returns 0.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_FULL_REVOLUTION
+    category: EDGE
+    description: A positive full revolution exercises the final else branch with off
+      equal to +180.
+    preconditions:
+    - arg0 == 360.0
+    expectedSourceBehavior:
+    - Computes off == 180.0.
+    - Takes the final else branch and returns 0.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_EXACT_ANTIMERIDIAN_RESIDUE
+    category: EDGE
+    description: A negative out-of-range antimeridian equivalent produces negative
+      zero from remainder and avoids the positive exact-residue condition.
+    preconditions:
+    - arg0 == -540.0
+    expectedSourceBehavior:
+    - Computes an off value numerically equal to zero with negative sign.
+    - off < 0 is false and lon_deg > 0 is false, so the final else returns -180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_EXACT_ANTIMERIDIAN_RESIDUE
+    category: EDGE
+    description: A positive out-of-range antimeridian equivalent reaches the dedicated
+      positive exact-residue branch.
+    preconditions:
+    - arg0 == 540.0
+    expectedSourceBehavior:
+    - Computes off == 0.0.
+    - Takes off == 0 && lon_deg > 0 and returns 180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_NONZERO_MULTIPLE_CYCLE
+    category: EDGE
+    description: A negative value beyond more than one revolution has a negative nonzero
+      remainder.
+    preconditions:
+    - arg0 == -541.0
+    expectedSourceBehavior:
+    - Computes off == -1.0.
+    - Takes off < 0 and returns 179.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_NONZERO_MULTIPLE_CYCLE
+    category: EDGE
+    description: A positive value beyond more than one revolution has a positive nonzero
+      remainder.
+    preconditions:
+    - arg0 == 541.0
+    expectedSourceBehavior:
+    - Computes off == 1.0.
+    - Takes the final else branch and returns -179.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LARGE_POSITIVE_MANY_REVOLUTIONS
+    category: EDGE
+    description: A large exactly representable positive longitude tests modulus normalization
+      after many revolutions.
+    preconditions:
+    - arg0 == 360000181.0
+    expectedSourceBehavior:
+    - Does not take the in-range branch.
+    - Computes a positive nonzero off residue of 1.0 and returns -179.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LARGE_NEGATIVE_MANY_REVOLUTIONS
+    category: EDGE
+    description: A large exactly representable negative longitude tests the corresponding
+      negative modulus path after many revolutions.
+    preconditions:
+    - arg0 == -360000181.0
+    expectedSourceBehavior:
+    - Does not take the in-range branch.
+    - Computes a negative off residue of -1.0 and returns 179.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_ANTIMERIDIAN_TOLERANCE_BAND
+    category: BOUNDARY
+    description: A value within the relation's 1e-9 antimeridian recognition band,
+      but not exactly +180.
+    preconditions:
+    - arg0 == 179.9999999995
+    - Math.abs(Math.abs(arg0) - 180.0) <= 1e-9
+    expectedSourceBehavior:
+    - Returns arg0 unchanged through the in-range branch.
+    - This exercises the relation's tolerance-based antimeridian sentinel rather than
+      only exact endpoints.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_ANTIMERIDIAN_TOLERANCE_BAND
+    category: BOUNDARY
+    description: A value within the relation's 1e-9 antimeridian recognition band,
+      but not exactly -180.
+    preconditions:
+    - arg0 == -179.9999999995
+    - Math.abs(Math.abs(arg0) - 180.0) <= 1e-9
+    expectedSourceBehavior:
+    - Returns arg0 unchanged through the in-range branch.
+    - Its +360 follow-up crosses the positive range boundary and normalizes near -180.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_OUTSIDE_ANTIMERIDIAN_TOLERANCE
+    category: BOUNDARY
+    description: A value near +180 but outside the relation's antimeridian tolerance
+      band.
+    preconditions:
+    - arg0 == 179.999999998
+    - Math.abs(Math.abs(arg0) - 180.0) > 1e-9
+    expectedSourceBehavior:
+    - Returns arg0 unchanged through the in-range branch.
+    - The relation must use its ordinary absolute-difference check rather than the
+      antimeridian exception.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_OUTSIDE_ANTIMERIDIAN_TOLERANCE
+    category: BOUNDARY
+    description: A value near -180 but outside the relation's antimeridian tolerance
+      band.
+    preconditions:
+    - arg0 == -179.999999998
+    - Math.abs(Math.abs(arg0) - 180.0) > 1e-9
+    expectedSourceBehavior:
+    - Returns arg0 unchanged through the in-range branch.
+    - The generated follow-up is normalized near -180 without qualifying for the relation's
+      antimeridian sentinel.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_MAX_FINITE_LONGITUDE
+    category: EDGE
+    description: The largest positive finite double exercises finite modulus arithmetic
+      at extreme magnitude, where adding 360 is absorbed by double precision.
+    preconditions:
+    - arg0 == Double.MAX_VALUE
+    - arg0 + 360.0 == arg0
+    expectedSourceBehavior:
+    - Does not take the in-range branch.
+    - Produces a finite normalized result in the documented [-180,180] range.
+    - The generated follow-up has the same double value as the source input.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_MAX_FINITE_LONGITUDE
+    category: EDGE
+    description: The most negative finite double exercises the negative finite modulus
+      path at extreme magnitude.
+    preconditions:
+    - arg0 == -Double.MAX_VALUE
+    - arg0 + 360.0 == arg0
+    expectedSourceBehavior:
+    - Does not take the in-range branch.
+    - Its remainder has negative sign, so normalization uses the off < 0 return.
+    - The generated follow-up has the same double value as the source input.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_FOLLOW_UP_ROUNDING_THRESHOLD
+    category: EDGE
+    description: A finite large value whose ULP exceeds 360 demonstrates that generateFollowUp
+      can advance by a rounded amount rather than exactly 360.
+    preconditions:
+    - arg0 == Math.scalb(1.0, 61)
+    - arg0 + 360.0 != arg0
+    - (arg0 + 360.0) - arg0 != 360.0
+    expectedSourceBehavior:
+    - Does not take the in-range branch.
+    - Because arg0 + 180.0 rounds to arg0 at this magnitude, the source computes off
+      == 272.0 and returns 92.0.
+    - This is a reachable finite precision boundary for the supplied follow-up transformation.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_FOLLOW_UP_ROUNDING_THRESHOLD
+    category: EDGE
+    description: The negative counterpart of the large-value follow-up rounding boundary.
+    preconditions:
+    - arg0 == -Math.scalb(1.0, 61)
+    - arg0 + 360.0 != arg0
+    - (arg0 + 360.0) - arg0 != 360.0
+    expectedSourceBehavior:
+    - Does not take the in-range branch.
+    - Because arg0 + 180.0 rounds to arg0 at this magnitude, the source computes off
+      == -272.0 and returns -92.0.
+    targetCases: 1
+    emptyOutputAllowed: false

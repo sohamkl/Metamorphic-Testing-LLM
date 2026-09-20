@@ -1,0 +1,615 @@
+InputDomain:
+  summary: Finite, non-empty Cartesian CircleImpl receivers and RectangleImpl arguments
+    in one non-geo SpatialContext, with sufficient context-bound margin for the fixed
+    common translation; scenarios cover all four relations, bounding-box shortcuts,
+    phase-2 axis branches, tangencies, degenerate rectangles, and zero-radius circles.
+  globalConstraints:
+  - Construct the receiver as new CircleImpl(context.makePoint(cx, cy), radius, context),
+    and construct the argument as a RectangleImpl(minX, maxX, minY, maxY, context).
+  - The receiver and rectangle use the same SpatialContext, and context.isGeo() is
+    false.
+  - cx, cy, radius, minX, maxX, minY, and maxY are finite doubles; radius >= 0; minX
+    <= maxX; and minY <= maxY.
+  - The source center and rectangle are non-empty. Empty shapes are excluded because
+    generateFollowUp performs arithmetic on their coordinates, and the supplied API
+    does not establish the resulting NaN-based follow-up shapes as valid.
+  - Let B=[cx-radius,cx+radius] x [cy-radius,cy+radius]. Every edge of B and the source
+    rectangle, as well as those edges after adding SHIFT_X=17.5 and SHIFT_Y=-9.25,
+    lies within the non-geo context world bounds.
+  - The shifted center (cx+17.5,cy-9.25) and shifted rectangle [minX+17.5,maxX+17.5]
+    x [minY-9.25,maxY-9.25] are finite and preserve all source edge orderings.
+  - Coordinate magnitudes and separations are chosen so adding the fixed offsets neither
+    overflows nor collapses distinct coordinates through floating-point rounding.
+  - Unless a scenario explicitly requires radius=0, radius>0.
+  - Scenario-relative coordinates may use cx=0, cy=0, and the stated radius when these
+    values satisfy the context-margin constraints.
+  diversity:
+    expectedRelation:
+    - CONTAINS
+    - WITHIN
+    - INTERSECTS
+    - DISJOINT
+    bboxRelationPath:
+    - DISJOINT_SHORTCUT
+    - WITHIN_SHORTCUT
+    - EQUAL_BBOX_SENTINEL
+    - INTERSECTS_PHASE2
+    - CONTAINS_PHASE2
+    centerVsRectangleX:
+    - LEFT_OF_RECTANGLE
+    - INSIDE_X_INTERVAL
+    - RIGHT_OF_RECTANGLE
+    centerVsRectangleY:
+    - BELOW_RECTANGLE
+    - INSIDE_Y_INTERVAL
+    - ABOVE_RECTANGLE
+    rectangleDimension:
+    - AREA
+    - VERTICAL_LINE
+    - HORIZONTAL_LINE
+    - POINT
+    contactType:
+    - STRICT_GAP
+    - STRICT_OVERLAP
+    - AXIS_TANGENCY
+    - CORNER_TANGENCY
+    - SHARED_BBOX_EDGE
+    - EXACT_BBOX
+    circleRadiusClass:
+    - POSITIVE
+    - ZERO
+  scenarios:
+  - id: BBOX_DISJOINT_RIGHT
+    category: NORMAL
+    description: The rectangle lies strictly to the right of the circle bounding box.
+    preconditions:
+    - minX > cx+radius.
+    - minX < maxX and minY < maxY.
+    expectedSourceBehavior:
+    - enclosingBox.relate(rectangle) is DISJOINT, so relate returns DISJOINT through
+      the first shortcut.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CIRCLE_STRICTLY_WITHIN_RECTANGLE
+    category: NORMAL
+    description: The rectangle strictly encloses the circle bounding box.
+    preconditions:
+    - minX < cx-radius and maxX > cx+radius.
+    - minY < cy-radius and maxY > cy+radius.
+    expectedSourceBehavior:
+    - enclosingBox.relate(rectangle) is WITHIN, so relate returns WITHIN without entering
+      phase 2.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CIRCLE_WITHIN_RECTANGLE_SHARED_EDGE
+    category: BOUNDARY
+    description: The rectangle encloses the circle bounding box while sharing exactly
+      one bounding-box edge.
+    preconditions:
+    - minX = cx-radius, maxX > cx+radius, minY < cy-radius, and maxY > cy+radius.
+    expectedSourceBehavior:
+    - The enclosing box is WITHIN the rectangle, so relate returns WITHIN.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: RECTANGLE_EQUALS_CIRCLE_BBOX
+    category: EDGE
+    description: The rectangle is exactly equal to the calculated circle bounding
+      box.
+    preconditions:
+    - minX = cx-radius, maxX = cx+radius, minY = cy-radius, and maxY = cy+radius.
+    expectedSourceBehavior:
+    - The explicit bboxSect==CONTAINS and enclosingBox.equals(rectangle) sentinel
+      returns WITHIN.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NORTHEAST_CORNER_GAP
+    category: NORMAL
+    description: A rectangle inside the bounding box's northeast corner is nevertheless
+      outside the circular disk.
+    preconditions:
+    - Use radius=10, minX=cx+8, maxX=cx+9, minY=cy+8, and maxY=cy+9.
+    - (minX-cx)^2+(minY-cy)^2 > radius^2.
+    expectedSourceBehavior:
+    - Phase 2 takes cx<minX and cy<minY, rejects the closest corner, and returns DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NORTHWEST_CORNER_GAP
+    category: NORMAL
+    description: A rectangle inside the bounding box's northwest corner is outside
+      the disk.
+    preconditions:
+    - Use radius=10, minX=cx-9, maxX=cx-8, minY=cy+8, and maxY=cy+9.
+    - (maxX-cx)^2+(minY-cy)^2 > radius^2.
+    expectedSourceBehavior:
+    - Phase 2 takes cx>maxX and cy<minY, rejects the closest corner, and returns DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SOUTHEAST_CORNER_GAP
+    category: NORMAL
+    description: A rectangle inside the bounding box's southeast corner is outside
+      the disk.
+    preconditions:
+    - Use radius=10, minX=cx+8, maxX=cx+9, minY=cy-9, and maxY=cy-8.
+    - (minX-cx)^2+(maxY-cy)^2 > radius^2.
+    expectedSourceBehavior:
+    - Phase 2 takes cx<minX and cy>maxY, rejects the closest corner, and returns DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SOUTHWEST_CORNER_GAP
+    category: NORMAL
+    description: A rectangle inside the bounding box's southwest corner is outside
+      the disk.
+    preconditions:
+    - Use radius=10, minX=cx-9, maxX=cx-8, minY=cy-9, and maxY=cy-8.
+    - (maxX-cx)^2+(maxY-cy)^2 > radius^2.
+    expectedSourceBehavior:
+    - Phase 2 takes cx>maxX and cy>maxY, rejects the closest corner, and returns DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NORTHEAST_CORNER_OVERLAP
+    category: NORMAL
+    description: The rectangle approaches from the northeast with its closest corner
+      inside the circle and a farther corner outside.
+    preconditions:
+    - Use radius=10, minX=cx+6, maxX=cx+9, minY=cy+6, and maxY=cy+9.
+    - (minX-cx)^2+(minY-cy)^2 < radius^2.
+    - (maxX-cx)^2+(maxY-cy)^2 > radius^2.
+    expectedSourceBehavior:
+    - The closest-corner test establishes overlap, but the farthest-corner test prevents
+      containment; relate returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NORTHWEST_CORNER_OVERLAP
+    category: NORMAL
+    description: The rectangle approaches from the northwest with its closest corner
+      inside and a farther corner outside.
+    preconditions:
+    - Use radius=10, minX=cx-9, maxX=cx-6, minY=cy+6, and maxY=cy+9.
+    - (maxX-cx)^2+(minY-cy)^2 < radius^2.
+    - (minX-cx)^2+(maxY-cy)^2 > radius^2.
+    expectedSourceBehavior:
+    - The left-and-above closest-corner path reaches INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SOUTHEAST_CORNER_OVERLAP
+    category: NORMAL
+    description: The rectangle approaches from the southeast with its closest corner
+      inside and a farther corner outside.
+    preconditions:
+    - Use radius=10, minX=cx+6, maxX=cx+9, minY=cy-9, and maxY=cy-6.
+    - (minX-cx)^2+(maxY-cy)^2 < radius^2.
+    - (maxX-cx)^2+(minY-cy)^2 > radius^2.
+    expectedSourceBehavior:
+    - The right-and-below closest-corner path reaches INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SOUTHWEST_CORNER_OVERLAP
+    category: NORMAL
+    description: The rectangle approaches from the southwest with its closest corner
+      inside and a farther corner outside.
+    preconditions:
+    - Use radius=10, minX=cx-9, maxX=cx-6, minY=cy-9, and maxY=cy-6.
+    - (maxX-cx)^2+(maxY-cy)^2 < radius^2.
+    - (minX-cx)^2+(minY-cy)^2 > radius^2.
+    expectedSourceBehavior:
+    - The left-and-below closest-corner path reaches INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: RIGHT_SIDE_INTERSECTION
+    category: NORMAL
+    description: The rectangle crosses the horizontal circle axis and protrudes through
+      the right side.
+    preconditions:
+    - Use radius=10, minX=cx+9, maxX=cx+12, minY=cy-1, and maxY=cy+1.
+    expectedSourceBehavior:
+    - Because cy is in the Y interval, diagonal disjoint rejection is skipped; bboxSect
+      is not CONTAINS, so relate returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LEFT_SIDE_INTERSECTION
+    category: NORMAL
+    description: The rectangle crosses the horizontal circle axis and protrudes through
+      the left side.
+    preconditions:
+    - Use radius=10, minX=cx-12, maxX=cx-9, minY=cy-1, and maxY=cy+1.
+    expectedSourceBehavior:
+    - The center-right-of-rectangle X branch and inside-Y branch produce INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: TOP_SIDE_INTERSECTION
+    category: NORMAL
+    description: The rectangle crosses the vertical circle axis and protrudes through
+      the top.
+    preconditions:
+    - Use radius=10, minX=cx-1, maxX=cx+1, minY=cy+9, and maxY=cy+12.
+    expectedSourceBehavior:
+    - The inside-X and center-below-rectangle Y branches produce INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BOTTOM_SIDE_INTERSECTION
+    category: NORMAL
+    description: The rectangle crosses the vertical circle axis and protrudes through
+      the bottom.
+    preconditions:
+    - Use radius=10, minX=cx-1, maxX=cx+1, minY=cy-12, and maxY=cy-9.
+    expectedSourceBehavior:
+    - The inside-X and center-above-rectangle Y branches produce INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: RIGHT_AXIS_TANGENT_AREA
+    category: BOUNDARY
+    description: A positive-area rectangle starts at the circle's rightmost tangent
+      and extends outward.
+    preconditions:
+    - minX = cx+radius, maxX > minX, minY < cy, and maxY > cy.
+    expectedSourceBehavior:
+    - The bounding box touches the rectangle and the rectangle spans the horizontal
+      axis; relate returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: TOP_AXIS_TANGENT_AREA
+    category: BOUNDARY
+    description: A positive-area rectangle starts at the circle's top tangent and
+      extends outward.
+    preconditions:
+    - minY = cy+radius, maxY > minY, minX < cx, and maxX > cx.
+    expectedSourceBehavior:
+    - The bounding-box touch and axis-spanning path returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EXTERNAL_CORNER_TANGENCY
+    category: BOUNDARY
+    description: The inward corner of an otherwise external rectangle lies exactly
+      on the circle.
+    preconditions:
+    - Use radius=10, minX=cx+6, minY=cy+8, maxX>minX, and maxY>minY.
+    - (minX-cx)^2+(minY-cy)^2 = radius^2.
+    expectedSourceBehavior:
+    - contains(closestX,closestY) accepts the tangent corner, but bboxSect is not
+      CONTAINS; relate returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: RIGHT_TANGENT_POINT_RECTANGLE
+    category: BOUNDARY
+    description: The rectangle degenerates to the circle's rightmost boundary point.
+    preconditions:
+    - minX=maxX=cx+radius and minY=maxY=cy.
+    expectedSourceBehavior:
+    - The boundary point is contained, so relate returns CONTAINS for the point-like
+      rectangle.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: THREE_FOUR_FIVE_TANGENT_POINT
+    category: BOUNDARY
+    description: A point-like rectangle lies on a non-axis-aligned 3-4-5 circle boundary.
+    preconditions:
+    - radius=5, minX=maxX=cx+3, and minY=maxY=cy+4.
+    expectedSourceBehavior:
+    - The farthest and closest rectangle points coincide at a contained boundary point;
+      relate returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CENTER_POINT_RECTANGLE
+    category: EDGE
+    description: The rectangle degenerates to the circle center.
+    preconditions:
+    - minX=maxX=cx and minY=maxY=cy.
+    expectedSourceBehavior:
+    - The circle contains the point-like rectangle and returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: STRICT_INTERIOR_POINT_RECTANGLE
+    category: EDGE
+    description: The rectangle is a point strictly between the center and boundary.
+    preconditions:
+    - minX=maxX and minY=maxY.
+    - 0 < (minX-cx)^2+(minY-cy)^2 < radius^2.
+    expectedSourceBehavior:
+    - The farthest-point containment test succeeds and relate returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CENTERED_INTERIOR_RECTANGLE
+    category: NORMAL
+    description: A positive-area rectangle centered on the circle is strictly inside
+      the disk.
+    preconditions:
+    - Use radius=10, minX=cx-2, maxX=cx+2, minY=cy-2, and maxY=cy+2.
+    expectedSourceBehavior:
+    - bboxSect is CONTAINS and the selected farthest corner is within the circle;
+      relate returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NORTHEAST_INTERIOR_RECTANGLE
+    category: NORMAL
+    description: A positive-area rectangle entirely northeast of the center is strictly
+      contained.
+    preconditions:
+    - Use radius=10, minX=cx+2, maxX=cx+4, minY=cy+1, and maxY=cy+3.
+    - (maxX-cx)^2+(maxY-cy)^2 < radius^2.
+    expectedSourceBehavior:
+    - The cx<minX and cy<minY branches select the northeast farthest corner and return
+      CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NORTHWEST_INTERIOR_RECTANGLE
+    category: NORMAL
+    description: A positive-area rectangle entirely northwest of the center is strictly
+      contained.
+    preconditions:
+    - Use radius=10, minX=cx-4, maxX=cx-2, minY=cy+1, and maxY=cy+3.
+    - (minX-cx)^2+(maxY-cy)^2 < radius^2.
+    expectedSourceBehavior:
+    - The cx>maxX and cy<minY branches select a contained farthest corner and return
+      CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SOUTHEAST_INTERIOR_RECTANGLE
+    category: NORMAL
+    description: A positive-area rectangle entirely southeast of the center is strictly
+      contained.
+    preconditions:
+    - Use radius=10, minX=cx+2, maxX=cx+4, minY=cy-3, and maxY=cy-1.
+    - (maxX-cx)^2+(minY-cy)^2 < radius^2.
+    expectedSourceBehavior:
+    - The cx<minX and cy>maxY branches select a contained farthest corner and return
+      CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SOUTHWEST_INTERIOR_RECTANGLE
+    category: NORMAL
+    description: A positive-area rectangle entirely southwest of the center is strictly
+      contained.
+    preconditions:
+    - Use radius=10, minX=cx-4, maxX=cx-2, minY=cy-3, and maxY=cy-1.
+    - (minX-cx)^2+(minY-cy)^2 < radius^2.
+    expectedSourceBehavior:
+    - The cx>maxX and cy>maxY branches select a contained farthest corner and return
+      CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: RECTANGLE_STRADDLES_X_AXIS_CONTAINED
+    category: NORMAL
+    description: The rectangle contains cx in its X interval, lies above cy, and remains
+      inside the disk.
+    preconditions:
+    - Use radius=10, minX=cx-2, maxX=cx+3, minY=cy+6, and maxY=cy+8.
+    - maxX-cx > cx-minX.
+    - (maxX-cx)^2+(maxY-cy)^2 < radius^2.
+    expectedSourceBehavior:
+    - The inside-X and center-below-rectangle Y branches select maxX as farthestX
+      and return CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: RECTANGLE_STRADDLES_Y_AXIS_CONTAINED
+    category: NORMAL
+    description: The rectangle contains cy in its Y interval, lies right of cx, and
+      remains inside the disk.
+    preconditions:
+    - Use radius=10, minX=cx+6, maxX=cx+8, minY=cy-2, and maxY=cy+3.
+    - maxY-cy > cy-minY.
+    - (maxX-cx)^2+(maxY-cy)^2 < radius^2.
+    expectedSourceBehavior:
+    - The center-left-of-rectangle X branch and inside-Y branch select maxY as farthestY
+      and return CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ASYMMETRIC_RECTANGLE_STRADDLES_BOTH_AXES
+    category: NORMAL
+    description: An asymmetric rectangle contains the center on both axes and is wholly
+      inside the disk.
+    preconditions:
+    - Use radius=10, minX=cx-2, maxX=cx+4, minY=cy-3, and maxY=cy+1.
+    - (maxX-cx)^2+(minY-cy)^2 < radius^2.
+    expectedSourceBehavior:
+    - Both inside-interval branches execute, select (maxX,minY), and return CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: X_FARTHEST_EDGE_TIE
+    category: EDGE
+    description: The center is exactly midway between the rectangle's X edges.
+    preconditions:
+    - minX < cx < maxX and maxX-cx = cx-minX.
+    - Every rectangle corner has squared distance from (cx,cy) less than radius^2.
+    expectedSourceBehavior:
+    - Because the comparison uses strict greater-than, farthestX is minX on the tie;
+      containment returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: Y_FARTHEST_EDGE_TIE
+    category: EDGE
+    description: The center is exactly midway between the rectangle's Y edges.
+    preconditions:
+    - minY < cy < maxY and maxY-cy = cy-minY.
+    - Every rectangle corner has squared distance from (cx,cy) less than radius^2.
+    expectedSourceBehavior:
+    - Because the comparison uses strict greater-than, farthestY is minY on the tie;
+      containment returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BBOX_CONTAINS_RECTANGLE_BUT_CIRCLE_DOES_NOT
+    category: NORMAL
+    description: The rectangle is wholly inside the square bounding box, overlaps
+      the disk, but has a far corner outside the disk.
+    preconditions:
+    - Use radius=10, minX=cx+8, maxX=cx+9, minY=cy+4, and maxY=cy+5.
+    - (minX-cx)^2+(minY-cy)^2 < radius^2.
+    - (maxX-cx)^2+(maxY-cy)^2 > radius^2.
+    expectedSourceBehavior:
+    - bboxSect is CONTAINS, the closest-corner test finds overlap, and the farthest-corner
+      test returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BBOX_INTERSECTS_WITH_CLOSE_CORNER_INSIDE
+    category: NORMAL
+    description: The rectangle enters the disk at a corner and also extends beyond
+      the circle bounding box.
+    preconditions:
+    - Use radius=10, minX=cx+8, maxX=cx+12, minY=cy+4, and maxY=cy+5.
+    - (minX-cx)^2+(minY-cy)^2 < radius^2.
+    expectedSourceBehavior:
+    - The closest corner establishes overlap; because bboxSect is INTERSECTS rather
+      than CONTAINS, relate returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: VERTICAL_DIAMETER_SEGMENT
+    category: EDGE
+    description: A zero-width rectangle is the complete vertical diameter.
+    preconditions:
+    - minX=maxX=cx, minY=cy-radius, and maxY=cy+radius.
+    expectedSourceBehavior:
+    - Both segment endpoints are contained boundary points, so relate returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: HORIZONTAL_INTERIOR_CHORD
+    category: EDGE
+    description: A zero-height horizontal segment has both endpoints strictly inside
+      the circle.
+    preconditions:
+    - minY=maxY=cy.
+    - cx-radius < minX < maxX < cx+radius.
+    expectedSourceBehavior:
+    - The selected farther endpoint is contained, so relate returns CONTAINS for the
+      line-like rectangle.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: HORIZONTAL_DIAMETER_BOUNDARY_ENDPOINTS
+    category: BOUNDARY
+    description: A zero-height rectangle is the exact horizontal diameter.
+    preconditions:
+    - minX=cx-radius, maxX=cx+radius, and minY=maxY=cy.
+    expectedSourceBehavior:
+    - The selected farthest endpoint is exactly on the boundary and is contained;
+      relate returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LINE_CROSSES_AND_EXTENDS_OUTSIDE
+    category: EDGE
+    description: A horizontal line-like rectangle crosses the disk and extends beyond
+      both bounding-box sides.
+    preconditions:
+    - minY=maxY=cy, minX < cx-radius, and maxX > cx+radius.
+    expectedSourceBehavior:
+    - The rectangle spans the circle axis and bboxSect is INTERSECTS, so relate returns
+      INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_RADIUS_WITHIN_AREA_RECTANGLE
+    category: EDGE
+    description: A zero-radius circle is a point strictly inside a positive-area rectangle.
+    preconditions:
+    - radius=0.
+    - minX < cx < maxX and minY < cy < maxY.
+    expectedSourceBehavior:
+    - The point bounding box is WITHIN the rectangle, so relate returns WITHIN.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_RADIUS_EXACT_POINT_RECTANGLE
+    category: EDGE
+    description: A zero-radius circle and point-like rectangle have identical coordinates.
+    preconditions:
+    - radius=0.
+    - minX=maxX=cx and minY=maxY=cy.
+    expectedSourceBehavior:
+    - The exact enclosing-box equality sentinel returns WITHIN.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_RADIUS_DISJOINT_POINT
+    category: EDGE
+    description: A zero-radius circle and point-like rectangle have distinct coordinates.
+    preconditions:
+    - radius=0.
+    - minX=maxX and minY=maxY.
+    - minX != cx or minY != cy.
+    expectedSourceBehavior:
+    - The zero-area enclosing box is disjoint from the distinct point rectangle, so
+      relate returns DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_RADIUS_ON_RECTANGLE_EDGE
+    category: BOUNDARY
+    description: A zero-radius circle lies on an edge of a positive-area rectangle.
+    preconditions:
+    - radius=0.
+    - cx=minX, minY < cy < maxY, and maxX>minX.
+    expectedSourceBehavior:
+    - The point bounding box is within the edge-inclusive rectangle, so relate returns
+      WITHIN.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CIRCLE_BBOX_WITHIN_RECTANGLE_AT_TWO_EDGES
+    category: BOUNDARY
+    description: The containing rectangle shares two adjacent circle-bounding-box
+      edges and extends beyond the other two.
+    preconditions:
+    - minX=cx-radius, minY=cy-radius, maxX>cx+radius, and maxY>cy+radius.
+    expectedSourceBehavior:
+    - The circle bounding box is WITHIN the rectangle, so relate returns WITHIN.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: RECTANGLE_INSCRIBED_CORNERS_ON_CIRCLE
+    category: BOUNDARY
+    description: All four corners of a centered rectangle lie exactly on the circle.
+    preconditions:
+    - For finite a>0 and b>0, minX=cx-a, maxX=cx+a, minY=cy-b, and maxY=cy+b.
+    - a^2+b^2 = radius^2.
+    expectedSourceBehavior:
+    - The selected farthest corner is accepted by contains, so relate returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: RECTANGLE_JUST_BEYOND_INSCRIBED_CORNERS
+    category: BOUNDARY
+    description: A centered rectangle crosses the circular boundary at all four corners.
+    preconditions:
+    - For finite a>0 and b>0, minX=cx-a, maxX=cx+a, minY=cy-b, and maxY=cy+b.
+    - a < radius, b < radius, and a^2+b^2 > radius^2.
+    expectedSourceBehavior:
+    - bboxSect is CONTAINS but the selected farthest corner is outside, so relate
+      returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: RECTANGLE_SHARES_FULL_RIGHT_BBOX_EDGE
+    category: BOUNDARY
+    description: A vertical line-like rectangle equals the full right edge of the
+      circle bounding box.
+    preconditions:
+    - minX=maxX=cx+radius, minY=cy-radius, and maxY=cy+radius.
+    expectedSourceBehavior:
+    - The edge midpoint is on the circle while its endpoint corners are outside; relate
+      returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: RECTANGLE_TOUCHES_BBOX_BUT_MISSES_CIRCLE
+    category: BOUNDARY
+    description: The rectangle touches the circle bounding box at a corner outside
+      the circular disk.
+    preconditions:
+    - minX=cx+radius and minY=cy+radius.
+    - maxX>minX and maxY>minY.
+    expectedSourceBehavior:
+    - The bounding boxes are not disjoint because of the shared corner, but the closest
+      point is outside the circle; phase 2 returns DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: RECTANGLE_TOUCHES_BBOX_AND_CIRCLE_AT_AXIS
+    category: BOUNDARY
+    description: A point-like rectangle is simultaneously on a bounding-box edge and
+      the circle at an axis extremum.
+    preconditions:
+    - minX=maxX=cx and minY=maxY=cy+radius.
+    expectedSourceBehavior:
+    - The tangent point is contained, so relate returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: THIN_RECTANGLE_CROSSES_BOUNDARY
+    category: NORMAL
+    description: A positive-width, positive-height thin rectangle spans the horizontal
+      axis and crosses the circle's right boundary.
+    preconditions:
+    - minX < cx+radius < maxX.
+    - minY < cy < maxY.
+    - minX < maxX and minY < maxY.
+    expectedSourceBehavior:
+    - The rectangle spans an axis and protrudes beyond the bounding box, producing
+      INTERSECTS rather than DISJOINT or CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
