@@ -1,7 +1,7 @@
-# Claude Terminal Runbook: Adding and Testing a Java SUT
+# Adding and Testing a New Java SUT
 
-Use this document as context when asking Claude Terminal to add a new Java system under test (SUT)
-to the MT-Testing framework. Run all framework commands from the local repository root, referred to
+Step-by-step guide for adding a new Java system under test (SUT) to the framework. It was also
+written to be handed to a coding assistant as context. Run all framework commands from the local repository root, referred to
 below through the `MT_TESTING_ROOT` shell variable:
 
 ```bash
@@ -13,7 +13,7 @@ Replace uppercase template tokens such as `DATASET`, `DATASET_PROFILE`, `SUT_SLU
 
 ## Objective
 
-For a new Maven-based Java project under `examples/<dataset>`, Claude should:
+For a new Maven-based Java project under `examples/<dataset>`:
 
 1. Build the original project without modifying its business logic.
 2. Create or update its `prompt.yaml` using the original SUT class wherever possible.
@@ -51,8 +51,7 @@ Important limitations:
 - Automatic discovery cannot infer every undocumented business invariant. Prefer a concise scalar
   `InputDomain`; structured scenario requirements and construction hints are optional enhancements,
   not mandatory developer work.
-- Raw `RANDOOP` requires `MRProvider: DEV`. `LLM`, `HYBRID`, and `NEW_HYBRID` can use an LLM-owned
-  MR; `HYBRID + LLM` uses LLM-proposed seeds followed by Randoop harvesting before LLM test creation.
+- Raw `RANDOOP` requires `MRProvider: DEV`. `LLM` and `NEW_HYBRID` can use an LLM-owned MR.
 
 ## Step 1: Inspect and Build the SUT Project
 
@@ -394,9 +393,9 @@ Increasing `Count` alone does not guarantee a higher mutation score. Improvement
 source inputs that reach new branches, non-vacuous outputs, stronger metamorphic assertions, and
 additional valid MRs that constrain different behaviour.
 
-## Claude Terminal Completion Checklist
+## Completion Checklist
 
-Before claiming the integration works, Claude must report evidence for every checked item:
+Before treating the integration as working, confirm every item:
 
 - [ ] Original SUT project builds with its required Java version.
 - [ ] Prompt targets an original public method and exact overload.

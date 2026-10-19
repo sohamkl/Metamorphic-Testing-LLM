@@ -12,6 +12,30 @@ This keeps the generated logic readable and debuggable by developers.
 
 The backend supports configurable JSON/JUnit outputs and developer- or LLM-provided MR logic. See [CONFIGURATION.md](docs/CONFIGURATION.md) for the detailed explanation.
 
+In the Part IV project reports this framework is called **MT4J**.
+
+## Compendium Guide
+
+This repository is the research compendium (online technical appendix) for the 2026 Part IV project on
+metamorphic testing with LLMs (Nathan Turley and Soham Kulkarni, University of Auckland). It holds the
+tool, the subjects and their metamorphic relations, the experiment configuration, every raw result, and
+the scripts that turn those results into the report's tables.
+
+| Report content | Where it is in this repository |
+|----------------|--------------------------------|
+| MT4J design and implementation | `src/main/java/mtllm/` (see [Project Layout](#project-layout)) |
+| Configuration: input generators and MR ownership | [Prompt Config](#prompt-config), `docs/CONFIGURATION.md`, `docs/AUTOMATIC_INPUT_PIPELINE.md` |
+| Subjects, their provenance, and the developer-written MRs | `examples/<sut>/` (see [Subjects](#subjects)) |
+| Experiment design, manifest, runner, and the 40 prompts | `final-experiment/` (see [Final Experiment](#final-experiment)) |
+| Raw results for all 480 runs | `final-experiment/final-experiment-run-metadata/`, `final-experiment/final-experiment-pit-reports/` |
+| Oracle stripping of the AUTO (`nl`) runs | `final-experiment/final-experiment-stripped-oracles/`, `final-experiment/analysis/OracleStripper.java` |
+| Every results table (RQ1, RQ2, cost) | `final-experiment/analysis/analyse.py`, output in `final-experiment/analysis/results/` |
+| Work not in the report | `examples/*/exploratory/`, `examples/*/mt-testing/exploratory/`, `docs/evaluations/` |
+| Extending the work with a new subject | `docs/ADDING_A_SUT.md` |
+
+To reproduce from a fresh clone: install the [Requirements](#requirements), build the subjects
+([Setup](#setup)), run `mvn test`, then use the commands under [Final Experiment](#final-experiment).
+
 ## Requirements
 
 | What | Why |
@@ -19,9 +43,9 @@ The backend supports configurable JSON/JUnit outputs and developer- or LLM-provi
 | JDK 25 | The core backend targets Java 17, but some SUT profiles (e.g. ta4j) compile with `release 25`. All final-experiment runs used JDK 25 |
 | Maven | Build the project and resolve JUnit 5 |
 | Python 3 | Only for `final-experiment/run-final-experiment.py`. PyYAML is used if installed but is not required |
-| OpenAI API key | `LLM`, `HYBRID`, and `NEW_HYBRID` generation (raw `RANDOOP` makes no API calls) |
+| OpenAI API key | `LLM` and `NEW_HYBRID` generation (raw `RANDOOP` makes no API calls) |
 | JUnit Platform Console Standalone jar | Optional alternative to Maven for compiling/running generated JUnit tests |
-| Randoop | Bundled — `lib/randoop-all-4.3.4.jar` is vendored and wired into `pom.xml` (system scope), so no separate install is needed for the Randoop-backed input modes |
+| Randoop | Bundled: `lib/randoop-all-4.3.4.jar` is vendored and wired into `pom.xml` (system scope), so no separate install is needed for the Randoop-backed input modes |
 
 ## Configuration
 
@@ -42,6 +66,24 @@ JUNIT_PLATFORM_CONSOLE_STANDALONE_JAR=/absolute/path/to/junit-platform-console-s
 
 `OPENAI_REASONING_EFFORT` is optional. When set (for example `medium`), it is sent to the API as `reasoning_effort`; leave it unset for models without reasoning support, such as `gpt-4o-mini`, which reject the field. The final-experiment runner sets it from `reasoningEffort` in `final-experiment/experiment-manifest.yaml`.
 
+## Setup
+
+The subjects under `examples/` are upstream Maven projects. Build them once (with JDK 25) before running
+the framework, because the pom and the experiment prompts use their compiled classes and jars:
+
+```bash
+mvn -f examples/the-algorithms-java/pom.xml -DskipTests install
+mvn -f examples/jsoup/pom.xml -DskipTests install
+(cd examples/ta4j && ./mvnw -pl ta4j-core -am -DskipTests install)   # mvnw.cmd on Windows
+mvn -f examples/spatial4j/pom.xml -DskipTests package
+mvn -f examples/threeten-extra/pom.xml -DskipTests package
+mvn test
+```
+
+the-algorithms-java, jsoup and ta4j-core are consumed as normal Maven dependencies (hence `install`).
+spatial4j and threeten-extra are system-scope dependencies on their `target/*.jar` (hence `package`).
+ta4j uses its own Maven wrapper; `-pl ta4j-core -am` skips the unused `ta4j-examples` module.
+
 ## Project Layout
 
 | Path | Purpose |
@@ -60,19 +102,14 @@ JUNIT_PLATFORM_CONSOLE_STANDALONE_JAR=/absolute/path/to/junit-platform-console-s
 | `lib/randoop-all-4.3.4.jar` | Vendored Randoop jar (system-scoped dependency in `pom.xml`) |
 | `examples/the-algorithms-java/`, `examples/jsoup/`, `examples/ta4j/`, `examples/spatial4j/`, `examples/threeten-extra/` | The five live SUTs. The 10 metamorphic relations used in the final experiment are listed in `final-experiment/experiment-manifest.yaml`; some example folders also hold extra MR specs that were not part of the experiment |
 | `final-experiment/` | Final experiment manifest, runner, prompts, and all raw results (see [Final Experiment](#final-experiment)) |
-| `examples/_archive/` | Superseded examples, kept for reference only. Not compiled by the build. |
-| `examples/_archive/pricing/` | Archived shopping-cart SUT, MR helper, and prompt. Still the worked example in the config docs below. |
-| `examples/_archive/pricing/generated/data-generator-code/` | Generated Java code that creates and evaluates pricing JSON data |
-| `examples/_archive/pricing/generated/json-data/` | Generated pricing JSON data and pass/fail splits |
-| `examples/_archive/pricing/generated/junit-tests/` | Generated pricing JUnit tests and pass/fail splits |
-| `examples/_archive/pricing/generated/junit-support/` | Copied pricing SUT/support/MR sources used only to compile generated JUnit tests |
-| `examples/_archive/pricing/generated/reports/` | Generated pricing HTML reports |
 | `src/main/resources/reports/` | FreeMarker templates for generated HTML reports |
 | `prompt.yaml` | Default generation config: a copy of the jsoup cleaner-idempotence `dev` prompt from the final experiment |
 | `examples/<sut>/exploratory/`, `examples/<sut>/mt-testing/exploratory/` | MRs explored during development but not used in the final experiment (reference only; see each folder's README) |
 | `docs/CONFIGURATION.md` | Explanation of output/MR-provider configuration combinations |
 | `docs/AUTOMATIC_INPUT_PIPELINE.md` | Automatic domain inference, scenario planning, quality gates, and current boundary |
 | `docs/PITEST.md` | PIT mutation testing profile, command, target scope, and report paths |
+| `docs/ADDING_A_SUT.md` | Step-by-step guide to adding and mutation-testing a new Java SUT |
+| `docs/evaluations/` | Exploratory pre-experiment comparisons (not part of the reported results) |
 
 ## Prompt Config
 
@@ -82,23 +119,33 @@ When `SUTClasspath` is omitted, the framework locates the nearest Maven project 
 compiled outputs and dependency classpath. Set `AutomaticDiscovery: false` to require explicit paths.
 The backend parses this file with SnakeYAML into `PromptConfig`; the LLM receives the generated prompt built from those Java config values, not the raw YAML file.
 
+The final experiment's matrix-transpose `nl` prompt
+(`final-experiment/final-experiment-sut-prompts/the-algorithms-java/MatrixRank/prompt-matrix-transpose-nl.yaml`):
+
 ```yaml
-SUTClassFile: examples/sorting/src/SortUtil.java
-TargetFunction: public static int[] sortArray(int[] arr)
-SUTSupportFiles: []
+ProjectRoot: examples/the-algorithms-java
+AutomaticDiscovery: true
+SUTClassFile: examples/the-algorithms-java/src/main/java/com/thealgorithms/matrix/MatrixRank.java
+SUTClasspath:
+  - examples/the-algorithms-java/target/classes
+TargetFunction: computeRank
+SUTDescription: >-
+  Computes the rank of a non-empty rectangular double matrix using pivot
+  selection, row normalization, and elimination.
 
-MRInput: the follow-up input is a permutation of the source input array
-MROutput: the sorted source output and sorted follow-up output are equal arrays
-MR:
+MRInput: Transpose the source matrix.
+MROutput: The source and transposed matrices must have the same rank.
 
-Count: 8
-InputDomain: non-null int arrays; include empty arrays, duplicates, negatives, already sorted arrays, reverse sorted arrays
-GeneratedClassName: GeneratedSortUtilMetamorphicTest
-OutputRoot: examples/sorting/generated
+Count: 50
+
+GeneratedClassName: GeneratedTheAlgorithmsMatrixRankTransposeMetamorphicTest
+OutputRoot: examples/the-algorithms-java/mt-testing/generated/matrix-rank-transpose
+MavenProfiles: [the-algorithms-java]
+InputGenerator: LLM
 JsonRequired: false
 TestSuiteRequired: true
 MRProvider: LLM
-MaxRepairAttempts: 1
+MaxRepairAttempts: 3
 ```
 
 A minimal project-oriented form is:
@@ -283,10 +330,12 @@ Generated data code is compiled with plain `javac`, so it must use only the Java
 If `MRProvider: DEV`, add:
 
 ```yaml
-DeveloperMrFile: examples/_archive/pricing/mr/PricingMetamorphicSpec.java
-DeveloperFollowUpMethod: PricingMetamorphicSpec.generateFollowUp
-DeveloperAssertMethod: PricingMetamorphicSpec.assertRelation
+DeveloperMrFile: examples/the-algorithms-java/mt-testing/mr/MatrixRankMetamorphicSpec.java
+DeveloperFollowUpMethod: thealgorithmsmt.MatrixRankMetamorphicSpec.generateFollowUp
+DeveloperAssertMethod: thealgorithmsmt.MatrixRankMetamorphicSpec.assertRelation
 ```
+
+Method names are qualified with the spec's package when it declares one (here `thealgorithmsmt`).
 
 The LLM then generates source inputs that call those developer-owned methods instead of inventing the follow-up transformation or assertion itself.
 
@@ -405,6 +454,75 @@ The current mutation threshold is `0`, so PIT produces reports without failing t
   - `nl`, `iauto`, `oauto`: NEW_HYBRID x 3 models x 10 MRs x 3 reps = 90 runs each
 - **Effectiveness metric:** killed PIT mutants of the target class, compared within an MR (mutant totals differ between classes).
 
+### Subjects
+
+Four of the five subjects (jsoup, ta4j, spatial4j, threeten-extra) come from the benchmark of the SBFT
+2023 Java tool competition. Each folder is a copy of the upstream project, with the MT-specific files
+beside the library code (`mr/` or `mt-testing/mr/`).
+
+| Folder | Upstream | Version in this repo | Licence | MRs in the experiment |
+|--------|----------|----------------------|---------|-----------------------|
+| `examples/the-algorithms-java/` | https://github.com/TheAlgorithms/Java | `1.0-SNAPSHOT` | MIT | matrix-transpose |
+| `examples/jsoup/` | https://github.com/jhy/jsoup | `1.23.2-SNAPSHOT` | MIT | node-filter-clone, cleaner-idempotence |
+| `examples/ta4j/` | https://github.com/ta4j/ta4j | `0.23.1-SNAPSHOT` | MIT | slope-change, renko-scaling |
+| `examples/spatial4j/` | https://github.com/locationtech/spatial4j | `0.9-SNAPSHOT` | Apache 2.0 | circle-relate, longitude-normalize, rectangle-contains |
+| `examples/threeten-extra/` | https://github.com/ThreeTen/threeten-extra | `1.10.1-SNAPSHOT` (upstream commit `5ec7ef4`) | BSD 3-Clause | days-between, range-length |
+
+### Environment
+
+All 480 runs used Windows, JDK 25.0.4.1 and Maven 3.9.11, between 14 and 20 September 2026 (NZ time). On
+Windows the runner does not switch JDKs per subject (`javaVersion` in the manifest is recorded but only
+honoured where `/usr/libexec/java_home` exists), so every run used the inherited JDK 25; each run's
+`resolvedJavaHome` is in its metadata. The Randoop runs are deterministic: rerunning the 10 Randoop
+configurations on a second machine (Windows 11 with the same JDK and Maven versions and Python 3.12.3) reproduced
+every archived kill count and covered-line count exactly.
+
+### Analysis
+
+`final-experiment/analysis/analyse.py` reads only the archived data and prints every results table:
+
+```bash
+python final-experiment/analysis/analyse.py                                  # Markdown tables
+python final-experiment/analysis/analyse.py --csv-dir final-experiment/analysis/results
+```
+
+The committed output is in `final-experiment/analysis/results/` (`tables.md` plus one CSV per table).
+The selection rules, which match the reports, are:
+
+- `all-runs.jsonl` also holds pilot and retried attempts; the last record per run ID is the run, which
+  leaves exactly 480 runs.
+- A run is successful when generation reported `PASSED` and PIT exited 0 (445 runs). Failed runs (32) are
+  counted but never averaged.
+- An `iauto`/`oauto` run whose passing suite calls the developer half the LLM was meant to write is a
+  leak and is excluded (3 runs, all `oauto` node-filter-clone).
+- Kills are PIT `KILLED` only. Relative scores divide, per MR, a configuration's mean by the best RQ1
+  configuration's mean (RQ1) or by `dev` with the same models (RQ2), then average over MRs; "pooled"
+  rows pool runs across models before dividing.
+
+### Oracle stripping (AUTO runs)
+
+With `MRProvider: LLM` the model sometimes added conventional expected-value assertions (for example a
+hard-coded expected rank) beside the metamorphic check. To measure only the relation, those assertions
+were removed with `final-experiment/analysis/OracleStripper.java` and the affected suites were re-run
+through the test and PIT steps:
+
+- In a `@Test` method, a JUnit assertion is kept if it references a follow-up value or calls a method
+  declared in the test class; otherwise it is removed.
+- In a helper method, an assertion comparing against an `expectedSource*` value is removed.
+
+22 of the 85 successful `nl` runs had something removed. `final-experiment-stripped-oracles/` holds, per
+run, the stripped suite, the list of removed and kept statements (`.removed.txt`), and the test and PIT
+logs; `stripped-runs.jsonl` holds the re-measured results, which `analyse.py` uses for those runs. The
+extra `..._control` entry is matrix-transpose terra run001 replayed **unmodified** through the same path,
+which reproduced its original 32 kills and validates the replay. Check the tool against the archive with:
+
+```bash
+python final-experiment/analysis/verify_oracle_stripping.py
+```
+
+It reproduces all 22 stripped suites and removed-statement lists byte for byte, and confirms that exactly
+those 22 of the 85 passing `nl` suites have anything to strip.
+
 ### Rerunning
 
 The runner executes one combination at a time: it writes the prompt, runs generation, runs the generated passing tests, then runs PIT, and archives everything. List the planned runs first:
@@ -436,8 +554,9 @@ Use `--run <id>`, `--model <id>`, and `--start-run <n>` to restrict or resume, a
 | `final-experiment/final-experiment-run-metadata/all-runs.jsonl` | One JSON line per attempted run (status, timings, token usage, kills, coverage). It also contains pilot and retried attempts, so it has more lines than the 480 reported runs |
 | `final-experiment/final-experiment-run-metadata/<run-id>.*` | Per run: the exact prompt used, metadata JSON, generation/test/PIT logs, and the archived generated sources (`.generated/`) |
 | `final-experiment/final-experiment-pit-reports/<run-id>/` | PIT reports for every run |
-| `final-experiment/final-experiment-stripped-oracles/` | Re-measured copies of the `nl` runs in which the generated tests also asserted source outputs directly, outside the metamorphic relation. Those assertions were removed and the tests and PIT were replayed from the archived generated sources. `.removed.txt` lists what was removed |
+| `final-experiment/final-experiment-stripped-oracles/` | The 22 oracle-stripped `nl` runs plus one unmodified control replay (see [Oracle stripping](#oracle-stripping-auto-runs)) |
 | `final-experiment/final-experiment-pit-reports-stripped/` | PIT reports for the stripped re-runs |
+| `final-experiment/analysis/` | `analyse.py` (results tables), `OracleStripper.java` and `verify_oracle_stripping.py`, and the committed `results/` |
 
 Run IDs follow `<sut>__<mr>__<mode>__<generator>__<model>__runNNN`. Randoop runs use `no-model` as the model component.
 

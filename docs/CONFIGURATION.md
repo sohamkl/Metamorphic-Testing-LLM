@@ -1,8 +1,8 @@
 # Output And MR Provider Configuration
 
-> Note: the `pricing` example used throughout this document now lives under
-> `examples/_archive/pricing/`. It is kept as a reference walkthrough and is no longer
-> compiled by the build. The live SUTs are spatial4j, threeten-extra, ta4j and jsoup.
+> Examples in this document use the threeten-extra days-between MR from the final experiment
+> (`final-experiment/final-experiment-sut-prompts/threeten-extra/Days/`). The live SUTs are
+> the-algorithms-java, jsoup, ta4j, spatial4j and threeten-extra.
 
 The public configuration no longer uses numbered modes. Developers choose the output artifact and who owns the MR implementation:
 
@@ -10,7 +10,7 @@ The public configuration no longer uses numbered modes. Developers choose the ou
 JsonRequired: true|false
 TestSuiteRequired: true|false
 MRProvider: DEV|LLM
-OutputRoot: examples/_archive/pricing/generated
+OutputRoot: examples/threeten-extra/generated/days-between
 ```
 
 `MRProvider` means who writes the metamorphic relation implementation:
@@ -25,17 +25,17 @@ At least one output must be requested. The backend supports JSON output, JUnit t
 `OutputRoot` controls where generated artifacts are written. For example:
 
 ```text
-OutputRoot: examples/_archive/pricing/generated
+OutputRoot: examples/threeten-extra/generated/days-between
 ```
 
 creates:
 
 ```text
-examples/_archive/pricing/generated/data-generator-code/
-examples/_archive/pricing/generated/json-data/
-examples/_archive/pricing/generated/junit-tests/
-examples/_archive/pricing/generated/junit-support/
-examples/_archive/pricing/generated/reports/
+examples/threeten-extra/generated/days-between/data-generator-code/
+examples/threeten-extra/generated/days-between/json-data/
+examples/threeten-extra/generated/days-between/junit-tests/
+examples/threeten-extra/generated/days-between/junit-support/
+examples/threeten-extra/generated/days-between/reports/
 ```
 
 If `OutputRoot` is omitted and the SUT is inside `examples/<name>/src`, the backend defaults to
@@ -47,9 +47,9 @@ If `OutputRoot` is omitted and the SUT is inside `examples/<name>/src`, the back
 JsonRequired: true
 TestSuiteRequired: false
 MRProvider: DEV
-DeveloperMrFile: examples/_archive/pricing/mr/PricingMetamorphicSpec.java
-DeveloperFollowUpMethod: PricingMetamorphicSpec.generateFollowUp
-DeveloperAssertMethod: PricingMetamorphicSpec.assertRelation
+DeveloperMrFile: examples/threeten-extra/mr/DaysBetweenMetamorphicSpec.java
+DeveloperFollowUpMethod: DaysBetweenMetamorphicSpec.generateFollowUp
+DeveloperAssertMethod: DaysBetweenMetamorphicSpec.assertRelation
 ```
 
 The LLM generates candidate source inputs. The generated Java data program calls developer-owned MR methods and the real SUT to compute:
@@ -79,9 +79,9 @@ This is the lowest LLM-responsibility option because the developer controls the 
 JsonRequired: false
 TestSuiteRequired: true
 MRProvider: DEV
-DeveloperMrFile: examples/_archive/pricing/mr/PricingMetamorphicSpec.java
-DeveloperFollowUpMethod: PricingMetamorphicSpec.generateFollowUp
-DeveloperAssertMethod: PricingMetamorphicSpec.assertRelation
+DeveloperMrFile: examples/threeten-extra/mr/DaysBetweenMetamorphicSpec.java
+DeveloperFollowUpMethod: DaysBetweenMetamorphicSpec.generateFollowUp
+DeveloperAssertMethod: DaysBetweenMetamorphicSpec.assertRelation
 ```
 
 The LLM generates JUnit source-input tests. Each test calls the developer-owned follow-up and assertion methods.
@@ -136,7 +136,31 @@ Outputs:
 <OutputRoot>/junit-tests/<GeneratedClassNameWithoutTest>FailingTest.java
 ```
 
-This is the highest LLM-responsibility option and the fastest end-to-end JUnit demo.
+This is the highest LLM-responsibility option and the fastest end-to-end JUnit demo. The final
+experiment calls this configuration AUTO (mode `nl`).
+
+## Split MR Ownership (i-AUTO / o-AUTO)
+
+With `MRProvider: DEV`, the developer may supply only one half of the relation and leave the other to
+the LLM. Name only the developer-owned method, and describe the LLM-owned half in prose:
+
+```text
+# i-AUTO: developer input transformation, LLM-written output relation
+MRProvider: DEV
+DeveloperMrFile: examples/threeten-extra/mr/DaysBetweenMetamorphicSpec.java
+DeveloperFollowUpMethod: DaysBetweenMetamorphicSpec.generateFollowUp
+MROutput: <the output relation, in prose>
+
+# o-AUTO: LLM-written input transformation, developer output relation
+MRProvider: DEV
+DeveloperMrFile: examples/threeten-extra/mr/DaysBetweenMetamorphicSpec.java
+DeveloperAssertMethod: DaysBetweenMetamorphicSpec.assertRelation
+MRInput: <the input transformation, in prose>
+```
+
+`PromptConfigLoader` requires `DeveloperMrFile`, at least one of the two methods, and the prose for
+whichever half is left to the LLM. `RANDOOP` needs both developer methods, so split ownership is
+LLM/NEW_HYBRID only.
 
 ## JSON + JUnit Together
 
@@ -157,6 +181,6 @@ Internally, the backend runs this as two generation passes:
 If `GeneratedClassName` ends in `Data`, the JUnit class name is derived by replacing that suffix with `Test`. For example:
 
 ```text
-GeneratedPricingEngineDeveloperMrData
-GeneratedPricingEngineDeveloperMrTest
+GeneratedDaysBetweenMetamorphicData
+GeneratedDaysBetweenMetamorphicTest
 ```
