@@ -114,18 +114,6 @@ public final class RandoopHarvester<T> {
         return new ArrayList<>(harvestDistinct(timeLimitMillis, extraSeeds, randomSeed).values());
     }
 
-    /** Multi-seed union variant of {@link #harvestSequences}: keeps one sequence per distinct shape. */
-    public List<Harvested<T>> harvestSequencesMultiSeed(int timeLimitMillis, List<Object> extraSeeds,
-                                                        long[] randomSeeds) throws Exception {
-        Map<String, Harvested<T>> union = new LinkedHashMap<>();
-        for (long s : randomSeeds) {
-            for (Map.Entry<String, Harvested<T>> e : harvestDistinct(timeLimitMillis, extraSeeds, s).entrySet()) {
-                union.putIfAbsent(e.getKey(), e.getValue());
-            }
-        }
-        return new ArrayList<>(union.values());
-    }
-
     /**
      * Core harvest: run Randoop once and collect structurally-distinct target-type objects, keyed by
      * structural signature (insertion-ordered), each paired with the sequence that produced it.

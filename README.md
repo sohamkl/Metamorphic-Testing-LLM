@@ -228,22 +228,22 @@ InputGenerator: LLM
 |---|---|---|
 | `LLM` (default) | the LLM (existing behavior) | generation, repair, and one domain-inference call when `InputDomain` is absent |
 | `RANDOOP` | Randoop, building objects by calling the SUT's own constructors/methods | none (fully offline) |
-| `HYBRID` | the LLM suggests seed values, then Randoop builds objects from them at scale | one seeding call, plus one domain-inference call when `InputDomain` is absent |
-| `NEW_HYBRID` | Randoop first discovers API-valid source examples; the LLM then generalizes them into the final constrained input set | final generation and repair calls, plus one domain-inference call when `InputDomain` is absent |
+| `NEW_HYBRID` | Randoop first discovers API-valid source examples; the LLM then generalizes them into the final constrained input set. The Part IV reports call this generator **HYBRID** | final generation and repair calls, plus one domain-inference call when `InputDomain` is absent |
+
+An earlier `HYBRID` value (the LLM suggested seed values and Randoop built the final inputs) was replaced by `NEW_HYBRID` before the final experiment and has been removed; configs that still say `HYBRID` fail with a message pointing to `NEW_HYBRID`.
 
 Key points:
 
-- **`RANDOOP` and `HYBRID` require `MRProvider: DEV`.** Randoop produces the final source inputs on these paths, so the metamorphic relation must be developer-owned. `NEW_HYBRID` feeds Randoop examples into the normal LLM generation/repair path and therefore supports both `DEV` and `LLM` MR providers.
+- **`RANDOOP` requires `MRProvider: DEV`.** Randoop produces the final source inputs, so the metamorphic relation must be developer-owned. `NEW_HYBRID` feeds Randoop examples into the normal LLM generation/repair path and therefore supports both `DEV` and `LLM` MR providers.
 - **Works for any object or array.** Randoop constructs inputs from the SUT's visible API, so object SUTs (e.g. an `Order` with a `List<LineItem>`), array SUTs (`double[][]`), and nested object graphs (`Cart` → `List<CartItem>`) are all supported with no per-SUT serialization code.
-- **All modes honor the same output flags.** With `JsonRequired: true` you get JSON data, pass/fail splits, and an HTML report. `RANDOOP`/`HYBRID` emit their object JUnit suites pre-split because they know verdicts in-process; `LLM`/`NEW_HYBRID` use the existing generated-test execution and actual-result splitter.
-- **Seeding source (HYBRID):** the LLM is asked for seed values from the `InputDomain` description when present, otherwise from the SUT source. `InputDomain` values are coarser (domain-level), while code-derived values can straddle exact boundaries.
+- **All modes honor the same output flags.** With `JsonRequired: true` you get JSON data, pass/fail splits, and an HTML report. `RANDOOP` emits its object JUnit suites pre-split because they know verdicts in-process; `LLM`/`NEW_HYBRID` use the existing generated-test execution and actual-result splitter.
 - **Seeding source (NEW_HYBRID):** Randoop runs first without an API call, retains source objects accepted by the target method, and emits each runtime value plus its minimal Java construction trace. The LLM receives those examples together with `InputDomain`; the examples ground it in the real API, while `InputDomain` remains authoritative for semantic constraints and diversity.
 - **Optional `RandoopTargetClasses`:** use a YAML list of fully qualified class names as additional construction evidence. Automatic construction-graph discovery still runs, so this field is a hint rather than a requirement.
-- **Empty-harvest fallback:** `HYBRID` and `NEW_HYBRID` first use deterministic Instancio seeds after Randoop produces no executable input. Each fallback object is run through the SUT before the LLM sees it. If the complete `NEW_HYBRID` seed stage still returns no seeds or fails, the run continues in `LLM` mode and prints an `[INPUT_GENERATOR_FALLBACK]` warning. `<OutputRoot>/metrics.json` preserves `requestedInputGenerator: NEW_HYBRID`, records `effectiveInputGenerator: LLM`, and tags the reason with `NEW_HYBRID_FALLBACK_LLM_NO_SEEDS` or `NEW_HYBRID_FALLBACK_LLM_SEED_ERROR`. Raw `RANDOOP` remains unchanged for fair generator comparisons.
+- **Empty-harvest fallback:** `NEW_HYBRID` first uses deterministic Instancio seeds after Randoop produces no executable input. Each fallback object is run through the SUT before the LLM sees it. If the complete `NEW_HYBRID` seed stage still returns no seeds or fails, the run continues in `LLM` mode and prints an `[INPUT_GENERATOR_FALLBACK]` warning. `<OutputRoot>/metrics.json` preserves `requestedInputGenerator: NEW_HYBRID`, records `effectiveInputGenerator: LLM`, and tags the reason with `NEW_HYBRID_FALLBACK_LLM_NO_SEEDS` or `NEW_HYBRID_FALLBACK_LLM_SEED_ERROR`. Raw `RANDOOP` remains unchanged for fair generator comparisons.
 - **Callback interfaces:** when a target argument is an interface whose callback methods return enums, booleans, characters, or primitive numbers, the framework generates deterministic concrete policy classes automatically. Policies include constant returns and numeric-threshold returns, are compiled into the Randoop workspace, and are copied as replayable JUnit support. Callback-based seeds must contain non-null reference arguments, preventing vacuous inputs such as `(null, null)`. Existing project implementations are still discovered normally. Callbacks with unsupported object return values or domain-specific state transitions remain outside this bounded automatic synthesis.
 - The Randoop time budget is fixed at 15s; Randoop runs in a subprocess so the SUT classes are genuinely on its classpath.
 
-`NEW_HYBRID` is useful for constrained object domains. Pure `LLM` generation understands prose constraints but can hallucinate constructors or factories. Existing `HYBRID` provides domain values before exploration, but Randoop must still combine them into semantically valid objects and may produce few usable cases. `NEW_HYBRID` reverses the order: Randoop demonstrates real construction paths first, then the LLM applies the domain rules and expands those grounded examples into diverse final inputs. It does not guarantee better results for every SUT, so it remains a separate evaluation mode rather than replacing either existing strategy.
+`NEW_HYBRID` is useful for constrained object domains. Pure `LLM` generation understands prose constraints but can hallucinate constructors or factories. `NEW_HYBRID` lets Randoop demonstrate real construction paths first, then the LLM applies the domain rules and expands those grounded examples into diverse final inputs. It does not guarantee better results for every SUT, so it remains a separate evaluation mode rather than replacing `LLM`.
 
 Example:
 
@@ -255,24 +255,21 @@ RandoopTargetClasses:
   - java.math.BigDecimal
 ```
 
-Example (Randoop builds the carts, developer owns the MR):
+Example (Randoop builds the inputs, developer owns the MR; from the final experiment's days-between `dev` prompt):
 
 ```yaml
-SUTClassFile: examples/_archive/pricing/src/PricingEngine.java
-SUTSupportFiles:
-  - examples/_archive/pricing/src/Cart.java
-  - examples/_archive/pricing/src/CartItem.java
-  - examples/_archive/pricing/src/Customer.java
-  - examples/_archive/pricing/src/CustomerTier.java
-  - examples/_archive/pricing/src/DiscountCode.java
-TargetFunction: public static BigDecimal calculateDiscountedSubtotal(Cart cart)
-InputGenerator: HYBRID
-JsonRequired: true
+ProjectRoot: examples/threeten-extra
+SUTClassFile: examples/threeten-extra/src/main/java/org/threeten/extra/Days.java
+TargetFunction: public static Days between(Temporal startDateInclusive, Temporal endDateExclusive)
+MavenProfiles:
+  - threeten
+InputGenerator: RANDOOP
+JsonRequired: false
 TestSuiteRequired: true
 MRProvider: DEV
-DeveloperMrFile: examples/_archive/pricing/mr/PricingMetamorphicSpec.java
-DeveloperFollowUpMethod: PricingMetamorphicSpec.generateFollowUp
-DeveloperAssertMethod: PricingMetamorphicSpec.assertRelation
+DeveloperMrFile: examples/threeten-extra/mr/DaysBetweenMetamorphicSpec.java
+DeveloperFollowUpMethod: DaysBetweenMetamorphicSpec.generateFollowUp
+DeveloperAssertMethod: DaysBetweenMetamorphicSpec.assertRelation
 ```
 
 When both `JsonRequired` and `TestSuiteRequired` are true, the backend performs two generation passes. If the configured class name ends in `Data`, the JUnit class name is derived by replacing that suffix with `Test`.

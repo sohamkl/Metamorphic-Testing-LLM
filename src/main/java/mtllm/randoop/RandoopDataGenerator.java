@@ -2,13 +2,9 @@ package mtllm.randoop;
 
 import mtllm.config.PromptConfig;
 import mtllm.config.PromptConfigLoader;
-import mtllm.domain.InputDomainInferenceService;
-import mtllm.llm.LlmClient;
-import mtllm.llm.OpenAiClient;
 import mtllm.sut.ConstructionGraphDiscoverer;
 import mtllm.sut.JavaSourceNames;
 import mtllm.sut.TargetMethodResolver;
-import mtllm.util.DotEnv;
 import mtllm.util.GeneratedNames;
 
 import randoop.sequence.Variable;
@@ -23,7 +19,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 
@@ -50,10 +45,6 @@ public final class RandoopDataGenerator {
 
     private final int timeLimitMillis;
     private final String invocationClassName;
-    // Keep harvesting deterministic and bounded. A single Randoop run already explores thousands
-    // of sequences; additional seeds can enter long-running third-party operations and discard the
-    // useful inputs harvested by earlier seeds when the subprocess timeout is reached.
-    private static final long[] RANDOM_SEEDS = {0L};
 
     public RandoopDataGenerator(int timeLimitMillis, String invocationClassName) {
         this.timeLimitMillis = timeLimitMillis;
@@ -64,9 +55,8 @@ public final class RandoopDataGenerator {
      * Subprocess entry point: {@code RandoopDataGenerator <prompt.yaml> <out.json>}.
      *
      * <p>Run in a separate JVM by the pipeline so the SUT classes are genuinely on the classpath
-     * (Randoop reflects them by name). Loads the config, builds an LLM client from {@code .env} when
-     * the mode is HYBRID, generates the executed-MT JSON, and writes it to the output file (a file,
-     * not stdout, to keep it clean of Randoop's console output).</p>
+     * (Randoop reflects them by name). Loads the config, generates the executed-MT JSON, and writes it
+     * to the output file (a file, not stdout, to keep it clean of Randoop's console output).</p>
      */
     public static void main(String[] args) throws Exception {
         if (args.length < 2) {
@@ -77,11 +67,6 @@ public final class RandoopDataGenerator {
         Path outJson = Path.of(args[1]).toAbsolutePath().normalize();
 
         PromptConfig config = PromptConfigLoader.load(promptPath, repoRoot);
-        String inputDomainFile = optionValue(args, "--input-domain-file=");
-        if (inputDomainFile != null && !inputDomainFile.isBlank()) {
-            config = config.withInputDomainRequirements(InputDomainInferenceService.readArtifact(
-                    Path.of(inputDomainFile), config.count()));
-        }
         String invocationClassName = optionValue(args, "--invocation-class=");
         RandoopDataGenerator generator = new RandoopDataGenerator(15000, invocationClassName);
         if (hasFlag(args, "--seeds-only")) {
@@ -91,30 +76,7 @@ public final class RandoopDataGenerator {
             return;
         }
 
-        boolean seeded = config.inputGenerator().seedsWithLlm();
-
-        LlmClient seederClient = null;
-        if (seeded) {
-            Map<String, String> env = DotEnv.load(repoRoot.resolve(".env"));
-            String apiKey = DotEnv.firstNonBlank(
-                    System.getenv("OPENAI_API_KEY_OPENAI"),
-                    env.get("OPENAI_API_KEY_OPENAI"));
-            String model = DotEnv.firstNonBlank(System.getenv("OPENAI_MODEL"), env.get("OPENAI_MODEL"), "gpt-4o-mini");
-            String baseUrl = DotEnv.firstNonBlank(
-                    System.getenv("OPENAI_BASE_URL"), env.get("OPENAI_BASE_URL"), "https://api.openai.com/v1");
-            String reasoningEffort = DotEnv.firstNonBlank(
-                    System.getenv("OPENAI_REASONING_EFFORT"), env.get("OPENAI_REASONING_EFFORT"));
-            seederClient = new OpenAiClient(apiKey, model, baseUrl, reasoningEffort);
-        }
-
-        if (hasFlag(args, "--seeded-sources-only")) {
-            String sourceExamples = generator
-                    .generateSeedExamples(config, repoRoot, seederClient, true);
-            Files.writeString(outJson, sourceExamples, StandardCharsets.UTF_8);
-            return;
-        }
-
-        Result result = generator.generateAll(config, repoRoot, seederClient, seeded);
+        Result result = generator.generateAll(config);
         Files.writeString(outJson, result.json(), StandardCharsets.UTF_8);
 
         // Object JUnit suite (approach C): emit passing/failing classes directly from the in-process
@@ -137,13 +99,6 @@ public final class RandoopDataGenerator {
     /** Harvest raw Randoop examples for NEW_HYBRID before the LLM creates the final input set. */
     @SuppressWarnings("unchecked")
     public String generateSeedExamples(PromptConfig config) throws Exception {
-        return generateSeedExamples(config, null, null, false);
-    }
-
-    /** Harvest executable source examples, optionally using LLM values to seed Randoop. */
-    @SuppressWarnings("unchecked")
-    public String generateSeedExamples(
-            PromptConfig config, Path repoRoot, LlmClient seederClient, boolean seeded) throws Exception {
         SutInvocation invocation = resolveSutInvocation(config);
         Method sutMethod = invocation.method;
         Class<Object> inputType = (Class<Object>) invocation.inputType;
@@ -151,20 +106,7 @@ public final class RandoopDataGenerator {
         RandoopHarvester<Object> harvester = new RandoopHarvester<>(
                 inputType,
                 randoopClassNames(config, inputType));
-        List<RandoopHarvester.Harvested<Object>> harvested;
-        if (seeded && seederClient != null) {
-            List<Object> seeds;
-            String inputDomain = config.inputDomain();
-            if (inputDomain != null && !inputDomain.isBlank()) {
-                seeds = LlmValueSeeder.generateSeedsFromDomain(seederClient, inputDomain);
-            } else {
-                seeds = LlmValueSeeder.generateSeedsFromCode(seederClient, readSutSources(repoRoot, config));
-            }
-            int perSeedBudget = Math.max(2000, timeLimitMillis / RANDOM_SEEDS.length);
-            harvested = harvester.harvestSequencesMultiSeed(perSeedBudget, seeds, RANDOM_SEEDS);
-        } else {
-            harvested = harvester.harvestSequences(timeLimitMillis, null, 0L);
-        }
+        List<RandoopHarvester.Harvested<Object>> harvested = harvester.harvestSequences(timeLimitMillis, null, 0L);
         List<RandoopHarvester.Harvested<Object>> executable = new ArrayList<>();
         for (RandoopHarvester.Harvested<Object> candidate : harvested) {
             try {
@@ -177,7 +119,7 @@ public final class RandoopDataGenerator {
                 // Seed examples should demonstrate inputs accepted by the target method.
             }
         }
-        if (executable.isEmpty() && (seeded || config.inputGenerator().name().equals("NEW_HYBRID"))) {
+        if (executable.isEmpty() && config.inputGenerator().randoopSeedsLlm()) {
             return emitInstancioSeedExamples(inputType, sutMethod, sutReceiver, invocation, config.count());
         }
         return emitSeedExamples(executable, config.count());
@@ -189,11 +131,9 @@ public final class RandoopDataGenerator {
      * the object suite (approach C). Sharing one harvest+evaluate pass keeps the JSON entries and the
      * JUnit {@code @Test} methods in lock-step -- same distinct shapes, same pass/fail verdicts.
      */
-    public Result generateAll(PromptConfig config, Path repoRoot, LlmClient seederClient, boolean seeded)
-            throws Exception {
+    public Result generateAll(PromptConfig config) throws Exception {
         MethodBundle bundle = resolveMethods(config);
-        List<RandoopHarvester.Harvested<Object>> harvested =
-                harvestSources(config, repoRoot, seederClient, seeded, bundle);
+        List<RandoopHarvester.Harvested<Object>> harvested = harvestSources(config, bundle);
 
         List<Evaluated> kept = new ArrayList<>();
         for (RandoopHarvester.Harvested<Object> h : harvested) {
@@ -254,28 +194,13 @@ public final class RandoopDataGenerator {
         return new MethodBundle(sutClass, specClass, sutMethod, sutReceiver, followUpMethod, assertMethod, inputType);
     }
 
-    /** Harvest structurally-distinct sources (raw, or LLM-seeded multi-seed) paired with sequences. */
+    /** Harvest structurally-distinct sources paired with the sequences that built them. */
     @SuppressWarnings("unchecked")
-    private List<RandoopHarvester.Harvested<Object>> harvestSources(
-            PromptConfig config, Path repoRoot, LlmClient seederClient, boolean seeded, MethodBundle bundle)
+    private List<RandoopHarvester.Harvested<Object>> harvestSources(PromptConfig config, MethodBundle bundle)
             throws Exception {
         RandoopHarvester<Object> harvester =
                 new RandoopHarvester<>((Class<Object>) bundle.inputType,
                         randoopClassNames(config, bundle.inputType));
-
-        if (seeded && seederClient != null) {
-            // Prefer the developer's InputDomain description (concise, authoritative, scales to any
-            // SUT size); fall back to reading the SUT source code when no domain is provided.
-            List<Object> seeds;
-            String inputDomain = config.inputDomain();
-            if (inputDomain != null && !inputDomain.isBlank()) {
-                seeds = LlmValueSeeder.generateSeedsFromDomain(seederClient, inputDomain);
-            } else {
-                seeds = LlmValueSeeder.generateSeedsFromCode(seederClient, readSutSources(repoRoot, config));
-            }
-            int perSeedBudget = Math.max(2000, timeLimitMillis / RANDOM_SEEDS.length);
-            return harvester.harvestSequencesMultiSeed(perSeedBudget, seeds, RANDOM_SEEDS);
-        }
         return harvester.harvestSequences(timeLimitMillis, null, 0L);
     }
 
@@ -470,17 +395,6 @@ public final class RandoopDataGenerator {
     private static String sourceClassName(Class<?> type) {
         String canonicalName = type.getCanonicalName();
         return canonicalName != null ? canonicalName : type.getName().replace('$', '.');
-    }
-
-    private List<String> readSutSources(Path repoRoot, PromptConfig config) throws Exception {
-        List<String> sources = new ArrayList<>();
-        if (config.sutClassFile() != null) {
-            sources.add(Files.readString(repoRoot.resolve(config.sutClassFile()), StandardCharsets.UTF_8));
-        }
-        for (Path support : config.sutSupportFiles()) {
-            sources.add(Files.readString(repoRoot.resolve(support), StandardCharsets.UTF_8));
-        }
-        return sources;
     }
 
     /** Invoke a reflected method (static when receiver==null), unwrapping InvocationTargetException

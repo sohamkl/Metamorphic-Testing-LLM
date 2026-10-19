@@ -1,7 +1,6 @@
 package mtllm.randoop;
 
 import mtllm.config.PromptConfig;
-import mtllm.domain.InputDomainInferenceService;
 import mtllm.runner.ProcessRunner;
 import mtllm.runner.RuntimeResourceCopier;
 import mtllm.sut.CompiledClassPath;
@@ -96,19 +95,6 @@ public final class RandoopInputRunner {
         ProcessRunner.Result run = runGenerator(config, promptPath, outJson, compilation, List.of("--seeds-only"));
         if (!Files.exists(outJson)) {
             throw new IllegalStateException("Randoop seed generation produced no output file.\n" + run.output());
-        }
-        return Files.readString(outJson, StandardCharsets.UTF_8);
-    }
-
-    /** Generate the final LLM-seeded Randoop source fixtures for HYBRID + LLM MR. */
-    public String generateLlmSeededSourceExamples(PromptConfig config, Path promptPath) throws Exception {
-        Compilation compilation = compileSut(config);
-        Path outJson = workDir.resolve("randoop-hybrid-sources.json");
-        ProcessRunner.Result run = runGenerator(
-                config, promptPath, outJson, compilation, List.of("--seeded-sources-only"));
-        if (!Files.exists(outJson)) {
-            throw new IllegalStateException(
-                    "LLM-seeded Randoop source generation produced no output file.\n" + run.output());
         }
         return Files.readString(outJson, StandardCharsets.UTF_8);
     }
@@ -242,12 +228,6 @@ public final class RandoopInputRunner {
         List<String> java = new ArrayList<>(List.of(
                 "java", "-ea", "-cp", classpath, "mtllm.randoop.RandoopDataGenerator",
                 promptPath.toString(), outJson.toString()));
-        Path inferredDomain = config.outputRoot().resolve("input-domain/inferred-input-domain.yaml");
-        if (Files.isRegularFile(inferredDomain)
-                && InputDomainInferenceService.readArtifact(inferredDomain, config.count())
-                        .equals(config.inputDomainRequirements())) {
-            java.add("--input-domain-file=" + inferredDomain);
-        }
         if (compilation.wrapper != null) {
             java.add("--invocation-class=" + compilation.wrapper.className());
         }

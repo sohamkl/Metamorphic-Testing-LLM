@@ -4,7 +4,6 @@ import com.github.javaparser.StaticJavaParser;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.expr.MethodCallExpr;
-import mtllm.config.InputGenerator;
 import mtllm.config.PromptConfig;
 import mtllm.config.ScenarioRequirement;
 
@@ -68,10 +67,7 @@ final class GeneratedTestQualityGate {
             }
         }
 
-        List<MissingScenario> missingScenarios = List.of();
-        if (config.inputGenerator() != InputGenerator.HYBRID) {
-            missingScenarios = missingScenarioCoverage(tests, config, retiredScenarioIds);
-        }
+        List<MissingScenario> missingScenarios = missingScenarioCoverage(tests, config, retiredScenarioIds);
 
         Map<String, MethodDeclaration> methods = new HashMap<>();
         unit.findAll(MethodDeclaration.class).forEach(method -> methods.put(method.getNameAsString(), method));

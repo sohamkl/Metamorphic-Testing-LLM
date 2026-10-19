@@ -58,8 +58,7 @@ public final class App {
             String apiKey = DotEnv.firstNonBlank(
                     System.getenv("OPENAI_API_KEY_OPENAI"),
                     env.get("OPENAI_API_KEY_OPENAI"));
-            boolean needsApiKey = !config.inputGenerator().usesRandoop()
-                    || config.inputGenerator().seedsWithLlm();
+            boolean needsApiKey = !config.inputGenerator().usesRandoop();
             if (needsApiKey && apiKey.isBlank()) {
                 throw new IllegalStateException(
                         "Missing OPENAI_API_KEY_OPENAI. Put it in .env or the environment.");
@@ -102,33 +101,7 @@ public final class App {
             TestRunResult result;
             int repairAttempts = 0;
             int additiveRepairAttempts = 0;
-            if (config.inputGenerator() == InputGenerator.HYBRID
-                    && config.mrProvider() == MRProvider.LLM) {
-                RandoopInputRunner sourceRunner = new RandoopInputRunner(
-                        repoRoot,
-                        repoRoot.resolve("lib/randoop-all-4.3.4.jar"),
-                        repoRoot.resolve("target/classes"),
-                        config.outputRoot().resolve("hybrid-randoop"));
-                System.out.println("Generating final source inputs with LLM-seeded Randoop (HYBRID)...");
-                String sourceExamples = sourceRunner.generateLlmSeededSourceExamples(config, promptPath);
-                if (sourceExamples.isBlank() || sourceExamples.equals("[]")) {
-                    throw new IllegalStateException(
-                            "HYBRID generated no executable source inputs for the LLM MR stage.");
-                }
-                System.out.println("Randoop source inputs harvested; asking the LLM to generate the MR tests...");
-
-                PromptConfig harvestedConfig = config.withRandoopSeedExamples(sourceExamples);
-                SutContext harvestedContext = SutContextLoader.load(harvestedConfig, repoRoot);
-                RepairLoop repairLoop = new RepairLoop(
-                        llmClient,
-                        testRunner,
-                        dataGeneratorRunner,
-                        outputRoot.resolve("junit-tests"),
-                        outputRoot.resolve("data-generator-code"));
-                result = repairLoop.generateRunAndRepair(harvestedConfig, harvestedContext);
-                repairAttempts = repairLoop.lastRepairAttempts();
-                additiveRepairAttempts = repairLoop.lastAdditiveRepairAttempts();
-            } else if (config.inputGenerator().randoopSeedsLlm()) {
+            if (config.inputGenerator().randoopSeedsLlm()) {
                 RandoopInputRunner seedRunner = new RandoopInputRunner(
                         repoRoot,
                         repoRoot.resolve("lib/randoop-all-4.3.4.jar"),
