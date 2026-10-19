@@ -68,8 +68,8 @@ JUNIT_PLATFORM_CONSOLE_STANDALONE_JAR=/absolute/path/to/junit-platform-console-s
 | `examples/_archive/pricing/generated/junit-support/` | Copied pricing SUT/support/MR sources used only to compile generated JUnit tests |
 | `examples/_archive/pricing/generated/reports/` | Generated pricing HTML reports |
 | `src/main/resources/reports/` | FreeMarker templates for generated HTML reports |
-| `prompt.yaml` | Active generation config |
-| `prompt.class-level.example.yaml` | Template config |
+| `prompt.yaml` | Default generation config: a copy of the jsoup cleaner-idempotence `dev` prompt from the final experiment |
+| `examples/<sut>/exploratory/`, `examples/<sut>/mt-testing/exploratory/` | MRs explored during development but not used in the final experiment (reference only; see each folder's README) |
 | `docs/CONFIGURATION.md` | Explanation of output/MR-provider configuration combinations |
 | `docs/AUTOMATIC_INPUT_PIPELINE.md` | Automatic domain inference, scenario planning, quality gates, and current boundary |
 | `docs/PITEST.md` | PIT mutation testing profile, command, target scope, and report paths |

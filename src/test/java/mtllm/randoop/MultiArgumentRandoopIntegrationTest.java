@@ -104,7 +104,7 @@ class MultiArgumentRandoopIntegrationTest {
     @EnabledIfEnvironmentVariable(named = "MTLLM_RUN_RANDOOP_INTEGRATION", matches = "true")
     void harvestsReceiverAndArgumentForSpatial4jInstanceMethod() throws Exception {
         Path repoRoot = Path.of("").toAbsolutePath().normalize();
-        Path prompt = repoRoot.resolve("examples/spatial4j/prompt.yaml");
+        Path prompt = repoRoot.resolve("final-experiment/final-experiment-sut-prompts/spatial4j/CircleImpl/prompt-circle-relate-nl.yaml");
         PromptConfig config = ProjectDiscovery.enrichClasspath(
                 PromptConfigLoader.load(prompt, repoRoot), mavenCommand(repoRoot));
         RandoopInputRunner runner = new RandoopInputRunner(
@@ -125,7 +125,7 @@ class MultiArgumentRandoopIntegrationTest {
     @EnabledIfEnvironmentVariable(named = "MTLLM_RUN_RANDOOP_INTEGRATION", matches = "true")
     void synthesizesNonNullNodeFilterSeedsForJsoup() throws Exception {
         Path repoRoot = Path.of("").toAbsolutePath().normalize();
-        Path prompt = repoRoot.resolve("examples/jsoup/mt-testing/prompt1.yaml");
+        Path prompt = repoRoot.resolve("final-experiment/final-experiment-sut-prompts/jsoup/NodeTraversorFilter/prompt-node-filter-clone-dev.yaml");
         PromptConfig config = ProjectDiscovery.enrichClasspath(
                 PromptConfigLoader.load(prompt, repoRoot), mavenCommand(repoRoot));
         RandoopInputRunner runner = new RandoopInputRunner(
