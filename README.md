@@ -16,8 +16,9 @@ The backend supports configurable JSON/JUnit outputs and developer- or LLM-provi
 
 | What | Why |
 |------|-----|
-| JDK 17+ | Compile and run the backend (the Randoop input-generation mode requires Java 17) |
+| JDK 25 | The core backend targets Java 17, but some SUT profiles (e.g. ta4j) compile with `release 25`. All final-experiment runs used JDK 25 |
 | Maven | Build the project and resolve JUnit 5 |
+| Python 3 | Only for `final-experiment/run-final-experiment.py`. PyYAML is used if installed but is not required |
 | OpenAI API key | `LLM`, `HYBRID`, and `NEW_HYBRID` generation (raw `RANDOOP` makes no API calls) |
 | JUnit Platform Console Standalone jar | Optional alternative to Maven for compiling/running generated JUnit tests |
 | Randoop | Bundled — `lib/randoop-all-4.3.4.jar` is vendored and wired into `pom.xml` (system scope), so no separate install is needed for the Randoop-backed input modes |
@@ -57,7 +58,8 @@ JUNIT_PLATFORM_CONSOLE_STANDALONE_JAR=/absolute/path/to/junit-platform-console-s
 | `src/main/java/mtllm/runner/` | Compiles, runs, and repairs generated tests |
 | `src/main/java/mtllm/util/` | Small helpers for `.env`, JSON, and code fences |
 | `lib/randoop-all-4.3.4.jar` | Vendored Randoop jar (system-scoped dependency in `pom.xml`) |
-| `examples/spatial4j/`, `examples/threeten-extra/`, `examples/ta4j/`, `examples/jsoup/` | The four live SUTs (11 metamorphic relations between them) |
+| `examples/the-algorithms-java/`, `examples/jsoup/`, `examples/ta4j/`, `examples/spatial4j/`, `examples/threeten-extra/` | The five live SUTs. The 10 metamorphic relations used in the final experiment are listed in `final-experiment/experiment-manifest.yaml`; some example folders also hold extra MR specs that were not part of the experiment |
+| `final-experiment/` | Final experiment manifest, runner, prompts, and all raw results (see [Final Experiment](#final-experiment)) |
 | `examples/_archive/` | Superseded examples, kept for reference only. Not compiled by the build. |
 | `examples/_archive/pricing/` | Archived shopping-cart SUT, MR helper, and prompt. Still the worked example in the config docs below. |
 | `examples/_archive/pricing/generated/data-generator-code/` | Generated Java code that creates and evaluates pricing JSON data |
@@ -390,6 +392,57 @@ target/pit-reports/mutations.xml
 ```
 
 The current mutation threshold is `0`, so PIT produces reports without failing the build while generated metamorphic suites are still being evaluated. See [PITEST.md](docs/PITEST.md) for details.
+
+## Final Experiment
+
+`final-experiment/` holds everything needed to rerun or audit the final experiment reported in the Part IV project reports.
+
+### Design
+
+- **Subjects and MRs:** 10 metamorphic relations across five SUTs (`the-algorithms-java` MatrixRank, jsoup, ta4j, spatial4j, threeten-extra). Each relation is one `runs` entry in `experiment-manifest.yaml`, which also records its prompts, generated class names, and PIT profile.
+- **MR ownership modes:** `dev` (developer writes the follow-up transformation and the assertion in Java), `nl` (the LLM implements both from a natural-language MR), `iauto` (developer input transformation, LLM-written output relation), and `oauto` (LLM-written input transformation, developer output relation).
+- **Input generators:** `LLM`, `NEW_HYBRID`, and `RANDOOP`. `RANDOOP` makes no API calls and runs only in `dev` mode.
+- **Models:** `gpt-5.6-luna`, `gpt-5.6-terra`, and `gpt-5.6-sol`, with `reasoningEffort: medium`.
+- **Repetitions:** 3 per configuration, 480 runs in total:
+  - `dev`: 7 configurations (LLM and NEW_HYBRID for each of the 3 models, plus RANDOOP) x 10 MRs x 3 reps = 210 runs
+  - `nl`, `iauto`, `oauto`: NEW_HYBRID x 3 models x 10 MRs x 3 reps = 90 runs each
+- **Effectiveness metric:** killed PIT mutants of the target class, compared within an MR (mutant totals differ between classes).
+
+### Rerunning
+
+The runner executes one combination at a time: it writes the prompt, runs generation, runs the generated passing tests, then runs PIT, and archives everything. List the planned runs first:
+
+```bash
+python final-experiment/run-final-experiment.py --list --runs-per-combination 3
+```
+
+Examples matching the experiment:
+
+```bash
+# dev mode, all three generators
+python final-experiment/run-final-experiment.py --mode dev --runs-per-combination 3 --continue-on-error
+
+# nl / iauto / oauto were run with NEW_HYBRID only
+python final-experiment/run-final-experiment.py --mode nl --mode iauto --mode oauto \
+  --input-generator new-hybrid --runs-per-combination 3 --continue-on-error
+```
+
+Use `--run <id>`, `--model <id>`, and `--start-run <n>` to restrict or resume, and `--dry-run` to print the Maven commands without executing them. The runner temporarily sets `OPENAI_MODEL` in `.env` per run (restoring the original file afterwards) and passes `OPENAI_REASONING_EFFORT` to the generation process from the manifest. LLM outputs are non-deterministic, so reruns will not reproduce the archived numbers exactly; the archived results below are the data the reports use.
+
+### Results layout
+
+| Path | Contents |
+|------|----------|
+| `final-experiment/experiment-manifest.yaml` | Models, modes, input generators, Maven command templates, and the 10 run definitions |
+| `final-experiment/run-final-experiment.py` | Serial experiment runner |
+| `final-experiment/final-experiment-sut-prompts/<sut>/<target>/` | The `dev`, `nl`, `iauto`, and `oauto` prompt YAML for each MR |
+| `final-experiment/final-experiment-run-metadata/all-runs.jsonl` | One JSON line per attempted run (status, timings, token usage, kills, coverage). It also contains pilot and retried attempts, so it has more lines than the 480 reported runs |
+| `final-experiment/final-experiment-run-metadata/<run-id>.*` | Per run: the exact prompt used, metadata JSON, generation/test/PIT logs, and the archived generated sources (`.generated/`) |
+| `final-experiment/final-experiment-pit-reports/<run-id>/` | PIT reports for every run |
+| `final-experiment/final-experiment-stripped-oracles/` | Re-measured copies of the `nl` runs in which the generated tests also asserted source outputs directly, outside the metamorphic relation. Those assertions were removed and the tests and PIT were replayed from the archived generated sources. `.removed.txt` lists what was removed |
+| `final-experiment/final-experiment-pit-reports-stripped/` | PIT reports for the stripped re-runs |
+
+Run IDs follow `<sut>__<mr>__<mode>__<generator>__<model>__runNNN`. Randoop runs use `no-model` as the model component.
 
 ## Current Scope
 
