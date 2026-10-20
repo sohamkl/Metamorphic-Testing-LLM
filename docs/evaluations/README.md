@@ -4,7 +4,7 @@ Small comparisons run in August and early September 2026, while the framework an
 generator were still being developed. They informed the final experiment's design but are **not** part of
 its results: they use earlier framework versions, earlier models and prompts, and prompt files that were
 later replaced by `final-experiment/final-experiment-sut-prompts/` (names such as `prompt1.yaml` no longer
-exist). For the reported results see `final-experiment/` and the README's Final Experiment section.
+exist). For the reported results see `final-experiment/` and [EXPERIMENT.md](../EXPERIMENT.md).
 
 | File | What it compared |
 |------|------------------|
