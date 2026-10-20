@@ -1,0 +1,491 @@
+InputDomain:
+  summary: Finite IEEE-754 longitude values, emphasizing the in-range identity path,
+    both modulo-sign branches, the positive-multiple-of-360 antimeridian sentinel,
+    range boundaries, repeated revolutions, and floating-point boundary behavior under
+    the follow-up lon_deg + 360.0.
+  globalConstraints:
+  - '{Source input must be a finite double=not NaN and not positive or negative infinity.}'
+  - The follow-up input is exactly sourceInput + 360.0, as required by the supplied
+    metamorphic transformation.
+  - Non-finite source inputs are excluded because the supplied MR is defined for longitude
+    values and its subtraction-and-tolerance assertion is not a meaningful non-finite
+    comparison.
+  - Every source invocation must use exactly one double argument and must observe
+    the returned double without applying additional normalization.
+  - For ordinary outputs, the expected normalized result is in the inclusive interval
+    [-180.0, 180.0]; -180.0 and 180.0 are retained as distinct numeric sentinels by
+    the source implementation and are equivalent only under the supplied MR assertion.
+  diversity:
+    sourceRange:
+    - interior_in_range
+    - exact_endpoint
+    - immediately_inside_endpoint
+    - immediately_outside_endpoint
+    - one_revolution
+    - multiple_revolutions
+    - very_large_finite
+    sign:
+    - negative
+    - negative_zero
+    - positive_zero
+    - positive
+    moduloBranch:
+    - in_range_identity
+    - negative_remainder
+    - positive_remainder
+    - zero_remainder_with_positive_source
+    revolutionCount:
+    - '0'
+    - '1'
+    - '2'
+    - '3'
+    - many
+    fractionalPart:
+    - '0.0'
+    - positive_fraction
+    - negative_fraction
+    - subnormal_fraction
+    followUpRelationOutcome:
+    - equal_numeric_outputs
+    - equal_with_rounding_tolerance
+    - both_antimeridian_sentinels
+    precisionScale:
+    - ordinary_double
+    - nextafter_boundary
+    - large_magnitude_double
+  scenarios:
+  - id: IN_RANGE_NEGATIVE_INTERIOR
+    category: NORMAL
+    description: Source longitude is an ordinary negative value strictly inside the
+      documented inclusive range, such as -179.0 or -45.5.
+    preconditions:
+    - -180.0 < sourceInput < 0.0
+    - sourceInput is finite
+    expectedSourceBehavior:
+    - The first if condition is true, so normLonDEG returns sourceInput unchanged.
+    - The follow-up sourceInput + 360.0 is outside the range and should normalize
+      to the same meridian within the MR tolerance.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: IN_RANGE_POSITIVE_INTERIOR
+    category: NORMAL
+    description: Source longitude is an ordinary positive value strictly inside the
+      documented inclusive range, such as 45.5 or 179.0.
+    preconditions:
+    - 0.0 < sourceInput < 180.0
+    - sourceInput is finite
+    expectedSourceBehavior:
+    - The first if condition is true, so normLonDEG returns sourceInput unchanged.
+    - The follow-up normalization should return the same longitude within 1e-9 degrees.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: IN_RANGE_POSITIVE_ZERO
+    category: BOUNDARY
+    description: Source longitude is exactly positive zero.
+    preconditions:
+    - sourceInput == 0.0
+    - raw IEEE-754 sign of sourceInput is positive
+    expectedSourceBehavior:
+    - The in-range identity branch returns zero without modulo arithmetic.
+    - The follow-up value is 360.0 and its modulo path should normalize to zero, preserving
+      the MR relation.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: IN_RANGE_NEGATIVE_ZERO
+    category: EDGE
+    description: Source longitude is negative zero, which is numerically in range
+      but exercises the identity return with a distinct IEEE-754 representation.
+    preconditions:
+    - sourceInput == 0.0
+    - raw IEEE-754 sign of sourceInput is negative
+    expectedSourceBehavior:
+    - The in-range identity branch returns the supplied zero value without shifting
+      it.
+    - The follow-up is numerically 360.0; the MR compares the resulting longitude
+      values numerically within tolerance.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EXACT_NEGATIVE_ANTIMERIDIAN
+    category: BOUNDARY
+    description: Source longitude is exactly -180.0, the lower endpoint of the documented
+      range.
+    preconditions:
+    - sourceInput == -180.0
+    expectedSourceBehavior:
+    - The in-range identity branch returns -180.0 unchanged.
+    - The follow-up is 180.0; assertRelation must accept the two outputs through its
+      bothAreAntimeridian exception.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EXACT_POSITIVE_ANTIMERIDIAN
+    category: BOUNDARY
+    description: Source longitude is exactly 180.0, the upper endpoint of the documented
+      range.
+    preconditions:
+    - sourceInput == 180.0
+    expectedSourceBehavior:
+    - The in-range identity branch returns 180.0 unchanged.
+    - The follow-up is 540.0 and should normalize to 180.0, giving equal antimeridian
+      outputs.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: IMMEDIATELY_INSIDE_LOWER_ENDPOINT
+    category: BOUNDARY
+    description: Source longitude is the greatest representable double below -180.0.
+    preconditions:
+    - sourceInput == Math.nextAfter(-180.0, Double.POSITIVE_INFINITY)
+    - sourceInput < -180.0 is false and sourceInput is finite
+    expectedSourceBehavior:
+    - The identity branch is taken because the value is just inside or equal to the
+      lower bound in double arithmetic.
+    - The returned value must be checked for exact identity and the follow-up relation
+      must be checked without rounding the source value to a decimal first.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: IMMEDIATELY_INSIDE_UPPER_ENDPOINT
+    category: BOUNDARY
+    description: Source longitude is the least representable double above 180.0's
+      lower neighbor, namely Math.nextAfter(180.0, Double.NEGATIVE_INFINITY).
+    preconditions:
+    - sourceInput == Math.nextAfter(180.0, Double.NEGATIVE_INFINITY)
+    - sourceInput < 180.0
+    - sourceInput is finite
+    expectedSourceBehavior:
+    - The identity branch returns the value unchanged.
+    - Adding 360.0 produces an out-of-range follow-up whose normalized output should
+      agree with the source output within tolerance.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: JUST_BELOW_LOWER_ENDPOINT
+    category: BOUNDARY
+    description: Source longitude is the least representable double below -180.0.
+    preconditions:
+    - sourceInput == Math.nextAfter(-180.0, Double.NEGATIVE_INFINITY)
+    - sourceInput < -180.0
+    - sourceInput is finite
+    expectedSourceBehavior:
+    - The identity branch is skipped.
+    - The negative remainder path is exercised and should return a value just below
+      or at the positive-side equivalent of 180.0, within the representable precision.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: JUST_ABOVE_UPPER_ENDPOINT
+    category: BOUNDARY
+    description: Source longitude is the least representable double above 180.0.
+    preconditions:
+    - sourceInput == Math.nextAfter(180.0, Double.POSITIVE_INFINITY)
+    - sourceInput > 180.0
+    - sourceInput is finite
+    expectedSourceBehavior:
+    - The identity branch is skipped.
+    - The positive remainder path returns a value just below -180.0 or its nearest
+      representable equivalent.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_FRACTIONAL_WRAP
+    category: NORMAL
+    description: Source is modestly above 180.0 with a nonzero fractional remainder,
+      for example 181.25 or 359.5.
+    preconditions:
+    - 180.0 < sourceInput < 360.0
+    - sourceInput has a nonzero fractional part
+    expectedSourceBehavior:
+    - The positive-remainder else branch is taken.
+    - The result is -180.0 + ((sourceInput + 180.0) % 360.0), which lies in (-180.0,
+      180.0).
+    - The follow-up output should match the source output within 1e-9 degrees.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: NEGATIVE_FRACTIONAL_WRAP
+    category: NORMAL
+    description: Source is modestly below -180.0 with a nonzero fractional remainder,
+      for example -181.25 or -359.5.
+    preconditions:
+    - -360.0 < sourceInput < -180.0
+    - sourceInput has a nonzero fractional part
+    expectedSourceBehavior:
+    - The negative-remainder branch off < 0 is exercised.
+    - The result is 180.0 + off and lies in (-180.0, 180.0).
+    - The follow-up output should match the source output within 1e-9 degrees.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: POSITIVE_ONE_REVOLUTION
+    category: EDGE
+    description: Source is exactly +360.0.
+    preconditions:
+    - sourceInput == 360.0
+    expectedSourceBehavior:
+    - The positive modulo path produces off == 180.0 and returns 0.0.
+    - The follow-up is 720.0 and should also normalize to 0.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_ONE_REVOLUTION
+    category: EDGE
+    description: Source is exactly -360.0.
+    preconditions:
+    - sourceInput == -360.0
+    expectedSourceBehavior:
+    - The negative modulo path produces a result of 0.0.
+    - The follow-up is 0.0, which uses the in-range identity path and should satisfy
+      the MR.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_TWO_REVOLUTIONS
+    category: EDGE
+    description: Source is exactly +720.0.
+    preconditions:
+    - sourceInput == 720.0
+    expectedSourceBehavior:
+    - The positive remainder is zero and the source is positive, so the explicit off
+      == 0 and lon_deg > 0 sentinel returns 180.0.
+    - The follow-up is 1080.0 and should also return 180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_TWO_REVOLUTIONS
+    category: EDGE
+    description: Source is exactly -720.0.
+    preconditions:
+    - sourceInput == -720.0
+    expectedSourceBehavior:
+    - The negative remainder is zero but lon_deg > 0 is false, so the final branch
+      returns -180.0.
+    - The follow-up is -360.0 and should normalize to 0.0; this case checks the supplied
+      MR's handling of the implementation's signed antimeridian convention.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_HALF_MULTIPLE
+    category: EDGE
+    description: Source is exactly +540.0, a positive value with zero modulo remainder
+      after adding 180.0.
+    preconditions:
+    - sourceInput == 540.0
+    expectedSourceBehavior:
+    - The explicit positive zero-remainder sentinel returns 180.0.
+    - The follow-up is 900.0 and should return 180.0 as well.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_HALF_MULTIPLE
+    category: EDGE
+    description: Source is exactly -540.0, the negative counterpart of the positive
+      antimeridian multiple.
+    preconditions:
+    - sourceInput == -540.0
+    expectedSourceBehavior:
+    - The final -180.0 + off branch returns -180.0 for the zero remainder.
+    - The follow-up is -180.0, so both outputs are antimeridian sentinels accepted
+      by the MR.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_THREE_REVOLUTIONS
+    category: EDGE
+    description: Source is exactly +1080.0.
+    preconditions:
+    - sourceInput == 1080.0
+    expectedSourceBehavior:
+    - The positive zero-remainder sentinel returns 180.0.
+    - The follow-up is 1440.0 and should preserve the same normalized sentinel.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_THREE_REVOLUTIONS
+    category: EDGE
+    description: Source is exactly -1080.0.
+    preconditions:
+    - sourceInput == -1080.0
+    expectedSourceBehavior:
+    - The final branch returns -180.0 for the negative zero remainder.
+    - The follow-up is -720.0 and should return -180.0, so both outputs are antimeridian
+      sentinels.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_MULTI_REVOLUTION_FRACTION
+    category: NORMAL
+    description: Source is several revolutions from zero with a fractional longitude,
+      such as 1440.125.
+    preconditions:
+    - sourceInput > 1080.0
+    - sourceInput is finite
+    - sourceInput is not an integer multiple of 360.0
+    expectedSourceBehavior:
+    - The positive-remainder branch folds the value into the inclusive normalized
+      interval.
+    - The follow-up adds one complete revolution and should produce the same normalized
+      value within tolerance.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: NEGATIVE_MULTI_REVOLUTION_FRACTION
+    category: NORMAL
+    description: Source is several negative revolutions from zero with a fractional
+      longitude, such as -1440.125.
+    preconditions:
+    - sourceInput < -1080.0
+    - sourceInput is finite
+    - sourceInput is not an integer multiple of 360.0
+    expectedSourceBehavior:
+    - The negative-remainder branch folds the value into the inclusive normalized
+      interval.
+    - The follow-up should normalize to the same meridian within tolerance.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: FRACTIONAL_VALUE_NEAR_POSITIVE_SENTINEL
+    category: EDGE
+    description: Source is just below a positive value whose modulo path reaches the
+      +180.0 sentinel, such as 539.9999999999999.
+    preconditions:
+    - sourceInput is finite
+    - 539.0 < sourceInput < 540.0
+    - sourceInput is not exactly 540.0
+    expectedSourceBehavior:
+    - The positive-remainder branch returns a value near, but generally below, 180.0
+      rather than taking the exact off == 0 sentinel.
+    - The follow-up relation checks whether adding 360.0 changes that near-boundary
+      result by more than 1e-9 degrees.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FRACTIONAL_VALUE_NEAR_NEGATIVE_SENTINEL
+    category: EDGE
+    description: Source is just above a negative value whose modulo path reaches the
+      -180.0 sentinel, such as -540.0000000000001.
+    preconditions:
+    - sourceInput is finite
+    - -541.0 < sourceInput < -540.0
+    - sourceInput is not exactly -540.0
+    expectedSourceBehavior:
+    - The negative-remainder branch returns a value near, but generally above, -180.0.
+    - The follow-up relation checks the tolerance behavior near the antimeridian without
+      treating merely near-antimeridian values as exact sentinels unless within 1e-9
+      degrees.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: VERY_LARGE_POSITIVE_FINITE
+    category: EDGE
+    description: Source is a very large finite positive double, such as Double.MAX_VALUE.
+    preconditions:
+    - sourceInput == Double.MAX_VALUE
+    - sourceInput is finite
+    - sourceInput > 180.0
+    expectedSourceBehavior:
+    - The in-range branch is skipped and the result is determined by Java double addition
+      and remainder arithmetic.
+    - The follow-up uses sourceInput + 360.0, which must be invoked without decimal
+      conversion; the MR checks the resulting normalized outputs and tolerance comparison.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: VERY_LARGE_NEGATIVE_FINITE
+    category: EDGE
+    description: Source is a very large finite negative double, such as -Double.MAX_VALUE.
+    preconditions:
+    - sourceInput == -Double.MAX_VALUE
+    - sourceInput is finite
+    - sourceInput < -180.0
+    expectedSourceBehavior:
+    - The negative remainder path is exercised using the precision available for a
+      very large finite operand.
+    - The follow-up is sourceInput + 360.0 and the MR result is observed without assuming
+      decimal-scale exactness.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LARGE_POSITIVE_ULP_SCALE
+    category: EDGE
+    description: Source is a large finite positive value for which one ulp is materially
+      larger than 360.0, such as Math.scalb(1.0, 52) or Math.scalb(1.0, 53).
+    preconditions:
+    - sourceInput is one of Math.scalb(1.0, 52) or Math.scalb(1.0, 53)
+    - sourceInput > 180.0
+    - sourceInput is finite
+    expectedSourceBehavior:
+    - The modulo path is exercised at a scale where sourceInput + 360.0 may round
+      to the same representable double.
+    - The source and follow-up outputs must still be compared through the supplied
+      MR rather than exact decimal expectations.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LARGE_NEGATIVE_ULP_SCALE
+    category: EDGE
+    description: Source is a large finite negative value for which one ulp is materially
+      larger than 360.0, such as -Math.scalb(1.0, 52) or -Math.scalb(1.0, 53).
+    preconditions:
+    - sourceInput is one of -Math.scalb(1.0, 52) or -Math.scalb(1.0, 53)
+    - sourceInput < -180.0
+    - sourceInput is finite
+    expectedSourceBehavior:
+    - The negative modulo branch is exercised at large magnitude.
+    - The follow-up addition and normalization are evaluated using the actual double
+      values and the supplied 1e-9-degree relation tolerance.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: SMALLEST_POSITIVE_SUBNORMAL
+    category: EDGE
+    description: Source is the smallest positive nonzero finite double.
+    preconditions:
+    - sourceInput == Double.MIN_VALUE
+    - sourceInput > 0.0
+    - sourceInput < 180.0
+    expectedSourceBehavior:
+    - The in-range identity branch returns the subnormal value unchanged.
+    - The follow-up is approximately 360.0 and should normalize back to a value numerically
+      consistent with the source within the MR tolerance.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SMALLEST_NEGATIVE_SUBNORMAL
+    category: EDGE
+    description: Source is the smallest negative nonzero finite double.
+    preconditions:
+    - sourceInput == -Double.MIN_VALUE
+    - sourceInput < 0.0
+    - sourceInput > -180.0
+    expectedSourceBehavior:
+    - The in-range identity branch returns the negative subnormal unchanged.
+    - The follow-up is approximately 360.0 and its normalized result is checked against
+      the source output using the supplied tolerance.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEAR_ZERO_POSITIVE_FRACTION
+    category: BOUNDARY
+    description: Source is a small ordinary positive longitude close to zero, such
+      as 1e-12.
+    preconditions:
+    - 0.0 < sourceInput < 1e-9
+    - sourceInput is finite
+    expectedSourceBehavior:
+    - The identity branch returns the small positive value without modulo-induced
+      shifting.
+    - The follow-up relation checks that the full-revolution shift does not alter
+      the normalized longitude beyond 1e-9 degrees.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEAR_ZERO_NEGATIVE_FRACTION
+    category: BOUNDARY
+    description: Source is a small ordinary negative longitude close to zero, such
+      as -1e-12.
+    preconditions:
+    - -1e-9 < sourceInput < 0.0
+    - sourceInput is finite
+    expectedSourceBehavior:
+    - The identity branch returns the small negative value unchanged.
+    - The follow-up output must satisfy the supplied tolerance-based relation.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FOLLOWUP_CROSSES_UPPER_RANGE
+    category: NORMAL
+    description: Source is near the upper endpoint but remains in range, such as 179.999999999.
+    preconditions:
+    - 0.0 < sourceInput < 180.0
+    - 180.0 - sourceInput <= 1e-9
+    expectedSourceBehavior:
+    - The source uses the identity branch and retains the near-antimeridian value.
+    - The follow-up is above 539.999999999 and exercises modulo arithmetic near the
+      positive antimeridian sentinel.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FOLLOWUP_CROSSES_LOWER_RANGE
+    category: NORMAL
+    description: Source is near the lower endpoint but remains in range, such as -179.999999999.
+    preconditions:
+    - -180.0 < sourceInput < 0.0
+    - sourceInput + 180.0 <= 1e-9
+    expectedSourceBehavior:
+    - The source uses the identity branch and retains the near-antimeridian value.
+    - The follow-up is near 180.000000001 and exercises the positive-remainder path
+      near the opposite antimeridian representation.
+    targetCases: 1
+    emptyOutputAllowed: false

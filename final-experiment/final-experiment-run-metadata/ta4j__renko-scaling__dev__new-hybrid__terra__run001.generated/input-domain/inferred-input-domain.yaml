@@ -1,0 +1,438 @@
+InputDomain:
+  summary: Valid Renko inputs consisting of a valid positive finite box-size configuration
+    and a non-null, chronologically contiguous, evenly spaced list of non-null Bar
+    instances. Cases use finite, exactly scalable numeric close prices and exercise
+    initial movement, continuation, reversals, pending metrics, nullable volume/amount,
+    multi-brick emission, and brick-time resolution.
+  globalConstraints:
+  - The receiver uses boxSize > 0 with a finite doubleValue(), reversalAmount > 0,
+    and its follow-up boxSize * 2.0 must also be finite and positive.
+  - bars is non-null; every element is a non-null Bar with a non-null close price,
+    because aggregate rejects null bars/close prices and the follow-up generator also
+    rejects null elements.
+  - 'For every non-empty list, bars are chronologically ordered, contiguous, and evenly
+    spaced: for a chosen T0 and positive duration D, bar i has begin time T0 + i*D
+    and end time T0 + (i+1)*D.'
+  - All numeric close prices, non-null amounts, and the selected boxSize are finite
+    values for which multiplication by 2 is representable by the Bar Num implementation;
+    this is required because the metamorphic follow-up scales them.
+  - Invalid receiver configurations, null lists, null source elements, null close
+    prices, and uneven/non-contiguous intervals are excluded because this metamorphic
+    relation constructs and compares successful source and follow-up outputs rather
+    than exception behavior.
+  diversity:
+    receiverConfiguration:
+    - 'one-argument constructor: boxSize=2'
+    - 'two-argument constructor: boxSize=2, reversalAmount=1'
+    - 'two-argument constructor: boxSize=2, reversalAmount=2'
+    - 'two-argument constructor: boxSize=2, reversalAmount=3'
+    - 'two-argument constructor: boxSize=0.5, reversalAmount=2'
+    closeMovement:
+    - flat or sub-box movement
+    - exact one-box initial UP and DOWN movement
+    - multi-box initial UP and DOWN movement
+    - same-direction continuation
+    - opposite movement below reversal threshold
+    - exact and beyond-threshold UP-to-DOWN reversal
+    - exact and beyond-threshold DOWN-to-UP reversal
+    sourceMetrics:
+    - non-null accumulated volume, amount, and trades
+    - multiple bricks from one source bar
+    - null volume
+    - null amount
+    - zero metrics
+    brickTiming:
+    - first brick at first source end time
+    - delayed first emission using a later source end time
+    - later source end time equal to nextBrickEndTime
+    - later source end time behind nextBrickEndTime after multi-brick emission
+  scenarios:
+  - id: EMPTY_SOURCE_LIST
+    category: EDGE
+    description: Empty valid source list.
+    preconditions:
+    - bars is List.of().
+    - receiver is RenkoBarAggregator(2).
+    expectedSourceBehavior:
+    - Returns an empty Renko-brick list.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: SINGLE_BASELINE_BAR
+    category: NORMAL
+    description: A single source bar establishes the initial close-price baseline.
+    preconditions:
+    - receiver is RenkoBarAggregator(2).
+    - bars has one bar with close=100.
+    expectedSourceBehavior:
+    - Returns no brick because the first close is the initial lastBrickClose.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: SINGLE_SUB_BOX_MOVE
+    category: BOUNDARY
+    description: Movement remains strictly below one box after the baseline.
+    preconditions:
+    - receiver is RenkoBarAggregator(2).
+    - bar closes are [100, 101].
+    expectedSourceBehavior:
+    - Returns no brick because 101 is less than baseline 100 plus boxSize 2.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: INITIAL_UP_EXACT_ONE_BOX
+    category: BOUNDARY
+    description: Initial upward movement equals exactly one box.
+    preconditions:
+    - receiver is RenkoBarAggregator(2).
+    - bar closes are [100, 102].
+    expectedSourceBehavior:
+    - Emits exactly one UP brick with open=100 and close=102.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: INITIAL_UP_MULTIPLE_BOXES
+    category: NORMAL
+    description: One later source close crosses several upward box boundaries.
+    preconditions:
+    - receiver is RenkoBarAggregator(2).
+    - bar closes are [100, 106].
+    expectedSourceBehavior:
+    - Emits exactly three UP bricks with closes 102, 104, and 106.
+    - Only the first emitted brick from the second source bar receives that bar's
+      pending metrics.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: INITIAL_DOWN_EXACT_ONE_BOX
+    category: BOUNDARY
+    description: Initial downward movement equals exactly one box.
+    preconditions:
+    - receiver is RenkoBarAggregator(2).
+    - bar closes are [100, 98].
+    expectedSourceBehavior:
+    - Emits exactly one DOWN brick with open=100 and close=98.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: INITIAL_DOWN_MULTIPLE_BOXES
+    category: NORMAL
+    description: One later source close crosses several downward box boundaries.
+    preconditions:
+    - receiver is RenkoBarAggregator(2).
+    - bar closes are [100, 94].
+    expectedSourceBehavior:
+    - Emits exactly three DOWN bricks with closes 98, 96, and 94.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UPWARD_CONTINUATION
+    category: NORMAL
+    description: An established UP direction emits additional continuation bricks.
+    preconditions:
+    - receiver is RenkoBarAggregator(2).
+    - bar closes are [100, 102, 106].
+    expectedSourceBehavior:
+    - Emits one UP brick from the second bar and two additional UP bricks from the
+      third bar.
+    - Returns three bricks with closes 102, 104, and 106.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DOWNWARD_CONTINUATION
+    category: NORMAL
+    description: An established DOWN direction emits additional continuation bricks.
+    preconditions:
+    - receiver is RenkoBarAggregator(2).
+    - bar closes are [100, 98, 94].
+    expectedSourceBehavior:
+    - Emits one DOWN brick from the second bar and two additional DOWN bricks from
+      the third bar.
+    - Returns three bricks with closes 98, 96, and 94.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UP_DIRECTION_FLAT_BAR
+    category: EDGE
+    description: A flat close after an UP brick preserves direction without emission.
+    preconditions:
+    - receiver is RenkoBarAggregator(2).
+    - bar closes are [100, 102, 102].
+    expectedSourceBehavior:
+    - Emits only the initial UP brick.
+    - The third bar contributes pending metrics but does not itself emit a brick.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DOWN_DIRECTION_FLAT_BAR
+    category: EDGE
+    description: A flat close after a DOWN brick preserves direction without emission.
+    preconditions:
+    - receiver is RenkoBarAggregator(2).
+    - bar closes are [100, 98, 98].
+    expectedSourceBehavior:
+    - Emits only the initial DOWN brick.
+    - The third bar contributes pending metrics but does not itself emit a brick.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UP_PULLBACK_BELOW_REVERSAL
+    category: BOUNDARY
+    description: An UP trend receives an opposite move smaller than the two-box reversal
+      distance.
+    preconditions:
+    - receiver is RenkoBarAggregator(2, 2).
+    - bar closes are [100, 104, 101].
+    expectedSourceBehavior:
+    - Emits the two UP bricks ending at 102 and 104.
+    - Emits no DOWN reversal brick because 101 is above 104 minus reversalDistance
+      4.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UP_PULLBACK_THEN_CONTINUATION
+    category: NORMAL
+    description: An insufficient UP pullback is followed by renewed upward continuation.
+    preconditions:
+    - receiver is RenkoBarAggregator(2, 2).
+    - bar closes are [100, 104, 101, 106].
+    expectedSourceBehavior:
+    - The pullback at 101 emits no reversal brick.
+    - The final close emits one additional UP brick ending at 106.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UP_TO_DOWN_EXACT_REVERSAL
+    category: BOUNDARY
+    description: An UP trend reaches exactly the required two-box reversal distance.
+    preconditions:
+    - receiver is RenkoBarAggregator(2, 2).
+    - bar closes are [100, 104, 100].
+    expectedSourceBehavior:
+    - Emits two initial UP bricks and then two DOWN bricks ending at 102 and 100.
+    - Returns four bricks and finishes in DOWN direction.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UP_TO_DOWN_REVERSAL_OVERSHOOT
+    category: NORMAL
+    description: An UP trend reverses past the threshold and emits more than the minimum
+      reversal bricks.
+    preconditions:
+    - receiver is RenkoBarAggregator(2, 2).
+    - bar closes are [100, 104, 98].
+    expectedSourceBehavior:
+    - Emits two UP bricks followed by three DOWN bricks ending at 102, 100, and 98.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DOWN_PULLBACK_BELOW_REVERSAL
+    category: BOUNDARY
+    description: A DOWN trend receives an opposite move smaller than the two-box reversal
+      distance.
+    preconditions:
+    - receiver is RenkoBarAggregator(2, 2).
+    - bar closes are [100, 96, 99].
+    expectedSourceBehavior:
+    - Emits the two DOWN bricks ending at 98 and 96.
+    - Emits no UP reversal brick because 99 is below 96 plus reversalDistance 4.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DOWN_PULLBACK_THEN_CONTINUATION
+    category: NORMAL
+    description: An insufficient DOWN pullback is followed by renewed downward continuation.
+    preconditions:
+    - receiver is RenkoBarAggregator(2, 2).
+    - bar closes are [100, 96, 99, 94].
+    expectedSourceBehavior:
+    - The pullback at 99 emits no reversal brick.
+    - The final close emits one additional DOWN brick ending at 94.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DOWN_TO_UP_EXACT_REVERSAL
+    category: BOUNDARY
+    description: A DOWN trend reaches exactly the required two-box reversal distance.
+    preconditions:
+    - receiver is RenkoBarAggregator(2, 2).
+    - bar closes are [100, 96, 100].
+    expectedSourceBehavior:
+    - Emits two initial DOWN bricks and then two UP bricks ending at 98 and 100.
+    - Returns four bricks and finishes in UP direction.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DOWN_TO_UP_REVERSAL_OVERSHOOT
+    category: NORMAL
+    description: A DOWN trend reverses past the threshold and emits more than the
+      minimum reversal bricks.
+    preconditions:
+    - receiver is RenkoBarAggregator(2, 2).
+    - bar closes are [100, 96, 102].
+    expectedSourceBehavior:
+    - Emits two DOWN bricks followed by three UP bricks ending at 98, 100, and 102.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ONE_BOX_REVERSAL_CONFIGURATION
+    category: BOUNDARY
+    description: reversalAmount=1 permits reversal after one box instead of the default
+      two.
+    preconditions:
+    - receiver is RenkoBarAggregator(2, 1).
+    - bar closes are [100, 104, 102].
+    expectedSourceBehavior:
+    - Emits two UP bricks followed by one DOWN brick ending at 102.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: THREE_BOX_REVERSAL_NOT_REACHED
+    category: BOUNDARY
+    description: reversalAmount=3 prevents a two-and-a-half-box opposite move from
+      reversing.
+    preconditions:
+    - receiver is RenkoBarAggregator(2, 3).
+    - bar closes are [100, 104, 99].
+    expectedSourceBehavior:
+    - Emits only the two initial UP bricks.
+    - Emits no reversal because the required close is at most 98.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: THREE_BOX_REVERSAL_EXACT
+    category: BOUNDARY
+    description: reversalAmount=3 reverses at exactly three boxes.
+    preconditions:
+    - receiver is RenkoBarAggregator(2, 3).
+    - bar closes are [100, 104, 98].
+    expectedSourceBehavior:
+    - Emits two UP bricks followed by three DOWN bricks.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DEFAULT_CONSTRUCTOR_TWO_BOX_REVERSAL
+    category: NORMAL
+    description: The one-argument constructor uses the documented two-brick reversal
+      configuration.
+    preconditions:
+    - receiver is RenkoBarAggregator(2) using the one-argument constructor.
+    - bar closes are [100, 104, 100].
+    expectedSourceBehavior:
+    - 'Matches the two-box UP-to-DOWN reversal behavior: two UP then two DOWN bricks.'
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FRACTIONAL_BOX_SIZE_EXACT_THRESHOLDS
+    category: BOUNDARY
+    description: Exact threshold handling with a finite fractional box size that remains
+      exact under scaling.
+    preconditions:
+    - receiver is RenkoBarAggregator(0.5, 2).
+    - bar closes are [10, 11.5].
+    expectedSourceBehavior:
+    - Emits exactly three UP bricks with closes 10.5, 11.0, and 11.5.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PENDING_METRICS_BEFORE_FIRST_BRICK
+    category: NORMAL
+    description: Metrics from multiple non-emitting bars are attached to the first
+      later brick.
+    preconditions:
+    - receiver is RenkoBarAggregator(2).
+    - bar closes are [100, 101, 102].
+    - Each bar has non-null volume, amount, and trades.
+    expectedSourceBehavior:
+    - Emits one UP brick at the third bar.
+    - That brick's volume, amount, and trades equal the sums across all three source
+      bars.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MULTI_BRICK_METRICS_FIRST_ONLY
+    category: NORMAL
+    description: A single source bar emits multiple bricks while carrying non-zero
+      metrics.
+    preconditions:
+    - receiver is RenkoBarAggregator(2).
+    - bar closes are [100, 106].
+    - The second bar has non-zero non-null volume, amount, and trades.
+    expectedSourceBehavior:
+    - Emits three UP bricks from the second bar.
+    - The first such brick receives accumulated metrics; the second and third have
+      zero volume, zero amount, and zero trades.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: METRICS_RESET_AFTER_EMISSION
+    category: NORMAL
+    description: Pending metrics reset after a brick and later metrics are accumulated
+      for a subsequent brick.
+    preconditions:
+    - receiver is RenkoBarAggregator(2).
+    - bar closes are [100, 102, 103, 104].
+    - All bars have non-null volume, amount, and trades, with distinguishable non-zero
+      values.
+    expectedSourceBehavior:
+    - Emits one brick at close 102 and one at close 104.
+    - The second brick receives only metrics accumulated after the first emission.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NULL_VOLUME_ACCUMULATION
+    category: EDGE
+    description: Nullable volume is ignored while non-null amount and trades remain
+      accumulated.
+    preconditions:
+    - receiver is RenkoBarAggregator(2).
+    - bar closes are [100, 101, 102].
+    - At least one pre-emission source bar has volume=null; all close prices are non-null.
+    - All source bars have non-null amount and defined trades.
+    expectedSourceBehavior:
+    - Emits one UP brick.
+    - Its volume is the sum of only non-null source volumes, while amount and trades
+      include their supplied values.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NULL_AMOUNT_ACCUMULATION
+    category: EDGE
+    description: Nullable amount is ignored while non-null volume and trades remain
+      accumulated.
+    preconditions:
+    - receiver is RenkoBarAggregator(2).
+    - bar closes are [100, 101, 102].
+    - At least one pre-emission source bar has amount=null; all close prices are non-null.
+    - All source bars have non-null volume and defined trades.
+    expectedSourceBehavior:
+    - Emits one UP brick.
+    - Its amount is the sum of only non-null source amounts, while volume and trades
+      include their supplied values.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EXPLICIT_ZERO_SOURCE_METRICS
+    category: EDGE
+    description: Explicit zero volume, zero amount, and zero trades are preserved
+      through a brick emission.
+    preconditions:
+    - receiver is RenkoBarAggregator(2).
+    - bar closes are [100, 102].
+    - Every source bar has volume=0, amount=0, and trades=0.
+    expectedSourceBehavior:
+    - Emits one UP brick with zero volume, zero amount, and zero trades.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DELAYED_FIRST_BRICK_TIME
+    category: NORMAL
+    description: The first brick is delayed until a later source interval.
+    preconditions:
+    - receiver is RenkoBarAggregator(2).
+    - bar closes are [100, 101, 102].
+    - Bars use common positive period D and contiguous endpoints.
+    expectedSourceBehavior:
+    - Emits one UP brick whose end time is the third source bar's end time, because
+      it is after the initial nextBrickEndTime.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EQUAL_NEXT_BRICK_END_TIME
+    category: BOUNDARY
+    description: Consecutive one-brick emissions make a later source end time equal
+      nextBrickEndTime.
+    preconditions:
+    - receiver is RenkoBarAggregator(2).
+    - bar closes are [100, 102, 104].
+    - Bars use common positive period D and contiguous endpoints.
+    expectedSourceBehavior:
+    - Emits two UP bricks.
+    - The first and second brick end times are respectively the second and third source-bar
+      end times.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SOURCE_END_BEHIND_NEXT_BRICK_TIME
+    category: EDGE
+    description: Earlier multi-brick emission advances nextBrickEndTime beyond a later
+      source bar's end time.
+    preconditions:
+    - receiver is RenkoBarAggregator(2).
+    - bar closes are [100, 106, 108].
+    - Bars use common positive period D and contiguous endpoints.
+    expectedSourceBehavior:
+    - The second source bar emits three UP bricks and advances nextBrickEndTime by
+      three periods.
+    - The brick emitted from the third bar uses the already advanced nextBrickEndTime
+      rather than an earlier source end time.
+    targetCases: 1
+    emptyOutputAllowed: false

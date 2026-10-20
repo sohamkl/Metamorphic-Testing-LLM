@@ -1,0 +1,271 @@
+InputDomain:
+  summary: Finite IEEE-754 double longitudes, including in-range values, wrap boundaries,
+    positive and negative modulo paths, fractional and very large magnitudes. Follow-ups
+    are formed by Java double addition of 360.0; endpoint representations -180.0 and
+    180.0 must be treated as the same geographic location.
+  globalConstraints:
+  - Source input must satisfy Double.isFinite(lon_deg); NaN and infinities are excluded
+    because the stated geographic "same spot" relation has no meaningful equality
+    interpretation for them, although the implementation would return NaN through
+    its modulo path.
+  - Follow-up must be computed as the Java expression lon_deg + 360.0, preserving
+    IEEE-754 rounding rather than substituting an ideal real-number addition.
+  - All finite double magnitudes remain in scope, including magnitudes where adding
+    360.0 is rounded to a value other than an exact 360-degree increment or to the
+    original source value.
+  diversity:
+    sourceControlFlow:
+    - '4'
+    - distinct normLonDEG outcomes
+    - in-range early return; off < 0 return; off == 0 && lon_deg > 0 return; default
+      -180 + off return
+    rangePosition:
+    - '8'
+    - source position relative to -180, 180, and wrap seams
+    - interior; exact endpoints; immediately outside endpoints; positive seam; negative
+      seam; pre-seam; post-seam; multi-turn
+    numericRepresentation:
+    - '6'
+    - IEEE-754 input characteristics
+    - positive zero; negative zero; ordinary fractions; exact integers; nextUp/nextDown
+      boundaries; large values with rounded follow-up addition
+  scenarios:
+  - id: SIGNED_ZERO
+    category: NORMAL
+    description: Both IEEE-754 zero signs are already within the inclusive longitude
+      range.
+    preconditions:
+    - lon_deg is exactly 0.0 or exactly -0.0
+    expectedSourceBehavior:
+    - The inclusive range guard returns lon_deg directly without modulo arithmetic.
+    - The returned value preserves the supplied zero representation because the method
+      returns the original argument.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ORDINARY_INTERIOR_INTEGERS
+    category: NORMAL
+    description: Ordinary non-boundary integer longitudes lie strictly inside the
+      normal range.
+    preconditions:
+    - lon_deg is one of -179.0, -1.0, 1.0, or 179.0
+    - -180.0 < lon_deg < 180.0
+    expectedSourceBehavior:
+    - The method returns lon_deg directly.
+    - No remainder calculation or endpoint canonicalization occurs.
+    targetCases: 4
+    emptyOutputAllowed: false
+  - id: ORDINARY_INTERIOR_FRACTIONS
+    category: NORMAL
+    description: Positive and negative fractional longitudes are already normalized.
+    preconditions:
+    - lon_deg is one of -123.75, -0.5, 0.5, or 123.75
+    - -180.0 < lon_deg < 180.0
+    expectedSourceBehavior:
+    - The method returns the exact supplied double value through the common-case guard.
+    targetCases: 4
+    emptyOutputAllowed: false
+  - id: IN_RANGE_VALUES_ADJACENT_TO_ENDPOINTS
+    category: BOUNDARY
+    description: The closest representable in-range doubles below 180 and above -180
+      remain on the early-return path.
+    preconditions:
+    - lon_deg is Math.nextDown(180.0) or Math.nextUp(-180.0)
+    - -180.0 < lon_deg < 180.0
+    expectedSourceBehavior:
+    - The method returns lon_deg directly rather than performing a modulo operation.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: EXACT_NORMALIZATION_ENDPOINTS
+    category: BOUNDARY
+    description: Both inclusive normal-range endpoints are preserved rather than canonicalized
+      to one endpoint.
+    preconditions:
+    - lon_deg is exactly -180.0 or exactly 180.0
+    expectedSourceBehavior:
+    - normLonDEG(-180.0) returns -180.0.
+    - normLonDEG(180.0) returns 180.0.
+    - The two distinct returned endpoint representations must remain acceptable as
+      the same geographic location under the metamorphic relation.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: IMMEDIATELY_OUTSIDE_NORMALIZATION_ENDPOINTS
+    category: BOUNDARY
+    description: The closest representable values just beyond each inclusive endpoint
+      bypass the early-return guard.
+    preconditions:
+    - lon_deg is Math.nextUp(180.0) or Math.nextDown(-180.0)
+    - lon_deg > 180.0 or lon_deg < -180.0
+    expectedSourceBehavior:
+    - The method computes off as (lon_deg + 180.0) % 360.0.
+    - The positive-side value takes the default return path and normalizes just above
+      -180.0.
+    - The negative-side value takes the off < 0 path and normalizes just below 180.0.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: POSITIVE_FIRST_TURN_NON_SEAM
+    category: EDGE
+    description: Positive out-of-range values exercise positive nonzero remainders
+      without reaching the positive 180-degree seam.
+    preconditions:
+    - lon_deg is one of 181.0, 360.0, or 539.0
+    - lon_deg > 180.0
+    - (lon_deg + 180.0) % 360.0 is greater than 0.0
+    expectedSourceBehavior:
+    - The off < 0 condition is false.
+    - The off == 0 condition is false.
+    - The method returns -180.0 + off.
+    - Expected normalized results are -179.0, 0.0, and 179.0 respectively.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: POSITIVE_EXACT_180_SEAMS
+    category: BOUNDARY
+    description: Positive longitudes congruent to 180 degrees reach the explicit off
+      == 0 && lon_deg > 0 sentinel branch.
+    preconditions:
+    - lon_deg is one of 540.0 or 900.0
+    - lon_deg > 180.0
+    - (lon_deg + 180.0) % 360.0 equals 0.0
+    expectedSourceBehavior:
+    - The method returns 180.0 through the explicit positive seam branch.
+    - It does not return -180.0 for these positive exact-seam inputs.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: POSITIVE_POST_SEAM_VALUES
+    category: EDGE
+    description: Positive values immediately after a positive 180-degree seam return
+      near -180 degrees via the default modulo branch.
+    preconditions:
+    - lon_deg is one of 541.0 or 901.0
+    - lon_deg > 180.0
+    - (lon_deg + 180.0) % 360.0 is greater than 0.0
+    expectedSourceBehavior:
+    - The method returns -179.0 for each listed source value.
+    - The explicit positive seam branch is not taken because off is nonzero.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: NEGATIVE_FIRST_TURN_VALUES
+    category: EDGE
+    description: Negative out-of-range values with negative nonzero remainders exercise
+      the off < 0 branch.
+    preconditions:
+    - lon_deg is one of -181.0, -360.0, or -539.0
+    - lon_deg < -180.0
+    - (lon_deg + 180.0) % 360.0 is less than 0.0
+    expectedSourceBehavior:
+    - The method returns 180.0 + off.
+    - Expected normalized results are 179.0, 0.0, and -179.0 respectively.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: NEGATIVE_EXACT_180_SEAMS
+    category: BOUNDARY
+    description: Negative longitudes congruent to -180 degrees produce a zero remainder
+      but cannot take the positive seam branch.
+    preconditions:
+    - lon_deg is one of -540.0 or -900.0
+    - lon_deg < -180.0
+    - (lon_deg + 180.0) % 360.0 compares equal to 0.0
+    expectedSourceBehavior:
+    - The off < 0 condition is false for zero or negative zero remainder.
+    - The lon_deg > 0 condition is false.
+    - The method returns -180.0 through the default return branch.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: NEGATIVE_POST_SEAM_VALUES
+    category: EDGE
+    description: Negative values immediately beyond a negative -180-degree seam return
+      near positive 180 degrees.
+    preconditions:
+    - lon_deg is one of -541.0 or -901.0
+    - lon_deg < -180.0
+    - (lon_deg + 180.0) % 360.0 is less than 0.0
+    expectedSourceBehavior:
+    - The method returns 179.0 for each listed source value through the off < 0 branch.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: MULTI_TURN_POSITIVE_FRACTIONS
+    category: NORMAL
+    description: Positive fractional values many turns outside the normal range use
+      the positive nonzero remainder path.
+    preconditions:
+    - lon_deg is one of 12345.678 or 987654.125
+    - lon_deg > 180.0
+    - (lon_deg + 180.0) % 360.0 is greater than 0.0
+    expectedSourceBehavior:
+    - The method returns -180.0 + off.
+    - The result is finite and lies in the documented inclusive range from -180.0
+      through 180.0.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: MULTI_TURN_NEGATIVE_FRACTIONS
+    category: NORMAL
+    description: Negative fractional values many turns outside the normal range use
+      the negative remainder path.
+    preconditions:
+    - lon_deg is one of -12345.678 or -987654.125
+    - lon_deg < -180.0
+    - (lon_deg + 180.0) % 360.0 is less than 0.0
+    expectedSourceBehavior:
+    - The method returns 180.0 + off.
+    - The result is finite and lies in the documented inclusive range from -180.0
+      through 180.0.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LARGE_VALUES_WITH_EXACTLY_REPRESENTABLE_INCREMENT
+    category: EDGE
+    description: Large finite powers of two still have sufficient precision for Java
+      addition of 360.0 to change the represented source by exactly 360.0.
+    preconditions:
+    - lon_deg is exactly 4503599627370496.0 or -4503599627370496.0
+    - abs(lon_deg) equals 2^52
+    - The binary64 spacing at abs(lon_deg) is 1.0
+    expectedSourceBehavior:
+    - The source bypasses the in-range guard and performs remainder normalization.
+    - The source result is finite and within -180.0 through 180.0.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LARGE_VALUES_WITH_ROUNDED_FOLLOWUP_INCREMENT
+    category: EDGE
+    description: At magnitude 2^61, constructing the follow-up with +360.0 changes
+      the binary64 value by a rounded increment rather than an exact 360.0.
+    preconditions:
+    - lon_deg is exactly 2305843009213693952.0 or -2305843009213693952.0
+    - abs(lon_deg) equals 2^61
+    - The binary64 spacing at abs(lon_deg) is 512.0
+    expectedSourceBehavior:
+    - The source bypasses the in-range guard and performs remainder normalization.
+    - The source result is finite and within -180.0 through 180.0.
+    - Follow-up construction must retain Java double arithmetic because lon_deg +
+      360.0 is rounded at this magnitude.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LARGE_VALUES_WITH_UNCHANGED_FOLLOWUP
+    category: EDGE
+    description: At magnitude 2^62, adding 360.0 is too small to change the represented
+      binary64 source value.
+    preconditions:
+    - lon_deg is exactly 4611686018427387904.0 or -4611686018427387904.0
+    - abs(lon_deg) equals 2^62
+    - The binary64 spacing at abs(lon_deg) is 1024.0
+    - lon_deg + 360.0 equals lon_deg under Java double arithmetic
+    expectedSourceBehavior:
+    - The source bypasses the in-range guard and performs remainder normalization.
+    - The source result is finite and within -180.0 through 180.0.
+    - This is a reachable finite-input sentinel where the specified follow-up construction
+      is observationally unchanged.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: MAXIMUM_FINITE_MAGNITUDES
+    category: EDGE
+    description: The largest positive and negative finite doubles verify remainder
+      normalization at the finite numeric extremes.
+    preconditions:
+    - lon_deg is Double.MAX_VALUE or -Double.MAX_VALUE
+    - Double.isFinite(lon_deg)
+    - abs(lon_deg) is greater than 180.0
+    expectedSourceBehavior:
+    - The source bypasses the inclusive range guard.
+    - The remainder calculation produces a finite remainder for the finite dividend.
+    - The returned normalized longitude is finite and lies in the documented inclusive
+      range from -180.0 through 180.0.
+    targetCases: 2
+    emptyOutputAllowed: false

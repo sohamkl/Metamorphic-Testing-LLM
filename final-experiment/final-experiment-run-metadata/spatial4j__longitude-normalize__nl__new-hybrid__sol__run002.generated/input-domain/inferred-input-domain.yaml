@@ -1,0 +1,326 @@
+InputDomain:
+  summary: Finite double longitudes for which Java addition produces a measurable
+    360-degree follow-up, spanning the direct-return branch, both antimeridian sentinels,
+    all modulo branches, multiple turns, fractional values, signed zero, and large
+    representable magnitudes.
+  globalConstraints:
+  - The source longitude lon must satisfy Double.isFinite(lon); NaN and infinities
+    do not denote a longitude pointing at a spot on the globe, so the stated relation
+    does not apply to them.
+  - The follow-up must be computed exactly as follow = lon + 360.0 using Java double
+    arithmetic.
+  - The follow-up must satisfy Double.isFinite(follow).
+  - The represented transformation must satisfy follow - lon == 360.0; finite doubles
+    for which adding 360 is absorbed or rounds to a different displacement are excluded
+    because the constructed follow-up is not measurably one full turn from the source.
+  - Every selected source value must be a directly supplied double argument to the
+    static DistanceUtils.normLonDEG method; no object construction is involved.
+  - Both calls must return finite values in the inclusive interval [-180.0, 180.0],
+    as guaranteed by the supplied implementation for the constrained finite inputs.
+  - 'The relation must compare geographic longitude equivalence rather than requiring
+    endpoint identity: for source result s and follow-up result f, use circularDifference
+    = min(abs(s - f), abs(360.0 - abs(s - f))).'
+  - Accept the relation when circularDifference is at most 8 times max(Math.ulp(lon),
+    Math.ulp(follow), Math.ulp(s), Math.ulp(f)); this permits only double-rounding
+    effects while treating -180 and +180 as the same globe location.
+  diversity:
+    sourceBranch:
+    - direct_return
+    - negative_remainder
+    - positive_antimeridian_sentinel
+    - general_nonnegative_remainder
+    sourceRegion:
+    - inside_range
+    - lower_boundary
+    - upper_boundary
+    - below_range
+    - above_range
+    normalizedLocation:
+    - negative_interior
+    - zero_meridian
+    - positive_interior
+    - negative_antimeridian
+    - positive_antimeridian
+    turnCount:
+    - zero_turns
+    - first_external_turn
+    - multiple_turns
+    - large_magnitude
+    numericForm:
+    - positive_zero
+    - negative_zero
+    - integer
+    - binary_fraction
+    - adjacent_representable_boundary
+    - ulp_eight_large_value
+    followUpPath:
+    - direct_return
+    - negative_remainder
+    - positive_antimeridian_sentinel
+    - general_nonnegative_remainder
+  scenarios:
+  - id: SIGNED_ZERO_DIRECT_RETURN
+    category: EDGE
+    description: The source is either positive or negative signed zero.
+    preconditions:
+    - Double.doubleToRawLongBits(lon) equals the raw bits of +0.0 or -0.0, with one
+      case for each.
+    expectedSourceBehavior:
+    - The inclusive-range condition is true and the method returns lon without modulo
+      arithmetic.
+    - The returned raw sign bit matches the source sign bit, including preservation
+      of -0.0.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LOWER_ANTIMERIDIAN_BOUNDARY
+    category: BOUNDARY
+    description: The source is exactly the inclusive lower endpoint.
+    preconditions:
+    - lon == -180.0.
+    expectedSourceBehavior:
+    - The direct-return branch returns exactly -180.0.
+    - The follow-up is +180.0, so the relation must recognize the two endpoint representations
+      as the same location.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UPPER_ANTIMERIDIAN_BOUNDARY
+    category: BOUNDARY
+    description: The source is exactly the inclusive upper endpoint.
+    preconditions:
+    - lon == 180.0.
+    expectedSourceBehavior:
+    - The direct-return branch returns exactly 180.0.
+    - The follow-up is 540.0 and reaches the positive-antimeridian sentinel branch.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: JUST_INSIDE_LOWER_BOUNDARY
+    category: BOUNDARY
+    description: The source is the representable value immediately above -180.
+    preconditions:
+    - lon == Math.nextUp(-180.0).
+    expectedSourceBehavior:
+    - The source remains in the inclusive range and is returned unchanged.
+    - The result is strictly greater than -180.0 and less than 0.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: JUST_INSIDE_UPPER_BOUNDARY
+    category: BOUNDARY
+    description: The source is the representable value immediately below +180.
+    preconditions:
+    - lon == Math.nextDown(180.0).
+    expectedSourceBehavior:
+    - The source remains in the inclusive range and is returned unchanged.
+    - The result is strictly less than 180.0 and greater than 0.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_IN_RANGE_INTERIOR
+    category: NORMAL
+    description: Ordinary negative longitudes exercise the common direct-return path.
+    preconditions:
+    - -180.0 < lon && lon < 0.0.
+    - Select three distinct values, including at least one integer and one non-integer.
+    expectedSourceBehavior:
+    - The method returns exactly the supplied source value without precision shifting.
+    - The result is strictly inside the negative half of the documented range.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: POSITIVE_IN_RANGE_INTERIOR
+    category: NORMAL
+    description: Ordinary positive longitudes exercise the common direct-return path.
+    preconditions:
+    - 0.0 < lon && lon < 180.0.
+    - Select three distinct values, including at least one integer and one non-integer.
+    expectedSourceBehavior:
+    - The method returns exactly the supplied source value without precision shifting.
+    - The result is strictly inside the positive half of the documented range.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: FRACTIONAL_VALUES_AROUND_ZERO
+    category: EDGE
+    description: Small nonzero fractional longitudes test preservation of fractions
+      when adding a much larger turn.
+    preconditions:
+    - -1.0 < lon && lon < 1.0 && lon != 0.0.
+    - lon != Math.rint(lon).
+    - Select values on both sides of zero.
+    expectedSourceBehavior:
+    - The source call takes the direct-return branch and returns lon exactly.
+    - The normalized source result is nonzero and retains its original sign.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: JUST_BELOW_LOWER_BOUNDARY
+    category: BOUNDARY
+    description: Sources immediately below -180 cross from direct return into the
+      negative-remainder branch.
+    preconditions:
+    - lon < -180.0.
+    - lon >= Math.nextDown(Math.nextDown(-180.0)).
+    - Select distinct representable values below -180.0.
+    expectedSourceBehavior:
+    - The direct-return condition is false.
+    - off = (lon + 180.0) % 360.0 is negative, and the result is 180.0 + off.
+    - The result lies just below or at the positive side of the antimeridian.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: JUST_ABOVE_UPPER_BOUNDARY
+    category: BOUNDARY
+    description: Sources immediately above +180 cross from direct return into the
+      general nonnegative-remainder branch.
+    preconditions:
+    - lon > 180.0.
+    - lon <= Math.nextUp(Math.nextUp(180.0)).
+    - Select distinct representable values above 180.0.
+    expectedSourceBehavior:
+    - The direct-return condition is false.
+    - The remainder is positive, so the result is -180.0 + off.
+    - The result lies just above or at the negative side of the antimeridian.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: NEGATIVE_FIRST_EXTERNAL_TURN
+    category: NORMAL
+    description: Negative sources one turn outside the normal interval normalize through
+      a negative remainder.
+    preconditions:
+    - -540.0 < lon && lon < -180.0.
+    - off = (lon + 180.0) % 360.0 must satisfy off < 0.0.
+    - Select results covering negative interior, zero-near, and positive interior
+      normalized locations.
+    expectedSourceBehavior:
+    - The method executes the off < 0 branch and returns 180.0 + off.
+    - The result is within [-180.0, 180.0] and is not produced by direct return.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: POSITIVE_FIRST_EXTERNAL_TURN
+    category: NORMAL
+    description: Positive sources one turn outside the normal interval normalize through
+      a nonnegative remainder.
+    preconditions:
+    - 180.0 < lon && lon < 540.0.
+    - off = (lon + 180.0) % 360.0 must satisfy off > 0.0.
+    - Select results covering negative interior, zero-near, and positive interior
+      normalized locations.
+    expectedSourceBehavior:
+    - The method executes the final else branch and returns -180.0 + off.
+    - The result is within [-180.0, 180.0] and is not produced by direct return.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: POSITIVE_ANTIMERIDIAN_SENTINELS
+    category: EDGE
+    description: Positive out-of-range antimeridian equivalents trigger the explicit
+      off-equals-zero sentinel.
+    preconditions:
+    - lon == 180.0 + 360.0 * k for an integer k >= 1.
+    - Select three distinct k values satisfying all global constraints.
+    expectedSourceBehavior:
+    - off == 0.0 and lon > 0.0 are both true.
+    - The method returns exactly +180.0 rather than -180.0.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: NEGATIVE_ANTIMERIDIAN_SENTINELS
+    category: EDGE
+    description: Negative out-of-range antimeridian equivalents encounter zero remainder
+      without satisfying the positive sentinel.
+    preconditions:
+    - lon == -180.0 - 360.0 * k for an integer k >= 1.
+    - Select three distinct k values satisfying all global constraints.
+    expectedSourceBehavior:
+    - The remainder compares equal to zero, but lon > 0.0 is false.
+    - The final branch returns exactly -180.0.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: POSITIVE_ZERO_MERIDIAN_MULTIPLES
+    category: EDGE
+    description: Positive exact full-turn multiples normalize to the zero meridian
+      without using the antimeridian sentinel.
+    preconditions:
+    - lon == 360.0 * k for an integer k >= 1.
+    - Select three distinct k values satisfying all global constraints.
+    expectedSourceBehavior:
+    - off equals 180.0.
+    - The final branch returns exactly 0.0.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: NEGATIVE_ZERO_MERIDIAN_MULTIPLES
+    category: EDGE
+    description: Negative exact full-turn multiples normalize to the zero meridian
+      through the negative-remainder branch.
+    preconditions:
+    - lon == -360.0 * k for an integer k >= 1.
+    - Select three distinct k values satisfying all global constraints.
+    expectedSourceBehavior:
+    - off is negative, ordinarily -180.0 for these selected representable multiples.
+    - The off < 0 branch returns exactly 0.0.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: POSITIVE_GENERIC_MULTIPLE_TURNS
+    category: NORMAL
+    description: Positive longitudes more than one turn beyond the normal interval
+      exercise repeated folding with non-sentinel remainders.
+    preconditions:
+    - lon > 540.0.
+    - (lon - 180.0) / 360.0 is not an integer.
+    - lon / 360.0 is not an integer.
+    - Select distinct turn counts and normalized signs.
+    expectedSourceBehavior:
+    - The direct-return and positive-antimeridian sentinel outcomes are avoided.
+    - The result is computed by -180.0 + off and lies strictly between -180.0 and
+      180.0.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: NEGATIVE_GENERIC_MULTIPLE_TURNS
+    category: NORMAL
+    description: Negative longitudes more than one turn beyond the normal interval
+      exercise repeated folding with negative remainders.
+    preconditions:
+    - lon < -540.0.
+    - (lon + 180.0) / 360.0 is not an integer.
+    - lon / 360.0 is not an integer.
+    - Select distinct turn counts and normalized signs.
+    expectedSourceBehavior:
+    - off is strictly negative.
+    - The result is computed by 180.0 + off and lies strictly between -180.0 and 180.0.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: LARGE_POSITIVE_REPRESENTABLE_TURNS
+    category: EDGE
+    description: Large positive finite sources test modulo folding far beyond ordinary
+      longitude magnitudes.
+    preconditions:
+    - lon >= 1048576.0.
+    - Math.ulp(lon) < 8.0.
+    - lon is neither an exact zero-meridian multiple nor an antimeridian equivalent.
+    - Select distinct magnitudes separated by at least 1048576.0.
+    expectedSourceBehavior:
+    - The source bypasses direct return and is folded by the remainder logic.
+    - The finite result remains in [-180.0, 180.0] despite the large source magnitude.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LARGE_NEGATIVE_REPRESENTABLE_TURNS
+    category: EDGE
+    description: Large negative finite sources test the negative-remainder path far
+      beyond ordinary longitude magnitudes.
+    preconditions:
+    - lon <= -1048576.0.
+    - Math.ulp(lon) < 8.0.
+    - lon is neither an exact zero-meridian multiple nor an antimeridian equivalent.
+    - Select distinct magnitudes separated by at least 1048576.0.
+    expectedSourceBehavior:
+    - The source bypasses direct return and reaches the negative-remainder branch.
+    - The finite result remains in [-180.0, 180.0] despite the large source magnitude.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ULP_EIGHT_TRANSFORMATION_FRONTIER
+    category: EDGE
+    description: Very large sources at the coarsest binary spacing that can still
+      represent a 360-degree displacement exactly probe the MR applicability frontier.
+    preconditions:
+    - Math.ulp(lon) == 8.0.
+    - lon + 360.0 - lon == 360.0.
+    - Select both signs and at least two distinct non-sentinel remainders.
+    expectedSourceBehavior:
+    - The method performs modulo normalization on a finite, very large source.
+    - The result remains in the documented inclusive range.
+    - The source and follow-up calls are nonvacuous because follow != lon while their
+      represented displacement is exactly 360.0.
+    targetCases: 3
+    emptyOutputAllowed: false

@@ -1,0 +1,490 @@
+InputDomain:
+  summary: Non-empty rectangular matrices of finite Java double values, including
+    square, tall, wide, singular, full-rank, threshold-sensitive, and elimination-sensitive
+    cases; each follow-up is the exact transpose.
+  globalConstraints:
+  - arg0 is non-null, arg0.length >= 1, arg0[0] is non-null, and arg0[0].length >=
+    1.
+  - Every row is non-null and has exactly arg0[0].length elements, so the source is
+    rectangular as required by the SUT description and by deepCopy.
+  - 'Every entry is a finite Java double: Double.isFinite(arg0[i][j]) is true. NaN
+    and infinities are excluded because the supplied relation concerns matrix rank
+    over real-valued matrices, while the source specifies no rank or invalid-input
+    behavior for non-finite values.'
+  - The follow-up has dimensions arg0[0].length by arg0.length and satisfies followUp[j][i]
+    == arg0[i][j] for every valid i and j, including preservation of signed zero and
+    exact threshold values.
+  - Both source and follow-up must independently satisfy the non-null, non-empty,
+    rectangular constraints.
+  - The source matrix must be snapshotted before invocation; computeRank must not
+    change its dimensions, entries, row references, or entry bit patterns because
+    the implementation operates on a deep copy.
+  diversity:
+    shape:
+    - 1x1
+    - single-row
+    - single-column
+    - square
+    - wide
+    - tall
+    rankClass:
+    - zero
+    - rank-one
+    - intermediate-rank
+    - full-rank
+    pivotLocation:
+    - first-row
+    - lower-row
+    - first-column
+    - interior-column
+    - last-column
+    - no-pivot-sentinel
+    eliminationPath:
+    - no-elimination
+    - elimination-skipped-for-zero
+    - active-elimination
+    - cancellation-below-EPSILON
+    - residual-at-or-above-EPSILON
+    magnitudeClass:
+    - signed-zero
+    - strictly-below-1e-10
+    - exactly-plus-or-minus-1e-10
+    - ordinary
+    - fractional
+    - very-large-finite
+    - mixed-magnitude
+    dependencyStructure:
+    - duplicate-rows
+    - proportional-columns
+    - zero-rows
+    - zero-columns
+    - independent-rows
+    - independent-columns
+    - dense-unstructured
+  scenarios:
+  - id: SCALAR_STRICTLY_BELOW_EPSILON
+    category: BOUNDARY
+    description: A 1x1 source whose only value is treated as zero by isZero.
+    preconditions:
+    - matrix.length == 1 and matrix[0].length == 1.
+    - Math.abs(matrix[0][0]) < 1e-10, including cases using +0.0, -0.0, or a nonzero
+      sub-threshold value.
+    expectedSourceBehavior:
+    - computeRank returns 0 because findPivotRow reaches the numRows sentinel.
+    - The source entry retains its original double bit pattern.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: SCALAR_EXACT_EPSILON
+    category: BOUNDARY
+    description: A 1x1 source at the strict isZero comparison boundary.
+    preconditions:
+    - matrix is either [[1e-10]] or [[-1e-10]].
+    expectedSourceBehavior:
+    - computeRank returns 1 because Math.abs(value) < 1e-10 is false at equality.
+    - The only row is selected and marked as a pivot row.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: SCALAR_ORDINARY_NONZERO
+    category: NORMAL
+    description: A 1x1 source containing an ordinary finite nonzero value.
+    preconditions:
+    - matrix.length == 1 and matrix[0].length == 1.
+    - Math.abs(matrix[0][0]) > 1e-10.
+    expectedSourceBehavior:
+    - computeRank returns 1.
+    - The source value is unchanged.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ALL_ZERO_RECTANGULAR
+    category: EDGE
+    description: A non-square matrix in which every column takes the no-pivot sentinel
+      path.
+    preconditions:
+    - Use one wide shape with rows < columns and one tall shape with rows > columns.
+    - Every entry is +0.0 or -0.0.
+    expectedSourceBehavior:
+    - computeRank returns 0.
+    - No pivot row is normalized and no elimination changes the source.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: SINGLE_ROW_WITH_ONE_OR_MORE_PIVOTS_CANDIDATES
+    category: EDGE
+    description: A wide single-row matrix with at least one value not treated as zero.
+    preconditions:
+    - matrix.length == 1 and matrix[0].length >= 2.
+    - At least one column c satisfies Math.abs(matrix[0][c]) >= 1e-10.
+    - Cover both a case whose first qualifying value is in column 0 and a case with
+      one or more leading sub-threshold values.
+    expectedSourceBehavior:
+    - computeRank returns 1.
+    - After the first pivot, the sole row is marked and all remaining columns take
+      the no-pivot sentinel path.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: SINGLE_COLUMN_WITH_ZERO_AND_NONZERO_ROWS
+    category: EDGE
+    description: A tall single-column matrix exercising top-to-bottom pivot selection.
+    preconditions:
+    - matrix.length >= 2 and matrix[0].length == 1.
+    - At least one row contains a value with absolute value >= 1e-10.
+    - Cover one case with the pivot in row 0 and one with the first qualifying pivot
+      in a lower row.
+    expectedSourceBehavior:
+    - computeRank returns 1.
+    - normalizePivotRow has no later columns to process.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: SQUARE_IDENTITY
+    category: NORMAL
+    description: An identity matrix giving one pivot per column without active off-pivot
+      elimination.
+    preconditions:
+    - matrix is an n by n identity matrix for n >= 2.
+    - Cover at least two distinct n values.
+    expectedSourceBehavior:
+    - computeRank returns n.
+    - Each column selects its matching previously unmarked row.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: RECTANGULAR_DIAGONAL_FULL_POSSIBLE_RANK
+    category: NORMAL
+    description: A tall or wide rectangular diagonal matrix with every available diagonal
+      entry nonzero.
+    preconditions:
+    - Rows and columns are unequal and k == Math.min(rows, columns).
+    - matrix[i][i] has absolute value >= 1e-10 for 0 <= i < k, and all off-diagonal
+      entries are zero.
+    - Cover one tall and one wide shape.
+    expectedSourceBehavior:
+    - computeRank returns k.
+    - The result reaches the maximum possible rank for the source shape.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: PERMUTATION_MATRIX_LOWER_PIVOT
+    category: NORMAL
+    description: A square permutation matrix whose early column pivot is below the
+      first row.
+    preconditions:
+    - matrix is square with dimension >= 2.
+    - Every row and column contains exactly one 1.0 and all other entries are zero.
+    - matrix[0][0] == 0.0.
+    expectedSourceBehavior:
+    - computeRank returns the matrix dimension.
+    - At least the first column selects a lower pivot row, demonstrating first-suitable-row
+      scanning rather than diagonal-only selection.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LEADING_ZERO_COLUMNS_BEFORE_PIVOTS
+    category: EDGE
+    description: A rectangular matrix with one or more all-zero leading columns followed
+      by an identity block.
+    preconditions:
+    - At least the first column is entirely zero.
+    - A later k by k identity block exists on distinct rows, with all other entries
+      zero.
+    expectedSourceBehavior:
+    - computeRank returns k.
+    - Every leading zero column takes the no-pivot sentinel path before any row is
+      marked.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: INTERLEAVED_ZERO_COLUMNS
+    category: EDGE
+    description: Independent pivot columns are separated by all-zero columns.
+    preconditions:
+    - The source contains k >= 2 unit-vector columns on distinct rows.
+    - At least one all-zero column occurs between two such pivot columns.
+    - All remaining entries are zero.
+    expectedSourceBehavior:
+    - computeRank returns k.
+    - A no-pivot column occurs between successful pivot selections.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: DUPLICATE_NONZERO_ROWS
+    category: NORMAL
+    description: Multiple identical nonzero rows produce a rank-one matrix.
+    preconditions:
+    - At least two rows are entry-for-entry identical.
+    - All rows are either that same row or all-zero rows.
+    - The repeated row contains at least one entry with absolute value >= 1e-10.
+    - Cover both tall and wide shapes.
+    expectedSourceBehavior:
+    - computeRank returns 1 for exact integer-valued repeated rows.
+    - Active elimination makes later candidate values cancel rather than creating
+      additional pivots.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: PROPORTIONAL_NONZERO_COLUMNS
+    category: NORMAL
+    description: Every nonzero column is an exact scalar multiple of one finite nonzero
+      column.
+    preconditions:
+    - The source has at least two rows and two columns.
+    - Use integer-valued base entries and integer scale factors so proportionality
+      is exact in double arithmetic.
+    - At least one entry has absolute value >= 1e-10.
+    expectedSourceBehavior:
+    - computeRank returns 1.
+    - Only one independent pivot row is counted.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_ROWS_BEFORE_AND_AFTER_INDEPENDENT_ROWS
+    category: EDGE
+    description: Independent rows coexist with all-zero rows, including a zero first
+      row.
+    preconditions:
+    - matrix[0] is all zero.
+    - At least two later rows are distinct unit vectors in distinct columns.
+    - Optionally include an additional trailing zero row.
+    expectedSourceBehavior:
+    - computeRank equals the number of included distinct unit-vector rows.
+    - The first successful pivot is selected below row 0.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: TWO_BY_TWO_ACTIVE_ELIMINATION_FULL_RANK
+    category: NORMAL
+    description: A 2x2 matrix in which elimination creates a nonzero second pivot.
+    preconditions:
+    - matrix is exactly [[1.0, 1.0], [1.0, 2.0]].
+    expectedSourceBehavior:
+    - computeRank returns 2.
+    - Eliminating column 0 changes the second row's column-1 value to 1.0, which becomes
+      the second pivot.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: TWO_BY_TWO_ACTIVE_ELIMINATION_DEPENDENT
+    category: NORMAL
+    description: A 2x2 matrix in which elimination cancels the prospective second
+      pivot.
+    preconditions:
+    - matrix is exactly [[1.0, 2.0], [2.0, 4.0]].
+    expectedSourceBehavior:
+    - computeRank returns 1.
+    - Elimination makes the unmarked row's second-column value exactly zero.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DENSE_THREE_BY_THREE_FULL_RANK
+    category: NORMAL
+    description: A dense square matrix requiring successful pivots and elimination
+      across several columns.
+    preconditions:
+    - matrix is exactly [[1.0, 2.0, 3.0], [2.0, 5.0, 8.0], [1.0, 0.0, 1.0]].
+    expectedSourceBehavior:
+    - computeRank returns 3.
+    - Three distinct rows are marked across the three column iterations.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DENSE_THREE_BY_THREE_INTERMEDIATE_RANK
+    category: NORMAL
+    description: A dense-looking 3x3 matrix with one exactly dependent row and two
+      independent rows.
+    preconditions:
+    - matrix is exactly [[1.0, 2.0, 3.0], [2.0, 4.0, 6.0], [0.0, 1.0, 1.0]].
+    expectedSourceBehavior:
+    - computeRank returns 2.
+    - At least one column fails to supply an additional unmarked pivot after elimination.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WIDE_FULL_ROW_RANK_WITH_EXTRA_COLUMNS
+    category: EDGE
+    description: A wide matrix reaches full row rank before all columns have been
+      scanned.
+    preconditions:
+    - rows >= 2 and columns > rows.
+    - The first rows columns form an identity matrix.
+    - Remaining columns contain arbitrary finite values.
+    expectedSourceBehavior:
+    - computeRank returns rows.
+    - After every row is marked, each remaining column returns the numRows no-pivot
+      sentinel.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: TALL_FULL_COLUMN_RANK_WITH_EXTRA_ROWS
+    category: EDGE
+    description: A tall matrix has independent columns plus additional zero or dependent
+      rows.
+    preconditions:
+    - rows > columns and columns >= 2.
+    - The first columns rows form an identity matrix.
+    - Every additional row is either zero or an exact finite linear combination chosen
+      with integer coefficients.
+    expectedSourceBehavior:
+    - computeRank returns columns.
+    - The result reaches the maximum possible rank even though some rows remain unmarked.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: PIVOT_ONLY_IN_LAST_COLUMN
+    category: EDGE
+    description: All earlier columns have no pivot and the only pivot occurs in the
+      final column.
+    preconditions:
+    - The source has at least two columns.
+    - Every entry before the last column has absolute value < 1e-10.
+    - Exactly one row has a last-column value with absolute value >= 1e-10; all other
+      last-column values are sub-threshold.
+    expectedSourceBehavior:
+    - computeRank returns 1.
+    - normalizePivotRow executes with no nextCol iterations for the final-column pivot.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SINGLE_COLUMN_ACTIVE_ELIMINATION_EMPTY_INNER_LOOP
+    category: EDGE
+    description: A single-column source has multiple nonzero rows, causing eliminateRows
+      to enter qualifying rows while having no later columns.
+    preconditions:
+    - matrix is exactly [[1.0], [2.0], [0.0]].
+    expectedSourceBehavior:
+    - computeRank returns 1.
+    - The first row is marked; the second row satisfies the elimination condition,
+      but the col2 loop has zero iterations.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EXACT_THRESHOLD_DIAGONAL
+    category: BOUNDARY
+    description: Independent diagonal entries lie exactly at both signs of EPSILON.
+    preconditions:
+    - matrix is exactly [[1e-10, 0.0], [0.0, -1e-10]].
+    expectedSourceBehavior:
+    - computeRank returns 2 because both threshold values are classified as nonzero.
+    - Both rows are selected as pivots.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ALL_ENTRIES_STRICTLY_SUB_EPSILON
+    category: BOUNDARY
+    description: A nonzero-valued matrix whose every entry is classified as zero.
+    preconditions:
+    - The source has at least two rows and two columns.
+    - Every entry satisfies Math.abs(value) < 1e-10.
+    - At least one entry is numerically nonzero.
+    expectedSourceBehavior:
+    - computeRank returns 0 because no column has a qualifying pivot.
+    - No normalization or elimination is performed.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: CANCELLATION_RESIDUAL_BELOW_EPSILON
+    category: BOUNDARY
+    description: Elimination leaves a representable nonzero residual that is smaller
+      than EPSILON.
+    preconditions:
+    - matrix is exactly [[1.0, 1.0], [1.0, 1.0 + 0x1.0p-40]].
+    - 0x1.0p-40 < 1e-10.
+    expectedSourceBehavior:
+    - computeRank returns 1.
+    - The post-elimination residual is nonzero but is rejected by isZero.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CANCELLATION_RESIDUAL_ABOVE_EPSILON
+    category: BOUNDARY
+    description: Elimination leaves a small residual just above EPSILON.
+    preconditions:
+    - matrix is exactly [[1.0, 1.0], [1.0, 1.0 + 0x1.0p-33]].
+    - 0x1.0p-33 > 1e-10.
+    expectedSourceBehavior:
+    - computeRank returns 2.
+    - The post-elimination residual is accepted as the second pivot.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_PIVOT_NORMALIZATION
+    category: NORMAL
+    description: A negative pivot exercises division by a negative pivot value followed
+      by active elimination.
+    preconditions:
+    - matrix is exactly [[-2.0, 4.0], [1.0, 3.0]].
+    expectedSourceBehavior:
+    - computeRank returns 2.
+    - The first pivot row's later value is normalized to -2.0 before the other row
+      is eliminated.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FRACTIONAL_PIVOT_NORMALIZATION
+    category: NORMAL
+    description: Finite fractional pivots exercise normalization without integer-only
+      values.
+    preconditions:
+    - matrix is exactly [[0.5, 0.25], [0.25, 0.5]].
+    expectedSourceBehavior:
+    - computeRank returns 2.
+    - Normalization and elimination leave a qualifying nonzero second pivot.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: VERY_LARGE_FINITE_DIAGONAL
+    category: EDGE
+    description: Very large finite values are used as pivots without requiring products
+      of two large nonzero values.
+    preconditions:
+    - matrix is a diagonal matrix with dimension >= 2.
+    - Every diagonal entry is Double.MAX_VALUE or -Double.MAX_VALUE, and every off-diagonal
+      entry is zero.
+    expectedSourceBehavior:
+    - computeRank returns the matrix dimension.
+    - All diagonal entries qualify as pivots and the source remains unchanged.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MINIMAL_POSITIVE_VALUES_CLASSIFIED_ZERO
+    category: BOUNDARY
+    description: The smallest positive and negative finite double magnitudes exercise
+      the strict zero predicate.
+    preconditions:
+    - The source contains Double.MIN_VALUE and -Double.MIN_VALUE and otherwise only
+      signed zeros.
+    - The source is non-empty and rectangular.
+    expectedSourceBehavior:
+    - computeRank returns 0 because every absolute value is below 1e-10.
+    - The signs and bit patterns of the source values remain unchanged.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MIXED_MAGNITUDE_DIAGONAL
+    category: EDGE
+    description: Independent pivots span ordinary, threshold, and very large finite
+      magnitudes.
+    preconditions:
+    - matrix is exactly [[1e308, 0.0, 0.0], [0.0, 1e-10, 0.0], [0.0, 0.0, -1e-9]].
+    expectedSourceBehavior:
+    - computeRank returns 3.
+    - The exact-EPSILON middle value and both larger-magnitude values are accepted
+      as pivots.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ALIASED_DUPLICATE_ROW_REFERENCES
+    category: EDGE
+    description: Two source row slots reference the same nonzero double array.
+    preconditions:
+    - matrix.length >= 2 and matrix[0] == matrix[1].
+    - The aliased row is an integer-valued nonzero row, and any additional rows are
+      zero or entry-for-entry duplicates.
+    expectedSourceBehavior:
+    - computeRank returns 1.
+    - The source row alias remains intact because deepCopy reads rows but does not
+      replace or mutate them.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: GENERAL_DENSE_WELL_SCALED_RECTANGULAR
+    category: NORMAL
+    description: A dense finite rectangular matrix not restricted to diagonal, permutation,
+      or exact-duplicate structure.
+    preconditions:
+    - matrix has at least two rows and two columns.
+    - Every entry has absolute value between 1e-4 and 1e4.
+    - Both zero and nonzero entries may occur, but at least two rows and two columns
+      contain nonzero values.
+    expectedSourceBehavior:
+    - computeRank returns an integer from 0 through Math.min(matrix.length, matrix[0].length).
+    - Repeated invocation on an unchanged source returns the same integer, and the
+      source is not mutated.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: GENERAL_DENSE_MIXED_SCALE_RECTANGULAR
+    category: EDGE
+    description: A dense finite matrix combines sub-threshold, threshold, ordinary,
+      and large entries without a prescribed dependency pattern.
+    preconditions:
+    - matrix has at least two rows and two columns.
+    - It contains at least one entry with absolute value < 1e-10, one with absolute
+      value == 1e-10, and one with absolute value > 1.0.
+    - All entries remain finite.
+    expectedSourceBehavior:
+    - computeRank returns an integer from 0 through Math.min(matrix.length, matrix[0].length).
+    - The call terminates without modifying any source entry, providing a non-vacuous
+      source result for comparison with the transposed follow-up.
+    targetCases: 1
+    emptyOutputAllowed: false

@@ -1,0 +1,303 @@
+InputDomain:
+  summary: Finite Java double longitudes spanning the direct-return interval, both
+    antimeridian representations, every modulo-normalization branch, multiple revolutions,
+    rounding boundaries, and large-magnitude shift behavior.
+  globalConstraints:
+  - 'The source input longitudeDeg must be a finite Java double: Double.isFinite(longitudeDeg)
+    must be true.'
+  - NaN and both infinities are excluded because normLonDEG produces NaN for them
+    and assertRelation treats a NaN difference as non-violating, making the MR vacuous
+    rather than testing longitude wrapping.
+  - The follow-up must be generated exactly as Java double arithmetic longitudeDeg
+    + 360.0, without pre-normalizing or mathematically replacing the floating-point
+    addition.
+  - Each listed candidate value denotes one source case; where a precondition lists
+    a finite set, all listed values must be used and targetCases equals that set's
+    cardinality.
+  diversity:
+    sourceRegion:
+    - inside [-180,180]
+    - exactly -180 or 180
+    - immediately inside
+    - immediately outside
+    - multiple revolutions outside
+    - large finite magnitude
+    normalizationPath:
+    - direct return
+    - off < 0
+    - off == 0 and positive longitude
+    - remaining modulo branch
+    normalizedResultRegion:
+    - negative interior
+    - signed or unsigned zero
+    - positive interior
+    - '-180'
+    - '180'
+    - within MR antimeridian tolerance
+    - outside MR antimeridian tolerance
+    followUpArithmetic:
+    - exact effective +360
+    - rounded effective shift
+    - absorbed shift
+    sign:
+    - negative
+    - negative zero
+    - positive zero
+    - positive
+  scenarios:
+  - id: SIGNED_ZERO_DIRECT_RETURN
+    category: EDGE
+    description: Both IEEE-754 zero encodings are already in the normal longitude
+      interval.
+    preconditions:
+    - longitudeDeg is exactly +0.0 or -0.0, with one case for each raw encoding.
+    expectedSourceBehavior:
+    - The inclusive range check succeeds and the method returns longitudeDeg directly.
+    - The returned value preserves the source zero sign because no arithmetic is performed.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: MINIMUM_SUBNORMAL_DIRECT_RETURN
+    category: EDGE
+    description: The smallest positive and negative nonzero doubles exercise direct
+      return near zero.
+    preconditions:
+    - longitudeDeg is exactly Double.MIN_VALUE or -Double.MIN_VALUE.
+    expectedSourceBehavior:
+    - The inclusive range check succeeds and the exact subnormal source value is returned.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ORDINARY_INTERIOR_DIRECT_RETURN
+    category: NORMAL
+    description: Ordinary negative and positive longitudes strictly inside the documented
+      interval.
+    preconditions:
+    - longitudeDeg is one of {-90.0, -1.0, 1.0, 90.0}.
+    expectedSourceBehavior:
+    - The inclusive range check succeeds.
+    - The source output equals longitudeDeg exactly.
+    targetCases: 4
+    emptyOutputAllowed: false
+  - id: LOWER_ANTIMERIDIAN_DIRECT_RETURN
+    category: BOUNDARY
+    description: The inclusive lower endpoint is retained as the negative antimeridian
+      representation.
+    preconditions:
+    - longitudeDeg == -180.0.
+    expectedSourceBehavior:
+    - The source output is exactly -180.0.
+    - The follow-up is 180.0, so assertRelation must use its explicit equivalence
+      of the two antimeridian representations.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UPPER_ANTIMERIDIAN_DIRECT_RETURN
+    category: BOUNDARY
+    description: The inclusive upper endpoint is retained as the positive antimeridian
+      representation.
+    preconditions:
+    - longitudeDeg == 180.0.
+    expectedSourceBehavior:
+    - The source output is exactly 180.0 rather than being merged with -180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: IMMEDIATELY_INSIDE_LOWER_ENDPOINT
+    category: BOUNDARY
+    description: The greatest representable longitude below the lower endpoint but
+      still inside the interval boundary direction is tested via the adjacent interior
+      value.
+    preconditions:
+    - longitudeDeg == Math.nextUp(-180.0).
+    expectedSourceBehavior:
+    - The direct-return path is taken.
+    - The output equals Math.nextUp(-180.0) exactly.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: IMMEDIATELY_INSIDE_UPPER_ENDPOINT
+    category: BOUNDARY
+    description: The adjacent representable value immediately below the upper endpoint
+      remains unchanged.
+    preconditions:
+    - longitudeDeg == Math.nextDown(180.0).
+    expectedSourceBehavior:
+    - The direct-return path is taken.
+    - The output equals Math.nextDown(180.0) exactly.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: IMMEDIATELY_OUTSIDE_LOWER_ENDPOINT
+    category: BOUNDARY
+    description: The adjacent double below -180 enters the negative-remainder normalization
+      path.
+    preconditions:
+    - longitudeDeg == Math.nextDown(-180.0).
+    expectedSourceBehavior:
+    - The direct-return condition is false.
+    - The computed off value is negative, so the source output is 180.0 + off and
+      lies just below 180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: IMMEDIATELY_OUTSIDE_UPPER_ENDPOINT
+    category: BOUNDARY
+    description: The adjacent double above 180 exposes rounding in lon_deg + 180 before
+      the remainder operation.
+    preconditions:
+    - longitudeDeg == Math.nextUp(180.0).
+    expectedSourceBehavior:
+    - The direct-return condition is false.
+    - IEEE-754 addition rounds longitudeDeg + 180.0 to 360.0, making off equal to
+      zero.
+    - The positive zero-remainder sentinel returns exactly 180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_EXACT_ANTIMERIDIAN_REVOLUTIONS
+    category: EDGE
+    description: Positive antimeridian-equivalent values after one or more complete
+      additional revolutions reach the positive zero-remainder sentinel.
+    preconditions:
+    - longitudeDeg is one of {540.0, 900.0, 1260.0}.
+    expectedSourceBehavior:
+    - (longitudeDeg + 180.0) % 360.0 is zero.
+    - Because longitudeDeg is positive, the source output is exactly 180.0.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: NEGATIVE_EXACT_ANTIMERIDIAN_REVOLUTIONS
+    category: EDGE
+    description: Negative antimeridian-equivalent values exercise zero remainder without
+      satisfying the positive-longitude sentinel.
+    preconditions:
+    - longitudeDeg is one of {-540.0, -900.0, -1260.0}.
+    expectedSourceBehavior:
+    - The remainder compares equal to zero but longitudeDeg > 0 is false.
+    - The final branch returns exactly -180.0.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: POSITIVE_FIRST_WRAP_RESIDUES
+    category: NORMAL
+    description: Representative positive values just beyond the normal interval produce
+      negative, zero, and positive normalized interiors.
+    preconditions:
+    - longitudeDeg is one of {181.0, 360.0, 539.0}.
+    expectedSourceBehavior:
+    - The source outputs are respectively -179.0, 0.0, and 179.0.
+    - Each case uses the nonnegative, non-sentinel remainder branch.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: POSITIVE_MULTIPLE_WRAP_RESIDUES
+    category: NORMAL
+    description: Positive values beyond more than one revolution verify repeated folding
+      with residues on both sides of zero.
+    preconditions:
+    - longitudeDeg is one of {541.0, 719.0, 721.0}.
+    expectedSourceBehavior:
+    - The source outputs are respectively -179.0, -1.0, and 1.0.
+    - All outputs are within the inclusive documented interval.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: NEGATIVE_FIRST_WRAP_RESIDUES
+    category: NORMAL
+    description: Representative negative values below the normal interval exercise
+      the off < 0 branch.
+    preconditions:
+    - longitudeDeg is one of {-181.0, -360.0, -539.0}.
+    expectedSourceBehavior:
+    - The source outputs are respectively 179.0, 0.0, and -179.0.
+    - For each case off is negative and the result is computed as 180.0 + off.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: NEGATIVE_MULTIPLE_WRAP_RESIDUES
+    category: NORMAL
+    description: Negative values beyond more than one revolution cover distinct negative-remainder
+      residues.
+    preconditions:
+    - longitudeDeg is one of {-541.0, -719.0, -721.0}.
+    expectedSourceBehavior:
+    - The source outputs are respectively 179.0, 1.0, and -1.0.
+    - All cases use the off < 0 branch.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: FRACTIONAL_OUT_OF_RANGE_VALUES
+    category: NORMAL
+    description: Fractional longitudes on both sides of the interval ensure normalization
+      is not limited to integral revolutions.
+    preconditions:
+    - longitudeDeg is one of {180.25, -180.25, 1234.5, -1234.5}.
+    expectedSourceBehavior:
+    - The source outputs are respectively -179.75, 179.75, 154.5, and -154.5.
+    - Each result is finite and within [-180.0, 180.0].
+    targetCases: 4
+    emptyOutputAllowed: false
+  - id: WITHIN_ANTIMERIDIAN_TOLERANCE
+    category: EDGE
+    description: Values surrounding a positive exact antimeridian revolution normalize
+      to opposite signed representations that remain within the MR's antimeridian
+      tolerance.
+    preconditions:
+    - longitudeDeg is one of {540.0 - 5.0e-10, 540.0 + 5.0e-10}.
+    expectedSourceBehavior:
+    - One source output lies within 1.0e-9 of 180.0 and the other lies within 1.0e-9
+      of -180.0.
+    - isAntimeridian(sourceOutput) evaluates true for each source output.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: OUTSIDE_ANTIMERIDIAN_TOLERANCE
+    category: EDGE
+    description: Nearby values just beyond the assertion tolerance distinguish ordinary
+      numeric comparison from antimeridian equivalence.
+    preconditions:
+    - longitudeDeg is one of {540.0 - 2.0e-9, 540.0 + 2.0e-9}.
+    expectedSourceBehavior:
+    - The normalized output is near an antimeridian but its distance from magnitude
+      180.0 is greater than 1.0e-9.
+    - isAntimeridian(sourceOutput) evaluates false.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LARGE_EXACT_SHIFT_MAGNITUDES
+    category: EDGE
+    description: Large integral doubles where adding 360 remains representable as
+      the intended increment test modulo behavior far outside geographic scale.
+    preconditions:
+    - longitudeDeg is exactly Math.scalb(1.0, 52) or -Math.scalb(1.0, 52).
+    expectedSourceBehavior:
+    - The out-of-range modulo path is taken and returns a finite value in [-180.0,
+      180.0].
+    - The Java double follow-up differs from the source by exactly 360.0.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LARGE_ROUNDED_SHIFT_MAGNITUDES
+    category: EDGE
+    description: At magnitude 2^59, floating-point spacing causes the requested 360-degree
+      follow-up shift to be rounded.
+    preconditions:
+    - longitudeDeg is exactly Math.scalb(1.0, 59) or -Math.scalb(1.0, 59).
+    expectedSourceBehavior:
+    - The out-of-range modulo path returns a finite value in [-180.0, 180.0].
+    - The generated follow-up is distinct from the source, but its represented displacement
+      is governed by the local double spacing rather than an exact real-number increment
+      of 360.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: SHIFT_ROUNDS_TO_ONE_ULP
+    category: EDGE
+    description: At magnitude 2^61, adding 360 rounds to an adjacent representable
+      value separated by one local ULP.
+    preconditions:
+    - longitudeDeg is exactly Math.scalb(1.0, 61) or -Math.scalb(1.0, 61).
+    expectedSourceBehavior:
+    - The source output is produced by the out-of-range modulo path and remains finite
+      within [-180.0, 180.0].
+    - The follow-up arithmetic does not represent an exact 360-degree displacement,
+      providing a precision-stress case for the MR.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: FOLLOW_UP_SHIFT_ABSORBED
+    category: EDGE
+    description: Very large finite longitudes exercise the sentinel condition where
+      adding 360 is absorbed by IEEE-754 precision.
+    preconditions:
+    - longitudeDeg is one of {Math.scalb(1.0, 62), -Math.scalb(1.0, 62), Double.MAX_VALUE,
+      -Double.MAX_VALUE}.
+    expectedSourceBehavior:
+    - The source output is computed through the out-of-range modulo path and is finite
+      within [-180.0, 180.0].
+    - Java evaluation of longitudeDeg + 360.0 equals longitudeDeg exactly, so source
+      and follow-up invocations receive the same double.
+    targetCases: 4
+    emptyOutputAllowed: false

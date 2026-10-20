@@ -22,10 +22,6 @@ public enum GenerationMode {
         return this == DEVELOPER_MR_JUNIT || this == DEVELOPER_MR_DATA || this == DEVELOPER_MR_BOTH;
     }
 
-    public boolean generatesFollowUpData() {
-        return this == INPUTS_AND_FOLLOWUP;
-    }
-
     public boolean generatesExecutedMtData() {
         return this == INPUTS_AND_FOLLOWUP || this == DEVELOPER_MR_DATA;
     }

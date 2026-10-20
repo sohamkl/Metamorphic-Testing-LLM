@@ -1,0 +1,323 @@
+InputDomain:
+  summary: Non-null, mutually compatible java.time.temporal.Temporal pairs for which
+    ChronoUnit.DAYS.between is supported, both endpoints can be shifted by 37 days,
+    and the resulting whole-day distance fits in an int; edge cases also cover the
+    Math.toIntExact overflow path.
+  globalConstraints:
+  - startDateInclusive and endDateExclusive are non-null Temporal instances, because
+    both the target and the follow-up generator require non-null values.
+  - Both temporals support plus(37, ChronoUnit.DAYS), and that follow-up operation
+    remains within the temporal type's representable range.
+  - The pair is compatible with ChronoUnit.DAYS.between; scenarios using date-time
+    types use compatible temporal types and, where applicable, the same chronology.
+  - For relation-assertable cases, ChronoUnit.DAYS.between(startDateInclusive, endDateExclusive)
+    is within Integer.MIN_VALUE..Integer.MAX_VALUE, so Math.toIntExact returns successfully.
+  - The follow-up pair is constructed exactly as startDateInclusive.plus(37, ChronoUnit.DAYS)
+    and endDateExclusive.plus(37, ChronoUnit.DAYS); no endpoint is replaced or independently
+    transformed.
+  - The observable result is read only through Days.getAmount(), as required by the
+    supplied relation.
+  diversity:
+    temporalRepresentation:
+    - LocalDate
+    - LocalDateTime
+    - Instant
+    - OffsetDateTime
+    - ZonedDateTime
+    - JapaneseDate
+    ordering:
+    - end equals start
+    - end after start
+    - end before start
+    distanceClass:
+    - zero days
+    - positive one day
+    - negative one day
+    - small positive multi-day distance
+    - small negative multi-day distance
+    - Integer.MAX_VALUE
+    - Integer.MIN_VALUE
+    - outside int range
+    calendarBoundary:
+    - ordinary dates
+    - month boundary
+    - year boundary
+    - leap-day boundary
+    - daylight-saving spring transition
+    - daylight-saving autumn transition
+    timeOfDayRelation:
+    - same local time
+    - less than one whole day
+    - more than one whole day but not an integral number of days
+    - exact integral number of 24-hour days
+  scenarios:
+  - id: EQUAL_LOCAL_DATES_ZERO
+    category: NORMAL
+    description: A LocalDate is paired with itself.
+    preconditions:
+    - startDateInclusive is LocalDate.of(2024, 6, 15).
+    - endDateExclusive equals startDateInclusive.
+    expectedSourceBehavior:
+    - ChronoUnit.DAYS.between returns 0.
+    - Days.between returns a Days whose getAmount() is 0.
+    - The follow-up dates remain equal after adding 37 days, and the follow-up getAmount()
+      is also 0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ONE_DAY_FORWARD_LOCAL_DATE
+    category: BOUNDARY
+    description: The end date is exactly one supported day after the start date.
+    preconditions:
+    - startDateInclusive is LocalDate.of(2024, 6, 15).
+    - endDateExclusive is startDateInclusive.plusDays(1).
+    expectedSourceBehavior:
+    - Days.between returns a Days whose getAmount() is 1.
+    - The result exercises the Days.of(1) singleton path.
+    - The follow-up getAmount() remains 1.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ONE_DAY_BACKWARD_LOCAL_DATE
+    category: BOUNDARY
+    description: The end date is exactly one supported day before the start date.
+    preconditions:
+    - startDateInclusive is LocalDate.of(2024, 6, 15).
+    - endDateExclusive is startDateInclusive.minusDays(1).
+    expectedSourceBehavior:
+    - Days.between returns a Days whose getAmount() is -1.
+    - The negative directed-amount behavior is observable through getAmount().
+    - The follow-up getAmount() remains -1.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SMALL_POSITIVE_MULTI_DAY_LOCAL_DATE
+    category: NORMAL
+    description: Several whole days separate ordinary LocalDate values in forward
+      order.
+    preconditions:
+    - Use LocalDate pairs with endDateExclusive.isAfter(startDateInclusive).
+    - The distances are 2, 7, 10, and 31 days.
+    expectedSourceBehavior:
+    - getAmount() equals the exact positive whole-day distance for each pair.
+    - The 7-day case exercises a week-sized distance without using a different API.
+    - Each follow-up getAmount() equals its source getAmount().
+    targetCases: 4
+    emptyOutputAllowed: false
+  - id: SMALL_NEGATIVE_MULTI_DAY_LOCAL_DATE
+    category: NORMAL
+    description: Several whole days separate ordinary LocalDate values in reverse
+      order.
+    preconditions:
+    - Use LocalDate pairs with endDateExclusive.isBefore(startDateInclusive).
+    - The distances are -2, -7, -10, and -31 days.
+    expectedSourceBehavior:
+    - getAmount() equals the exact negative whole-day distance for each pair.
+    - The result remains negative rather than being normalized to an absolute amount.
+    - Each follow-up getAmount() equals its source getAmount().
+    targetCases: 4
+    emptyOutputAllowed: false
+  - id: MONTH_AND_YEAR_BOUNDARIES
+    category: BOUNDARY
+    description: Whole-day differences cross month ends and a calendar-year boundary.
+    preconditions:
+    - Use LocalDate pairs such as 2023-01-31 to 2023-02-01, 2024-02-28 to 2024-03-01,
+      and 2023-12-31 to 2024-01-01.
+    - All endpoint pairs are within the LocalDate range after the 37-day shift.
+    expectedSourceBehavior:
+    - getAmount() equals ChronoUnit.DAYS.between for each pair, independent of month
+      or year numbering changes.
+    - The follow-up pair remains valid and has the same getAmount().
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: LEAP_DAY_BOUNDARIES
+    category: BOUNDARY
+    description: Distances cross or terminate at leap days, including a non-leap-year
+      February boundary.
+    preconditions:
+    - Use LocalDate pairs 2024-02-28 to 2024-03-01, 2024-02-29 to 2024-03-01, and
+      2023-02-28 to 2023-03-01.
+    - The pair directions include both forward and reverse ordering where applicable.
+    expectedSourceBehavior:
+    - getAmount() reflects the actual number of calendar days, including the presence
+      or absence of 2024-02-29.
+    - Adding 37 days to both endpoints does not alter the corresponding day count.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_INT_MAX_DISTANCE
+    category: EDGE
+    description: The LocalDate distance is exactly Integer.MAX_VALUE.
+    preconditions:
+    - startDateInclusive is a LocalDate anchor whose plusDays(Integer.MAX_VALUE) is
+      representable.
+    - endDateExclusive equals startDateInclusive.plusDays(Integer.MAX_VALUE).
+    - Both shifted endpoints, including endDateExclusive.plusDays(37), are representable.
+    expectedSourceBehavior:
+    - ChronoUnit.DAYS.between returns Integer.MAX_VALUE as a long.
+    - Math.toIntExact succeeds and Days.getAmount() is Integer.MAX_VALUE.
+    - The follow-up result also has getAmount() equal to Integer.MAX_VALUE.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_INT_MIN_DISTANCE
+    category: EDGE
+    description: The LocalDate distance is exactly Integer.MIN_VALUE.
+    preconditions:
+    - startDateInclusive is a LocalDate anchor whose plusDays(2147483648L) is representable.
+    - endDateExclusive is the anchor and startDateInclusive is 2147483648 days after
+      it.
+    - Both shifted endpoints remain representable after adding 37 days.
+    expectedSourceBehavior:
+    - ChronoUnit.DAYS.between returns Integer.MIN_VALUE as a long.
+    - Math.toIntExact succeeds and Days.getAmount() is Integer.MIN_VALUE.
+    - The follow-up result also has getAmount() equal to Integer.MIN_VALUE.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_DISTANCE_OVER_INT_MAX
+    category: EDGE
+    description: The temporal distance exceeds the largest representable Days amount.
+    preconditions:
+    - The LocalDate pair has ChronoUnit.DAYS.between equal to Integer.MAX_VALUE plus
+      1.
+    - Both endpoints and their 37-day follow-up shifts are representable.
+    expectedSourceBehavior:
+    - Math.toIntExact throws ArithmeticException instead of returning a Days value.
+    - No getAmount() result is available for the source invocation.
+    - This case is an overflow sentinel and is not relation-assertable because the
+      target has no Days output.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: LOCAL_DATE_DISTANCE_BELOW_INT_MIN
+    category: EDGE
+    description: The temporal distance is less than the smallest representable Days
+      amount.
+    preconditions:
+    - The LocalDate pair has ChronoUnit.DAYS.between equal to Integer.MIN_VALUE minus
+      1.
+    - Both endpoints and their 37-day follow-up shifts are representable.
+    expectedSourceBehavior:
+    - Math.toIntExact throws ArithmeticException instead of returning a Days value.
+    - No getAmount() result is available for the source invocation.
+    - This case is an overflow sentinel and is not relation-assertable because the
+      target has no Days output.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: LOCAL_DATE_TIME_EXACT_WHOLE_DAY
+    category: NORMAL
+    description: LocalDateTime values have matching times and differ by exact whole
+      days.
+    preconditions:
+    - Use LocalDateTime pairs with the same local time and distances of 1, 2, and
+      37 days.
+    - Both endpoints support plus(37, ChronoUnit.DAYS).
+    expectedSourceBehavior:
+    - getAmount() equals the whole-day distance returned by ChronoUnit.DAYS.between.
+    - The time component is preserved by the follow-up plus operation.
+    - Each follow-up getAmount() equals the source getAmount().
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_TIME_SUBDAY_ZERO
+    category: BOUNDARY
+    description: LocalDateTime endpoints are less than one whole day apart in the
+      forward direction.
+    preconditions:
+    - startDateInclusive is 2024-06-15T12:00.
+    - endDateExclusive is 2024-06-16T11:59:59.
+    expectedSourceBehavior:
+    - ChronoUnit.DAYS.between truncates the interval to 0 whole days.
+    - Days.getAmount() is 0.
+    - The follow-up pair remains less than one whole day apart and also returns 0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_TIME_FRACTIONAL_POSITIVE
+    category: BOUNDARY
+    description: LocalDateTime endpoints are more than one but less than two whole
+      days apart.
+    preconditions:
+    - startDateInclusive is 2024-06-15T12:00.
+    - endDateExclusive is 2024-06-17T11:59:59.
+    expectedSourceBehavior:
+    - ChronoUnit.DAYS.between returns 1 because only whole days are counted.
+    - Days.getAmount() is 1.
+    - The follow-up result has the same getAmount().
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_TIME_FRACTIONAL_NEGATIVE
+    category: BOUNDARY
+    description: LocalDateTime endpoints are less than one whole day apart in reverse
+      order.
+    preconditions:
+    - startDateInclusive is 2024-06-17T11:59:59.
+    - endDateExclusive is 2024-06-16T12:00.
+    expectedSourceBehavior:
+    - ChronoUnit.DAYS.between returns 0 for this sub-day reverse interval.
+    - Days.getAmount() is 0 rather than a negative fractional-day representation.
+    - The follow-up result has the same getAmount().
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: INSTANT_EXACT_AND_FRACTIONAL_DAYS
+    category: NORMAL
+    description: Instant inputs cover exact 24-hour distances and sub-day durations.
+    preconditions:
+    - Use Instant pairs with durations of exactly 86400 seconds, 2 times 86400 seconds,
+      and 86399 seconds.
+    - All Instants support the 37-day follow-up shift.
+    expectedSourceBehavior:
+    - getAmount() equals the whole-day result of ChronoUnit.DAYS.between for each
+      duration.
+    - The 86399-second case returns 0, while exact 86400-second multiples return the
+      corresponding positive amount.
+    - Each follow-up getAmount() equals the source getAmount().
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: OFFSET_DATE_TIME_FIXED_OFFSET
+    category: NORMAL
+    description: OffsetDateTime values use a fixed offset and cross ordinary calendar
+      boundaries.
+    preconditions:
+    - Both endpoints are OffsetDateTime values with the same ZoneOffset.
+    - Use exact whole-day distances of 0, 1, and -3 across at least one month or year
+      boundary.
+    expectedSourceBehavior:
+    - getAmount() equals ChronoUnit.DAYS.between for the offset date-times.
+    - The fixed offset is retained by both 37-day follow-up endpoints.
+    - The follow-up getAmount() equals the source getAmount().
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: ZONED_DATE_TIME_SPRING_TRANSITION
+    category: BOUNDARY
+    description: ZonedDateTime values cross a daylight-saving spring transition.
+    preconditions:
+    - Both endpoints use the same ZoneId that has a spring daylight-saving transition.
+    - The local dates are separated by 1 or 2 calendar days and the 37-day shifted
+      endpoints remain representable.
+    expectedSourceBehavior:
+    - getAmount() is the value returned by ChronoUnit.DAYS.between for the zoned temporals.
+    - The follow-up operation uses ChronoUnit.DAYS on both zoned endpoints and preserves
+      the corresponding day count.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ZONED_DATE_TIME_AUTUMN_TRANSITION
+    category: BOUNDARY
+    description: ZonedDateTime values cross a daylight-saving autumn transition.
+    preconditions:
+    - Both endpoints use the same ZoneId that has an autumn daylight-saving transition.
+    - The local dates are separated by 1 or 2 calendar days and the 37-day shifted
+      endpoints remain representable.
+    expectedSourceBehavior:
+    - getAmount() is determined by ChronoUnit.DAYS.between rather than by an assumed
+      constant calendar location.
+    - The follow-up result has the same getAmount(), including across the offset transition.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: JAPANESE_DATE_SAME_CHRONOLOGY
+    category: EDGE
+    description: Chronology-aware date inputs use JapaneseDate values with the same
+      chronology.
+    preconditions:
+    - Both endpoints are JapaneseDate values.
+    - The pair uses distances of 0, 1, and -10 days and both endpoints support plus(37,
+      ChronoUnit.DAYS).
+    expectedSourceBehavior:
+    - ChronoUnit.DAYS.between returns the directed whole-day distance for the compatible
+      chronology.
+    - Days.getAmount() equals that distance.
+    - The 37-day follow-up remains in the same chronology and preserves getAmount().
+    targetCases: 3
+    emptyOutputAllowed: false

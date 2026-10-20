@@ -1,0 +1,393 @@
+InputDomain:
+  summary: Valid non-null Temporal endpoint pairs for which ChronoUnit.DAYS.between
+    succeeds, produces an int-range whole-day count, and both endpoints can be shifted
+    forward 37 days as required by the metamorphic follow-up.
+  globalConstraints:
+  - Both source endpoints are non-null Temporal instances.
+  - Each endpoint must support plus(37, ChronoUnit.DAYS) without throwing, because
+    the supplied follow-up generator applies that operation to both endpoints.
+  - ChronoUnit.DAYS.between(startDateInclusive, endDateExclusive) must complete without
+    throwing and its long result must be in [-2147483648, 2147483647], because Days.between
+    applies Math.toIntExact.
+  - The endpoint types and values must be mutually compatible for the start endpoint's
+    DAYS.between calculation; source pairs that throw during DAYS.between are outside
+    this MR domain because no Days source output exists for assertRelation.
+  - Null endpoints are excluded because generateFollowUp explicitly rejects them with
+    Objects.requireNonNull, and invalid-input relations were not requested.
+  - Date/time values at a type's upper range must leave at least 37 days of forward
+    headroom for both source endpoints.
+  diversity:
+    temporalFamily:
+    - '7'
+    - Distinct concrete Temporal families exercised
+    - LocalDate, LocalDateTime, OffsetDateTime, ZonedDateTime, Instant, non-ISO ChronoLocalDate
+      implementations, LocalDate-to-LocalDateTime compatible mixed pair
+    resultPartition:
+    - '5'
+    - Source getAmount() partitions
+    - zero, positive one, positive multi-day, negative one, negative multi-day
+    calendarBoundary:
+    - '6'
+    - Calendar-specific boundary situations
+    - month transition, year transition, leap day, Japanese era transition, DST spring
+      transition, DST autumn transition
+    durationBoundary:
+    - '5'
+    - Whole-day truncation and exactness situations
+    - less than one day, exact one day, more than one day with remainder, negative
+      less than one day, int minimum/maximum exact values
+    rangeBoundary:
+    - '3'
+    - Endpoint range positions with follow-up feasibility
+    - ordinary range, minimum-side range, maximum-side range with endpoint at most
+      maximum minus 37 days
+  scenarios:
+  - id: LOCAL_DATE_EQUAL_ENDPOINTS
+    category: NORMAL
+    description: ISO LocalDate endpoints are identical, exercising the zero result
+      and Days.of(0) path.
+    preconditions:
+    - Use either (LocalDate.of(2024, 1, 1), LocalDate.of(2024, 1, 1)) or (LocalDate.of(2024,
+      2, 29), LocalDate.of(2024, 2, 29)).
+    expectedSourceBehavior:
+    - Days.between returns a Days whose getAmount() is 0.
+    - The source output is non-null and is the zero-valued Days result.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_FORWARD_ADJACENT_AND_MULTI_DAY
+    category: NORMAL
+    description: ISO LocalDate has positive adjacent-day and ordinary multi-day gaps.
+    preconditions:
+    - Use either (LocalDate.of(2024, 1, 1), LocalDate.of(2024, 1, 2)) or (LocalDate.of(2024,
+      1, 1), LocalDate.of(2024, 1, 11)).
+    expectedSourceBehavior:
+    - Source getAmount() is respectively 1 or 10.
+    - The one-day case exercises the Days.of(1) result path; the ten-day case produces
+      a non-singleton positive amount.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_REVERSE_ADJACENT_AND_MULTI_DAY
+    category: NORMAL
+    description: ISO LocalDate end dates precede start dates, including one-day and
+      multi-day negative amounts.
+    preconditions:
+    - Use either (LocalDate.of(2024, 1, 2), LocalDate.of(2024, 1, 1)) or (LocalDate.of(2024,
+      1, 11), LocalDate.of(2024, 1, 1)).
+    expectedSourceBehavior:
+    - Source getAmount() is respectively -1 or -10.
+    - The returned Days is negative rather than zero or positive.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_LEAP_DAY_CROSSING
+    category: BOUNDARY
+    description: ISO LocalDate gaps cross the leap day in leap year 2024.
+    preconditions:
+    - Use either (LocalDate.of(2024, 2, 28), LocalDate.of(2024, 2, 29)) or (LocalDate.of(2024,
+      2, 28), LocalDate.of(2024, 3, 1)).
+    expectedSourceBehavior:
+    - Source getAmount() is respectively 1 or 2.
+    - Both endpoint shifts remain valid ISO dates and preserve the source amount.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_MONTH_AND_YEAR_TRANSITIONS
+    category: BOUNDARY
+    description: ISO LocalDate gaps cross a month end and a calendar-year end.
+    preconditions:
+    - Use either (LocalDate.of(2024, 1, 31), LocalDate.of(2024, 2, 1)) or (LocalDate.of(2023,
+      12, 31), LocalDate.of(2024, 1, 1)).
+    expectedSourceBehavior:
+    - Source getAmount() is 1 for each case.
+    - The result is based on day distance, not on differing month or year fields.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_MINIMUM_SIDE_WITH_FOLLOW_UP_HEADROOM
+    category: EDGE
+    description: ISO LocalDate uses its minimum supported date while retaining sufficient
+      forward space for the required shift.
+    preconditions:
+    - Use startDateInclusive = LocalDate.MIN and endDateExclusive = LocalDate.MIN.plusDays(1).
+    expectedSourceBehavior:
+    - Source getAmount() is 1.
+    - Both follow-up endpoints are representable because shifting LocalDate.MIN forward
+      37 days is valid.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_MAXIMUM_SIDE_WITH_FOLLOW_UP_HEADROOM
+    category: EDGE
+    description: ISO LocalDate endpoints are near LocalDate.MAX but no endpoint exceeds
+      the maximum after the 37-day follow-up shift.
+    preconditions:
+    - Use startDateInclusive = LocalDate.MAX.minusDays(38) and endDateExclusive =
+      LocalDate.MAX.minusDays(37).
+    expectedSourceBehavior:
+    - Source getAmount() is 1.
+    - The shifted end endpoint is exactly LocalDate.MAX and remains valid.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_TIME_EQUAL_AND_SAME_DATE_PARTIAL
+    category: NORMAL
+    description: LocalDateTime distinguishes equal endpoints from a positive sub-day
+      interval on the same calendar date.
+    preconditions:
+    - Use either (LocalDateTime.of(2024, 1, 1, 12, 0), LocalDateTime.of(2024, 1, 1,
+      12, 0)) or (LocalDateTime.of(2024, 1, 1, 0, 0), LocalDateTime.of(2024, 1, 1,
+      23, 59)).
+    expectedSourceBehavior:
+    - Source getAmount() is 0 for both cases.
+    - The partial-day case verifies that DAYS.between counts complete day units rather
+      than merely detecting a date/time difference.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_TIME_CROSS_MIDNIGHT_UNDER_ONE_DAY
+    category: BOUNDARY
+    description: LocalDateTime crosses a date boundary but has less than one complete
+      day between endpoints.
+    preconditions:
+    - Use either (LocalDateTime.of(2024, 1, 1, 23, 0), LocalDateTime.of(2024, 1, 2,
+      1, 0)) or (LocalDateTime.of(2024, 2, 28, 23, 30), LocalDateTime.of(2024, 2,
+      29, 0, 30)).
+    expectedSourceBehavior:
+    - Source getAmount() is 0 for both cases.
+    - Crossing midnight alone does not require a positive whole-day result.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_TIME_EXACT_AND_REMAINDER_DAY
+    category: NORMAL
+    description: LocalDateTime has an exact one-day interval and an interval with
+      one complete day plus a remainder.
+    preconditions:
+    - Use either (LocalDateTime.of(2024, 1, 1, 8, 0), LocalDateTime.of(2024, 1, 2,
+      8, 0)) or (LocalDateTime.of(2024, 1, 1, 8, 0), LocalDateTime.of(2024, 1, 2,
+      9, 0)).
+    expectedSourceBehavior:
+    - Source getAmount() is 1 for both cases.
+    - The second case demonstrates that the additional one-hour remainder does not
+      create a second whole day.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_TIME_NEGATIVE_PARTIAL_AND_EXACT
+    category: BOUNDARY
+    description: LocalDateTime has reverse-direction intervals with less than one
+      complete day and exactly one complete day.
+    preconditions:
+    - Use either (LocalDateTime.of(2024, 1, 2, 1, 0), LocalDateTime.of(2024, 1, 1,
+      23, 0)) or (LocalDateTime.of(2024, 1, 2, 8, 0), LocalDateTime.of(2024, 1, 1,
+      8, 0)).
+    expectedSourceBehavior:
+    - Source getAmount() is respectively 0 or -1.
+    - The exact reverse-day case produces a negative Days amount.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_TIME_LEAP_AND_YEAR_BOUNDARIES
+    category: BOUNDARY
+    description: LocalDateTime exact whole-day calculations cross leap-day and year
+      boundaries.
+    preconditions:
+    - Use either (LocalDateTime.of(2024, 2, 28, 6, 0), LocalDateTime.of(2024, 2, 29,
+      6, 0)) or (LocalDateTime.of(2023, 12, 31, 6, 0), LocalDateTime.of(2024, 1, 1,
+      6, 0)).
+    expectedSourceBehavior:
+    - Source getAmount() is 1 for each case.
+    - The time-of-day is unchanged at both endpoints, making each gap exactly one
+      complete day.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: OFFSET_DATE_TIME_SAME_INSTANT_DIFFERENT_OFFSETS
+    category: EDGE
+    description: OffsetDateTime endpoints use different offsets while denoting the
+      same instant.
+    preconditions:
+    - Use either (OffsetDateTime.parse('2024-01-01T00:00Z'), OffsetDateTime.parse('2024-01-01T01:00+01:00'))
+      or (OffsetDateTime.parse('2024-06-01T12:00+02:00'), OffsetDateTime.parse('2024-06-01T10:00Z')).
+    expectedSourceBehavior:
+    - Source getAmount() is 0 for both cases.
+    - A difference in displayed local fields or offset does not itself imply a complete
+      elapsed day.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: OFFSET_DATE_TIME_EXACT_ELAPSED_DAYS_ACROSS_OFFSETS
+    category: NORMAL
+    description: OffsetDateTime intervals span complete elapsed days while endpoint
+      offsets differ.
+    preconditions:
+    - Use either (OffsetDateTime.parse('2024-01-01T00:00Z'), OffsetDateTime.parse('2024-01-02T01:00+01:00'))
+      or (OffsetDateTime.parse('2024-01-03T00:00+02:00'), OffsetDateTime.parse('2024-01-01T00:00+02:00')).
+    expectedSourceBehavior:
+    - Source getAmount() is respectively 1 or -2.
+    - The result is a whole-day count despite offset-bearing endpoint representations.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ZONED_DATE_TIME_DST_SPRING_FORWARD
+    category: BOUNDARY
+    description: ZonedDateTime spans the Europe/Paris spring-forward date at the same
+      local time.
+    preconditions:
+    - Use startDateInclusive = ZonedDateTime.parse('2024-03-30T12:00+01:00[Europe/Paris]')
+      and endDateExclusive = ZonedDateTime.parse('2024-03-31T12:00+02:00[Europe/Paris]').
+    expectedSourceBehavior:
+    - Source getAmount() is 1.
+    - The source pair crosses a DST offset change while retaining a one-day calendar-unit
+      interval.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZONED_DATE_TIME_DST_AUTUMN_FALL_BACK
+    category: BOUNDARY
+    description: ZonedDateTime spans the Europe/Paris autumn fallback date at the
+      same local time.
+    preconditions:
+    - Use startDateInclusive = ZonedDateTime.parse('2024-10-26T12:00+02:00[Europe/Paris]')
+      and endDateExclusive = ZonedDateTime.parse('2024-10-27T12:00+01:00[Europe/Paris]').
+    expectedSourceBehavior:
+    - Source getAmount() is 1.
+    - The source pair crosses the opposite DST offset change from the spring-forward
+      scenario.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZONED_DATE_TIME_SAME_INSTANT_DIFFERENT_ZONES
+    category: EDGE
+    description: ZonedDateTime endpoint representations have different zones but identify
+      the same instant.
+    preconditions:
+    - Use either (ZonedDateTime.parse('2024-01-01T00:00Z[UTC]'), ZonedDateTime.parse('2024-01-01T01:00+01:00[Europe/Paris]'))
+      or (ZonedDateTime.parse('2024-07-01T12:00Z[UTC]'), ZonedDateTime.parse('2024-07-01T08:00-04:00[America/New_York]')).
+    expectedSourceBehavior:
+    - Source getAmount() is 0 for both cases.
+    - Zone and local-clock differences do not make a same-instant pair a nonzero whole-day
+      gap.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ZONED_DATE_TIME_PARTIAL_DAY_ACROSS_LOCAL_DATE
+    category: BOUNDARY
+    description: ZonedDateTime crosses midnight in a fixed-offset zone but remains
+      below one whole day.
+    preconditions:
+    - Use either (ZonedDateTime.parse('2024-01-01T23:00Z[UTC]'), ZonedDateTime.parse('2024-01-02T01:00Z[UTC]'))
+      or (ZonedDateTime.parse('2024-01-01T01:00+09:00[Asia/Tokyo]'), ZonedDateTime.parse('2024-01-01T23:00+09:00[Asia/Tokyo]')).
+    expectedSourceBehavior:
+    - Source getAmount() is 0 for both cases.
+    - The scenario separates a local-date transition from a complete-day result.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: INSTANT_ZERO_AND_SUBDAY
+    category: NORMAL
+    description: Instant endpoints are identical or separated by less than 24 hours.
+    preconditions:
+    - Use either (Instant.parse('2024-01-01T00:00:00Z'), Instant.parse('2024-01-01T00:00:00Z'))
+      or (Instant.parse('2024-01-01T00:00:00Z'), Instant.parse('2024-01-01T23:59:59Z')).
+    expectedSourceBehavior:
+    - Source getAmount() is 0 for both cases.
+    - The source output remains a non-null zero-valued Days.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: INSTANT_EXACT_AND_MULTI_DAY
+    category: NORMAL
+    description: Instant endpoints are separated by exact whole-day quantities.
+    preconditions:
+    - Use either (Instant.parse('2024-01-01T00:00:00Z'), Instant.parse('2024-01-02T00:00:00Z'))
+      or (Instant.parse('2024-01-01T00:00:00Z'), Instant.parse('2024-01-11T00:00:00Z')).
+    expectedSourceBehavior:
+    - Source getAmount() is respectively 1 or 10.
+    - The source returns positive Days values derived from instant-based complete
+      days.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: INSTANT_NEGATIVE_EXACT_AND_PARTIAL
+    category: BOUNDARY
+    description: Instant endpoints are reverse ordered with an exact day and a sub-day
+      difference.
+    preconditions:
+    - Use either (Instant.parse('2024-01-02T00:00:00Z'), Instant.parse('2024-01-01T00:00:00Z'))
+      or (Instant.parse('2024-01-02T00:00:00Z'), Instant.parse('2024-01-01T01:00:00Z')).
+    expectedSourceBehavior:
+    - Source getAmount() is respectively -1 or 0.
+    - The partial reverse interval does not yield a negative complete day.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: INSTANT_INT_MAXIMUM_DAY_COUNT
+    category: EDGE
+    description: Instant has the greatest day distance accepted by Days.between without
+      Math.toIntExact overflow.
+    preconditions:
+    - Use startDateInclusive = Instant.EPOCH and endDateExclusive = Instant.EPOCH.plus(2147483647L,
+      ChronoUnit.DAYS).
+    expectedSourceBehavior:
+    - Source getAmount() is exactly 2147483647.
+    - The source completes without ArithmeticException because the DAYS.between result
+      equals Integer.MAX_VALUE.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: INSTANT_INT_MINIMUM_DAY_COUNT
+    category: EDGE
+    description: Instant has the smallest day distance accepted by Days.between without
+      Math.toIntExact overflow.
+    preconditions:
+    - Use startDateInclusive = Instant.EPOCH and endDateExclusive = Instant.EPOCH.minus(2147483648L,
+      ChronoUnit.DAYS).
+    expectedSourceBehavior:
+    - Source getAmount() is exactly -2147483648.
+    - The source completes without ArithmeticException because the DAYS.between result
+      equals Integer.MIN_VALUE.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: JAPANESE_DATE_ERA_TRANSITION
+    category: BOUNDARY
+    description: JapaneseDate spans the Heisei-to-Reiwa era transition using date-based
+      DAYS.between.
+    preconditions:
+    - Use startDateInclusive = JapaneseDate.of(2019, 4, 30) and endDateExclusive =
+      JapaneseDate.of(2019, 5, 1).
+    expectedSourceBehavior:
+    - Source getAmount() is 1.
+    - The result is available from a non-ISO ChronoLocalDate implementation across
+      an era boundary.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: THAI_BUDDHIST_DATE_LEAP_DAY
+    category: BOUNDARY
+    description: ThaiBuddhistDate crosses its representation of ISO leap day.
+    preconditions:
+    - Use startDateInclusive = ThaiBuddhistDate.of(2567, 2, 28) and endDateExclusive
+      = ThaiBuddhistDate.of(2567, 2, 29).
+    expectedSourceBehavior:
+    - Source getAmount() is 1.
+    - Both endpoints and their 37-day follow-ups remain within the same supported
+      chronology.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MINGUO_DATE_YEAR_TRANSITION
+    category: BOUNDARY
+    description: MinguoDate crosses a chronology-specific year boundary.
+    preconditions:
+    - Use startDateInclusive = MinguoDate.of(113, 12, 31) and endDateExclusive = MinguoDate.of(114,
+      1, 1).
+    expectedSourceBehavior:
+    - Source getAmount() is 1.
+    - The day count is independent of the chronology's year-number change.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: HIJRAH_DATE_MULTI_DAY
+    category: NORMAL
+    description: HijrahDate endpoints are constructed through supported DAYS addition
+      rather than assuming a particular month length.
+    preconditions:
+    - Use startDateInclusive = HijrahDate.of(1445, 9, 1) and endDateExclusive = startDateInclusive.plus(2,
+      ChronoUnit.DAYS).
+    expectedSourceBehavior:
+    - Source getAmount() is 2.
+    - The source and follow-up exercise a non-ISO calendar whose day arithmetic is
+      supplied by its Temporal implementation.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_START_LOCAL_DATE_TIME_END
+    category: NORMAL
+    description: A compatible mixed pair uses LocalDate as start and LocalDateTime
+      as end, allowing the start date implementation to obtain the end date.
+    preconditions:
+    - Use either (LocalDate.of(2024, 1, 1), LocalDateTime.of(2024, 1, 3, 0, 0)) or
+      (LocalDate.of(2024, 2, 28), LocalDateTime.of(2024, 3, 1, 23, 59)).
+    expectedSourceBehavior:
+    - Source getAmount() is respectively 2 or 2.
+    - The target accepts the compatible heterogeneous Temporal pair and returns a
+      non-null Days result.
+    targetCases: 2
+    emptyOutputAllowed: false

@@ -1,0 +1,362 @@
+InputDomain:
+  summary: IEEE-754 double longitude inputs for normLonDEG, emphasizing its inclusive
+    in-range fast path, both out-of-range remainder branches, antimeridian and zero-remainder
+    sentinels, floating-point boundaries, and the exact follow-up transformation longitude
+    + 360.0.
+  globalConstraints:
+  - Each source case supplies exactly one representable Java double to DistanceUtils.normLonDEG(double).
+  - The follow-up input is computed exactly as longitude + 360.0, as required by the
+    metamorphic specification; no alternate wrapping or pre-normalization is applied.
+  - Finite outputs from the target are expected to be within -180.0 and 180.0 inclusive;
+    NaN inputs and infinite inputs are retained as explicit IEEE-754 edge cases because
+    the supplied source defines their observable result through Java comparisons and
+    remainder arithmetic.
+  - The metamorphic assertion uses a 1e-9 degree tolerance, except that any pair whose
+    outputs are both within 1e-9 degrees of either antimeridian representation is
+    accepted regardless of sign.
+  diversity:
+    sourceRange:
+    - '-179.999999999'
+    - '-180.0'
+    - '-0.0'
+    - '0.0'
+    - '179.999999999'
+    - '180.0'
+    - '180.000000001'
+    - '-180.000000001'
+    - '360.0'
+    - '-360.0'
+    - '540.0'
+    - '-540.0'
+    - '1.0E16'
+    - '-1.0E16'
+    - '1.7976931348623157E308'
+    - '-1.7976931348623157E308'
+    - NaN
+    - Infinity
+    - -Infinity
+    sourceBranch:
+    - in_range_return
+    - negative_remainder
+    - positive_nonzero_remainder
+    - positive_zero_remainder
+    - nonfinite_remainder
+    followUpRelationship:
+    - ordinary_same_numeric_longitude
+    - antimeridian_representation
+    - zero_to_positive_antimeridian_difference
+    - nonfinite_vacuous_difference
+    boundaryType:
+    - interior
+    - inclusive_lower_endpoint
+    - inclusive_upper_endpoint
+    - just_outside_lower
+    - just_outside_upper
+    - exact_revolution
+    - large_finite
+    - nonfinite
+  scenarios:
+  - id: IN_RANGE_NEGATIVE_INTERIOR
+    category: NORMAL
+    description: A finite negative longitude strictly inside the inclusive -180..180
+      interval.
+    preconditions:
+    - longitude = -179.999999999, so -180.0 < longitude < 0.0 and longitude >= -180.0
+      and longitude <= 180.0.
+    expectedSourceBehavior:
+    - The first if condition is true and the method returns the input unchanged, without
+      modulo arithmetic.
+    - The follow-up longitude is 180.000000001 and exercises out-of-range normalization
+      back near the lower antimeridian.
+    - The metamorphic assertion should accept the two normalized values as equal within
+      the stated tolerance.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: IN_RANGE_POSITIVE_INTERIOR
+    category: NORMAL
+    description: A finite positive longitude strictly inside the inclusive interval.
+    preconditions:
+    - longitude = 179.999999999, so 0.0 < longitude < 180.0.
+    expectedSourceBehavior:
+    - The in-range fast path returns exactly 179.999999999.
+    - The follow-up 539.999999999 uses the positive nonzero remainder branch and normalizes
+      back near 179.999999999.
+    - The metamorphic assertion should pass within 1e-9 degrees.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SIGNED_ZERO_NEGATIVE
+    category: EDGE
+    description: Negative zero on the in-range fast path followed by an exact positive
+      revolution.
+    preconditions:
+    - longitude is the IEEE-754 value -0.0; it satisfies longitude >= -180.0 and longitude
+      <= 180.0.
+    expectedSourceBehavior:
+    - The source output is -0.0 because the method returns the in-range argument unchanged.
+    - The follow-up computation -0.0 + 360.0 produces +360.0, whose output is +180.0
+      through the positive zero-remainder sentinel.
+    - The supplied metamorphic assertion rejects this pair because the outputs are
+      not both antimeridian values and differ by 180 degrees.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SIGNED_ZERO_POSITIVE
+    category: EDGE
+    description: Positive zero on the in-range fast path followed by an exact positive
+      revolution.
+    preconditions:
+    - longitude is the IEEE-754 value +0.0; it satisfies longitude >= -180.0 and longitude
+      <= 180.0.
+    expectedSourceBehavior:
+    - The source output is +0.0, returned unchanged by the common-case branch.
+    - The follow-up +360.0 returns +180.0 because off == 0.0 and longitude > 0.0.
+    - The metamorphic assertion rejects this pair with a 180-degree difference; this
+      is a reachable sentinel mismatch in the supplied MR.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LOWER_ANTIMERIDIAN_ENDPOINT
+    category: BOUNDARY
+    description: The inclusive lower endpoint of the documented output interval.
+    preconditions:
+    - longitude = -180.0, satisfying longitude >= -180.0 and longitude <= 180.0.
+    expectedSourceBehavior:
+    - The source returns -180.0 unchanged through the in-range fast path.
+    - The follow-up is +180.0 and also returns unchanged through the fast path.
+    - The metamorphic assertion accepts the pair because both outputs are recognized
+      as antimeridian values.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UPPER_ANTIMERIDIAN_ENDPOINT
+    category: BOUNDARY
+    description: The inclusive upper endpoint of the documented output interval.
+    preconditions:
+    - longitude = 180.0, satisfying longitude >= -180.0 and longitude <= 180.0.
+    expectedSourceBehavior:
+    - The source returns +180.0 unchanged through the in-range fast path.
+    - The follow-up 540.0 reaches the positive zero-remainder sentinel and returns
+      +180.0.
+    - The metamorphic assertion accepts the equal antimeridian outputs.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: JUST_BELOW_LOWER_ENDPOINT
+    category: BOUNDARY
+    description: A value immediately below -180 that takes the negative remainder
+      branch.
+    preconditions:
+    - longitude = -180.000000001, which is less than -180.0 by 1e-9 degrees.
+    expectedSourceBehavior:
+    - The in-range condition is false; off is negative and the method returns 180.0
+      + off, producing a value just below +180.0.
+    - The follow-up is 179.999999999 and takes the in-range fast path.
+    - The outputs represent the same wrapped longitude and should satisfy the 1e-9
+      tolerance.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: JUST_ABOVE_UPPER_ENDPOINT
+    category: BOUNDARY
+    description: A value immediately above +180 that takes the positive nonzero remainder
+      branch.
+    preconditions:
+    - longitude = 180.000000001, which is greater than 180.0 by 1e-9 degrees.
+    expectedSourceBehavior:
+    - The in-range condition is false; off is positive and nonzero, so the method
+      returns -180.0 + off, producing a value just above -180.0.
+    - The follow-up is 540.000000001 and follows the same positive nonzero remainder
+      path.
+    - The metamorphic assertion should accept the normalized outputs within its tolerance.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_REMAINDER_NONZERO
+    category: NORMAL
+    description: A negative out-of-range value with a strictly negative remainder.
+    preconditions:
+    - longitude = -181.0; longitude < -180.0 and (longitude + 180.0) % 360.0 = -1.0.
+    expectedSourceBehavior:
+    - The method skips the fast path, takes off < 0, and returns 179.0.
+    - The follow-up 179.0 is in range and returns unchanged.
+    - The metamorphic assertion should pass exactly.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_REMAINDER_NONZERO
+    category: NORMAL
+    description: A positive out-of-range value with a positive, nonzero remainder.
+    preconditions:
+    - longitude = 181.0; longitude > 180.0 and (longitude + 180.0) % 360.0 = 1.0.
+    expectedSourceBehavior:
+    - The method takes the off > 0 non-sentinel path and returns -179.0.
+    - The follow-up 541.0 takes the same branch and also returns -179.0.
+    - The metamorphic assertion should pass exactly.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_EXACT_REVOLUTION
+    category: BOUNDARY
+    description: A positive exact revolution that activates the off == 0 and longitude
+      > 0 sentinel.
+    preconditions:
+    - longitude = 360.0; longitude > 180.0 and (longitude + 180.0) % 360.0 = 0.0.
+    expectedSourceBehavior:
+    - The method returns +180.0 from the explicit positive zero-remainder branch.
+    - The follow-up 720.0 reaches the same sentinel and returns +180.0.
+    - The metamorphic assertion accepts the equal antimeridian outputs.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_EXACT_REVOLUTION
+    category: BOUNDARY
+    description: A negative exact revolution with a nonzero negative remainder.
+    preconditions:
+    - longitude = -360.0; longitude < -180.0 and (longitude + 180.0) % 360.0 = -180.0.
+    expectedSourceBehavior:
+    - The method takes off < 0 and returns 0.0.
+    - The follow-up 0.0 uses the in-range fast path and also returns 0.0.
+    - The metamorphic assertion should pass exactly.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_ODD_HALF_REVOLUTION
+    category: BOUNDARY
+    description: A positive value whose remainder is exactly zero after shifting by
+      180.
+    preconditions:
+    - longitude = 540.0; longitude > 180.0 and (longitude + 180.0) % 360.0 = 0.0.
+    expectedSourceBehavior:
+    - The positive zero-remainder sentinel returns +180.0.
+    - The follow-up 900.0 reaches the same sentinel and returns +180.0.
+    - The metamorphic assertion accepts the equal antimeridian outputs.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_ZERO_REMAINDER
+    category: EDGE
+    description: A negative value for which Java remainder produces zero with a negative
+      sign.
+    preconditions:
+    - longitude = -540.0; longitude < -180.0 and (longitude + 180.0) % 360.0 is -0.0,
+      so off < 0.0 is false and longitude > 0.0 is false.
+    expectedSourceBehavior:
+    - The method skips both earlier return cases and evaluates the final expression
+      -180.0 + off, yielding -180.0.
+    - The follow-up -180.0 is returned unchanged by the in-range fast path.
+    - The metamorphic assertion accepts the pair because both outputs are antimeridian
+      values.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SMALL_FRACTIONAL_WRAP
+    category: NORMAL
+    description: A fractional longitude more than one revolution from zero that exercises
+      a non-sentinel remainder.
+    preconditions:
+    - longitude = 721.25; longitude > 180.0 and (longitude + 180.0) % 360.0 = 181.25.
+    expectedSourceBehavior:
+    - The positive nonzero remainder branch returns 1.25.
+    - The follow-up 1081.25 has the same normalized result.
+    - The metamorphic assertion should pass exactly.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_FRACTIONAL_WRAP
+    category: NORMAL
+    description: A negative fractional longitude more than one revolution from zero.
+    preconditions:
+    - longitude = -721.25; longitude < -180.0 and (longitude + 180.0) % 360.0 = -181.25.
+    expectedSourceBehavior:
+    - The negative remainder branch returns -1.25.
+    - The follow-up -361.25 also normalizes to -1.25.
+    - The metamorphic assertion should pass exactly.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LARGE_POSITIVE_FINITE
+    category: EDGE
+    description: A very large finite positive input where adding 360 may be rounded
+      by IEEE-754 before normalization.
+    preconditions:
+    - longitude = 1.0e16; longitude is finite and greater than 180.0.
+    expectedSourceBehavior:
+    - The source skips the fast path and uses Java double addition, remainder, and
+      the positive/negative remainder selection.
+    - The follow-up is computed independently as 1.0e16 + 360.0; its representable
+      value and normalized output must be observed rather than assumed to differ by
+      an exact revolution.
+    - The metamorphic assertion is evaluated with its 1e-9 tolerance, making this
+      a floating-point-precision scenario rather than an exact-arithmetic oracle.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LARGE_NEGATIVE_FINITE
+    category: EDGE
+    description: A very large finite negative input where remainder precision and
+      the follow-up addition are observable.
+    preconditions:
+    - longitude = -1.0e16; longitude is finite and less than -180.0.
+    expectedSourceBehavior:
+    - The source uses the out-of-range remainder calculation and selects the branch
+      based on the sign of the computed off.
+    - The follow-up is exactly the Java expression -1.0e16 + 360.0, subject to representable-double
+      rounding.
+    - The relation assertion must use the supplied tolerance and observed outputs
+      rather than an exact decimal wrapping expectation.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MAX_FINITE_POSITIVE
+    category: EDGE
+    description: The largest finite positive Java double.
+    preconditions:
+    - longitude = Double.MAX_VALUE; longitude is finite and greater than 180.0.
+    expectedSourceBehavior:
+    - The method does not take the in-range path and performs the source's finite
+      remainder computation.
+    - Adding 360.0 does not materially change this representable magnitude, so the
+      follow-up must still be generated and invoked rather than replaced by a hand-normalized
+      value.
+    - The metamorphic assertion is checked on the actual finite remainder outputs.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MAX_FINITE_NEGATIVE
+    category: EDGE
+    description: The most negative finite Java double.
+    preconditions:
+    - longitude = -Double.MAX_VALUE; longitude is finite and less than -180.0.
+    expectedSourceBehavior:
+    - The method takes the out-of-range path and applies Java's signed finite remainder
+      behavior.
+    - The follow-up is computed as -Double.MAX_VALUE + 360.0 and remains a finite
+      double.
+    - The relation assertion is applied to the observed normalized outputs with the
+      supplied tolerance.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NAN_INPUT
+    category: EDGE
+    description: A NaN source input, for which every ordered comparison in the source
+      is false.
+    preconditions:
+    - longitude = Double.NaN.
+    expectedSourceBehavior:
+    - The in-range condition is false; off is NaN, so off < 0.0 and off == 0.0 are
+      false and the final expression returns NaN.
+    - The follow-up NaN + 360.0 is NaN and also returns NaN.
+    - The supplied assertion does not throw because abs(NaN - NaN) is NaN and NaN
+      > 1e-9 is false; this is an explicitly non-vacuous coverage case for the source's
+      nonfinite path.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_INFINITY_INPUT
+    category: EDGE
+    description: Positive infinity entering the remainder computation.
+    preconditions:
+    - longitude = Double.POSITIVE_INFINITY.
+    expectedSourceBehavior:
+    - The range check is false and (Infinity + 180.0) % 360.0 evaluates to NaN, so
+      the method returns NaN from the final expression.
+    - The follow-up Infinity + 360.0 remains positive infinity and produces the same
+      NaN source output.
+    - The metamorphic assertion accepts the pair because the computed difference is
+      NaN and therefore is not greater than the tolerance.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_INFINITY_INPUT
+    category: EDGE
+    description: Negative infinity entering the remainder computation.
+    preconditions:
+    - longitude = Double.NEGATIVE_INFINITY.
+    expectedSourceBehavior:
+    - The range check is false and (-Infinity + 180.0) % 360.0 evaluates to NaN, so
+      the method returns NaN.
+    - The follow-up remains negative infinity and also returns NaN.
+    - The metamorphic assertion accepts the pair through its NaN comparison behavior.
+    targetCases: 1
+    emptyOutputAllowed: false

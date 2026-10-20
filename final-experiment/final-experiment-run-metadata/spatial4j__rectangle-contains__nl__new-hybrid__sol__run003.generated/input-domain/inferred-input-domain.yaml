@@ -1,0 +1,558 @@
+InputDomain:
+  summary: Finite canonical geographic rectangles and points, including ordinary,
+    dateline-wrapping, degenerate, polar, seam, and near-world cases; each source
+    is rotated east by 150 degrees with longitude normalization, and source and follow-up
+    relations must agree.
+  globalConstraints:
+  - The receiver context ctx is non-null and ctx.isGeo() is true.
+  - The point is non-null and is constructible through the same geographic SpatialContext,
+    such as ctx.makePoint(pointX, pointY).
+  - Receiver coordinates minX, maxX, minY, and maxY and point coordinates pointX and
+    pointY are finite doubles.
+  - Source longitudes satisfy -180 <= minX <= 180, -180 <= maxX <= 180, and -180 <=
+    pointX <= 180.
+  - Source latitudes satisfy -90 <= minY <= maxY <= 90 and -90 <= pointY <= 90.
+  - The represented longitude width w is maxX - minX when maxX >= minX and maxX -
+    minX + 360 otherwise, and must satisfy 0 <= w < 360.
+  - Width-360 rectangles such as (-180,180) are excluded because independently normalizing
+    both endpoints after a 150-degree rotation maps them to the same longitude and
+    does not preserve a full-world box.
+  - NaN-based empty rectangles and points are excluded because the metamorphic relation
+    requests valid geographic inputs and relate(Point) has no explicit empty-point
+    handling.
+  - The follow-up uses N(x) = x + 150 adjusted by multiples of 360 into [-180,180),
+    producing rectangle (N(minX),N(maxX),minY,maxY) and point (N(pointX),pointY) in
+    a geographic context.
+  - For every generated source, RectangleImpl.relate(point) and the corresponding
+    follow-up invocation are both required to complete normally and return the same
+    SpatialRelation.
+  diversity:
+    sourceRelation:
+    - CONTAINS
+    - DISJOINT
+    latitudePosition:
+    - below_minY
+    - at_minY
+    - interior
+    - at_maxY
+    - above_maxY
+    - north_pole
+    - south_pole
+    longitudeTopology:
+    - ordinary_nonwrapping
+    - dateline_wrapping
+    - zero_width
+    - half_world
+    - wider_than_half_world
+    - near_full_world
+    longitudePath:
+    - geo_short_circuit
+    - shift_plus_360
+    - shift_minus_360
+    - shifted_disjoint
+    rotationTopology:
+    - nonwrap_to_nonwrap
+    - nonwrap_to_wrap
+    - wrap_to_nonwrap
+    - wrap_to_wrap
+    seamCoverage:
+    - -180_equivalent_to_180
+    - rotation_maps_30_to_minus180
+    - endpoint_on_rotation_seam
+    rectangleDegeneracy:
+    - positive_area
+    - zero_height
+    - zero_width
+    - point_rectangle
+  scenarios:
+  - id: LATITUDE_ABOVE_MAX
+    category: NORMAL
+    description: The point is longitudinally aligned but strictly north of the rectangle.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (-20,20,-10,10) and (pointX,pointY) = (0,11).
+    expectedSourceBehavior:
+    - relate returns DISJOINT at the pointY > maxY latitude guard.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LATITUDE_BELOW_MIN
+    category: NORMAL
+    description: The point is longitudinally aligned but strictly south of the rectangle.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (-20,20,-10,10) and (pointX,pointY) = (0,-11).
+    expectedSourceBehavior:
+    - relate returns DISJOINT at the pointY < minY latitude guard.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LATITUDE_AT_MIN
+    category: BOUNDARY
+    description: The point lies on the inclusive minimum-latitude edge.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (-20,20,-10,10) and (pointX,pointY) = (0,-10).
+    expectedSourceBehavior:
+    - The latitude guard accepts equality and relate returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LATITUDE_AT_MAX
+    category: BOUNDARY
+    description: The point lies on the inclusive maximum-latitude edge.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (-20,20,-10,10) and (pointX,pointY) = (0,10).
+    expectedSourceBehavior:
+    - The latitude guard accepts equality and relate returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_HEIGHT_ON_LINE
+    category: EDGE
+    description: A zero-height rectangle contains a point on its latitude line.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (-20,20,5,5) and (pointX,pointY) = (0,5).
+    expectedSourceBehavior:
+    - Both inclusive latitude comparisons pass and relate returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_HEIGHT_OFF_LINE
+    category: EDGE
+    description: A point just off a zero-height rectangle is rejected by latitude.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (-20,20,5,5) and (pointX,pointY) = (0,6).
+    expectedSourceBehavior:
+    - relate returns DISJOINT at the upper latitude guard.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NORTH_POLE_BOUNDARY
+    category: BOUNDARY
+    description: The rectangle reaches the north pole and the point is on that boundary.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (-40,40,80,90) and (pointX,pointY) = (0,90).
+    expectedSourceBehavior:
+    - Latitude 90 is accepted inclusively and relate returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SOUTH_POLE_BOUNDARY
+    category: BOUNDARY
+    description: The rectangle reaches the south pole and the point is on that boundary.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (-40,40,-90,-80) and (pointX,pointY) = (0,-90).
+    expectedSourceBehavior:
+    - Latitude -90 is accepted inclusively and relate returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FULL_LATITUDE_SPAN
+    category: EDGE
+    description: The rectangle spans all valid latitudes while retaining a bounded
+      longitude interval.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (-10,10,-90,90) and (pointX,pointY) = (0,45).
+    expectedSourceBehavior:
+    - The latitude guard passes and the direct longitude interval yields CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_LONGITUDE_INTERIOR
+    category: NORMAL
+    description: The point is strictly inside an ordinary nonwrapping rectangle.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (-20,20,-10,10) and (pointX,pointY) = (5,0).
+    expectedSourceBehavior:
+    - pointX is between minX and maxX, so the geographic short-circuit returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_MIN_X_BOUNDARY
+    category: BOUNDARY
+    description: The point lies on the inclusive western edge.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (-20,20,-10,10) and (pointX,pointY) = (-20,0).
+    expectedSourceBehavior:
+    - Neither strict shift condition applies and relate returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_MAX_X_BOUNDARY
+    category: BOUNDARY
+    description: The point lies on the inclusive eastern edge.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (-20,20,-10,10) and (pointX,pointY) = (20,0).
+    expectedSourceBehavior:
+    - Neither strict shift condition applies and relate returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_LEFT_MISS_AFTER_PLUS_SHIFT
+    category: NORMAL
+    description: A point just west of an ordinary rectangle is shifted by 360 but
+      remains outside.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (-20,20,-10,10) and (pointX,pointY) = (-21,0).
+    expectedSourceBehavior:
+    - The pX < minX branch adds 360, and the final longitude test returns DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_RIGHT_MISS_AFTER_MINUS_SHIFT
+    category: NORMAL
+    description: A point just east of an ordinary rectangle is shifted by -360 but
+      remains outside.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (-20,20,-10,10) and (pointX,pointY) = (21,0).
+    expectedSourceBehavior:
+    - The pX > maxX branch subtracts 360, and the final longitude test returns DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_WIDTH_ON_MERIDIAN
+    category: EDGE
+    description: A zero-width rectangle contains a point on its meridian.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (12,12,-10,10) and (pointX,pointY) = (12,0).
+    expectedSourceBehavior:
+    - The direct inclusive longitude comparison returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_WIDTH_OFF_MERIDIAN
+    category: EDGE
+    description: A point away from a zero-width rectangle is disjoint.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (12,12,-10,10) and (pointX,pointY) = (13,0).
+    expectedSourceBehavior:
+    - The minus-360 shift does not reach longitude 12 and relate returns DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WRAPPED_WESTERN_LOBE_DIRECT
+    category: NORMAL
+    description: The point is in the positive-longitude portion of a dateline-wrapping
+      rectangle.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (170,-170,-10,10) and (pointX,pointY) = (175,0).
+    expectedSourceBehavior:
+    - The negative raw width is unwrapped and pointX is directly within [170,190],
+      yielding CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WRAPPED_EASTERN_LOBE_PLUS_SHIFT
+    category: NORMAL
+    description: The point is in the negative-longitude portion of a dateline-wrapping
+      rectangle.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (170,-170,-10,10) and (pointX,pointY) = (-175,0).
+    expectedSourceBehavior:
+    - The rectangle is unwrapped, pointX receives +360, and relate returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WRAPPED_CENTRAL_GAP
+    category: NORMAL
+    description: The point lies in the gap excluded by a narrow dateline-wrapping
+      rectangle.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (170,-170,-10,10) and (pointX,pointY) = (0,0).
+    expectedSourceBehavior:
+    - After rectangle unwrapping and the +360 point shift, the final test returns
+      DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WRAPPED_MIN_X_BOUNDARY
+    category: BOUNDARY
+    description: The point lies exactly on the stored minimum longitude of a wrapped
+      rectangle.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (170,-170,-10,10) and (pointX,pointY) = (170,0).
+    expectedSourceBehavior:
+    - The unwrapped interval includes its minimum and relate returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WRAPPED_MAX_X_BOUNDARY
+    category: BOUNDARY
+    description: The point lies exactly on the stored maximum longitude of a wrapped
+      rectangle.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (170,-170,-10,10) and (pointX,pointY) = (-170,0).
+    expectedSourceBehavior:
+    - Adding 360 maps pointX to the unwrapped maximum 190, yielding CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BROAD_WRAPPED_INTERIOR_DIRECT
+    category: EDGE
+    description: A wrapped rectangle wider than half the world contains a central
+      longitude directly.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (-10,-20,-10,10) and (pointX,pointY) = (0,0).
+    expectedSourceBehavior:
+    - The rectangle unwraps to [-10,340], and the geographic short-circuit returns
+      CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BROAD_WRAPPED_NARROW_GAP
+    category: EDGE
+    description: A point lies in the narrow excluded gap of a 350-degree wrapped rectangle.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (-10,-20,-10,10) and (pointX,pointY) = (-15,0).
+    expectedSourceBehavior:
+    - Adding 360 produces 345, beyond the unwrapped maximum 340, so relate returns
+      DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: HALF_WORLD_MAX_BOUNDARY
+    category: BOUNDARY
+    description: A 180-degree rectangle includes its maximum-longitude boundary.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (-90,90,-10,10) and (pointX,pointY) = (90,0).
+    expectedSourceBehavior:
+    - The direct inclusive longitude path returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WIDER_THAN_HALF_WORLD_MISS
+    category: EDGE
+    description: A point is outside a nonwrapping rectangle whose width exceeds 180
+      degrees.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (-120,120,-10,10) and (pointX,pointY) = (150,0).
+    expectedSourceBehavior:
+    - Subtracting 360 produces -210, still outside the interval, so relate returns
+      DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEAR_WORLD_WRAPPED_INTERIOR
+    category: EDGE
+    description: A 359-degree wrapped rectangle contains a point far from its one-degree
+      gap.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (1,0,-10,10) and (pointX,pointY) = (-100,0).
+    expectedSourceBehavior:
+    - The unwrapped interval is [1,360]; adding 360 to pointX produces 260 and returns
+      CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEAR_WORLD_WRAPPED_GAP
+    category: EDGE
+    description: A point lies in the narrow gap of a 359-degree wrapped rectangle.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (1,0,-10,10) and (pointX,pointY) = (0.5,0).
+    expectedSourceBehavior:
+    - Adding 360 produces 360.5, beyond the unwrapped maximum, so relate returns DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_180_EQUIVALENT_INSIDE
+    category: BOUNDARY
+    description: Longitude +180 is treated as equivalent to -180 on a rectangle beginning
+      at -180.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (-180,-160,-10,10) and (pointX,pointY) = (180,0).
+    expectedSourceBehavior:
+    - The pX > maxX branch subtracts 360 to obtain -180 and returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_180_EQUIVALENT_INSIDE
+    category: BOUNDARY
+    description: Longitude -180 is treated as equivalent to +180 on a rectangle ending
+      at +180.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (160,180,-10,10) and (pointX,pointY) = (-180,0).
+    expectedSourceBehavior:
+    - The pX < minX branch adds 360 to obtain 180 and returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: VERTICAL_MINUS_180_WITH_PLUS_180_POINT
+    category: EDGE
+    description: A zero-width meridian at -180 contains the equivalent +180 point.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (-180,-180,-10,10) and (pointX,pointY) = (180,0).
+    expectedSourceBehavior:
+    - Subtracting 360 maps the point exactly to the zero-width interval and returns
+      CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: VERTICAL_PLUS_180_WITH_MINUS_180_POINT
+    category: EDGE
+    description: A zero-width meridian at +180 contains the equivalent -180 point.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (180,180,-10,10) and (pointX,pointY) = (-180,0).
+    expectedSourceBehavior:
+    - Adding 360 maps the point exactly to the zero-width interval and returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DATELINE_EQUIVALENT_JUST_OUTSIDE_WEST
+    category: BOUNDARY
+    description: The dateline-equivalent point remains outside a rectangle starting
+      one degree east of -180.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (-179,-170,-10,10) and (pointX,pointY) = (180,0).
+    expectedSourceBehavior:
+    - Subtracting 360 produces -180, which is below minX, so relate returns DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DATELINE_EQUIVALENT_JUST_OUTSIDE_EAST
+    category: BOUNDARY
+    description: The dateline-equivalent point remains outside a rectangle ending
+      one degree west of +180.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (170,179,-10,10) and (pointX,pointY) = (-180,0).
+    expectedSourceBehavior:
+    - Adding 360 produces 180, which exceeds maxX, so relate returns DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_NONWRAP_TO_NONWRAP_CONTAINS
+    category: NORMAL
+    description: Neither rectangle endpoint wraps during rotation, and an interior
+      point is contained.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (-100,0,-10,10) and (pointX,pointY) = (-50,0).
+    expectedSourceBehavior:
+    - The source direct longitude path returns CONTAINS.
+    - Rotation produces the nonwrapping interval [50,150] and point longitude 100.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_NONWRAP_TO_NONWRAP_DISJOINT
+    category: NORMAL
+    description: Neither endpoint wraps during rotation, and the point is outside.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (-100,0,-10,10) and (pointX,pointY) = (20,0).
+    expectedSourceBehavior:
+    - The source minus-360 path returns DISJOINT.
+    - Rotation produces the nonwrapping interval [50,150] and point longitude 170.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_NONWRAP_TO_WRAP_CONTAINS
+    category: EDGE
+    description: Only the maximum endpoint wraps, converting a source nonwrapping
+      rectangle into a wrapped follow-up.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (-100,50,-10,10) and (pointX,pointY) = (0,0).
+    expectedSourceBehavior:
+    - The source direct longitude path returns CONTAINS.
+    - Rotation produces wrapped endpoints (50,-160) and point longitude 150.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_NONWRAP_TO_WRAP_DISJOINT
+    category: EDGE
+    description: A nonwrapping source becomes wrapped while an outside point remains
+      outside.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (-100,50,-10,10) and (pointX,pointY) = (100,0).
+    expectedSourceBehavior:
+    - The source shifted longitude test returns DISJOINT.
+    - Rotation produces wrapped endpoints (50,-160) and point longitude -110.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_BOTH_ENDPOINTS_WRAP_CONTAINS
+    category: NORMAL
+    description: Both endpoints wrap but their ordering remains nonwrapping.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (100,150,-10,10) and (pointX,pointY) = (125,0).
+    expectedSourceBehavior:
+    - The source direct longitude path returns CONTAINS.
+    - Rotation produces the nonwrapping interval [-110,-60] and point longitude -85.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_BOTH_ENDPOINTS_WRAP_DISJOINT
+    category: NORMAL
+    description: Both endpoints wrap while an outside point remains outside.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (100,150,-10,10) and (pointX,pointY) = (0,0).
+    expectedSourceBehavior:
+    - The source plus-360 path returns DISJOINT.
+    - Rotation produces the nonwrapping interval [-110,-60] and point longitude 150.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_WRAP_TO_NONWRAP_CONTAINS
+    category: EDGE
+    description: A dateline-wrapping source becomes a broad nonwrapping follow-up.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (100,20,-10,10) and (pointX,pointY) = (150,0).
+    expectedSourceBehavior:
+    - The source unwrapped direct path returns CONTAINS.
+    - Rotation produces the nonwrapping interval [-110,170] and point longitude -60.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_WRAP_TO_NONWRAP_DISJOINT
+    category: EDGE
+    description: A point in the source wrapped rectangle's gap remains outside after
+      the rectangle becomes nonwrapping.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (100,20,-10,10) and (pointX,pointY) = (50,0).
+    expectedSourceBehavior:
+    - The source +360 shift overshoots the unwrapped maximum and returns DISJOINT.
+    - Rotation produces interval [-110,170] and point longitude -160.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_WRAP_TO_WRAP_INTERIOR
+    category: EDGE
+    description: A broad wrapped rectangle remains wrapped when neither endpoint crosses
+      the normalization seam.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (-100,-120,-10,10) and (pointX,pointY) = (0,0).
+    expectedSourceBehavior:
+    - The source direct path in the unwrapped interval returns CONTAINS.
+    - Rotation produces wrapped endpoints (50,30) and point longitude 150.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_WRAP_TO_WRAP_GAP
+    category: EDGE
+    description: A point in a wrapped rectangle's narrow gap remains in the rotated
+      gap.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (-100,-120,-10,10) and (pointX,pointY) = (-110,0).
+    expectedSourceBehavior:
+    - The source +360 shift overshoots the unwrapped maximum and returns DISJOINT.
+    - Rotation produces wrapped endpoints (50,30) and point longitude 40.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_WRAPPED_BOTH_ENDPOINTS_GAP
+    category: EDGE
+    description: Both endpoints of a wrapped rectangle normalize across the seam,
+      and a gap point remains disjoint.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (100,50,-10,10) and (pointX,pointY) = (75,0).
+    expectedSourceBehavior:
+    - The source +360 shift places the point beyond the unwrapped maximum, yielding
+      DISJOINT.
+    - Rotation produces wrapped endpoints (-110,-160) and point longitude -135.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_WRAPPED_BOTH_ENDPOINTS_INTERIOR
+    category: EDGE
+    description: Both endpoints of a wrapped rectangle normalize across the seam,
+      and an interior point remains contained.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (100,50,-10,10) and (pointX,pointY) = (0,0).
+    expectedSourceBehavior:
+    - The source +360 shift places the point inside the unwrapped interval, yielding
+      CONTAINS.
+    - Rotation produces wrapped endpoints (-110,-160) and point longitude 150.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POINT_ROTATES_EXACTLY_TO_MINUS_180_INSIDE
+    category: BOUNDARY
+    description: A source point at longitude 30 normalizes exactly to -180 and remains
+      inside.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (20,40,-10,10) and (pointX,pointY) = (30,0).
+    expectedSourceBehavior:
+    - The source direct path returns CONTAINS.
+    - Rotation produces wrapped endpoints (170,-170) and point longitude -180.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POINT_ROTATES_EXACTLY_TO_MINUS_180_OUTSIDE
+    category: BOUNDARY
+    description: A source point at longitude 30 normalizes exactly to -180 while remaining
+      outside.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (-20,20,-10,10) and (pointX,pointY) = (30,0).
+    expectedSourceBehavior:
+    - The source minus-360 path returns DISJOINT.
+    - Rotation produces interval [130,170] and point longitude -180.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MIN_ENDPOINT_ROTATES_TO_MINUS_180
+    category: BOUNDARY
+    description: The source minimum endpoint and point both lie at the rotation seam.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (30,60,-10,10) and (pointX,pointY) = (30,0).
+    expectedSourceBehavior:
+    - The source includes its minimum endpoint and returns CONTAINS.
+    - Rotation produces interval [-180,-150] with the point at -180.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POINT_RECTANGLE_EXACT_MATCH
+    category: EDGE
+    description: Both rectangle dimensions are degenerate and exactly match the point.
+    preconditions:
+    - (minX,maxX,minY,maxY) = (7,7,3,3) and (pointX,pointY) = (7,3).
+    expectedSourceBehavior:
+    - Both inclusive coordinate checks pass and relate returns CONTAINS.
+    - Rotation preserves the exact rectangle-point coincidence at longitude 157.
+    targetCases: 1
+    emptyOutputAllowed: false

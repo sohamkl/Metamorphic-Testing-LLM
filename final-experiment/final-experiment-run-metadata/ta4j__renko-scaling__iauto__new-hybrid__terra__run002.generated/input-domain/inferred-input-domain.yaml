@@ -1,0 +1,277 @@
+InputDomain:
+  summary: Valid Renko inputs consist of an empty list or a non-null chronological
+    list of contiguous, evenly spaced bars with non-null close prices. Scenarios use
+    scale-stable numeric values and legal positive finite box sizes so that doubling
+    every price-like field and the box size exercises the specified positive-scaling
+    relation.
+  globalConstraints:
+  - The receiver uses either RenkoBarAggregator(boxSize) with its documented default
+    reversalAmount of 2, or RenkoBarAggregator(boxSize, reversalAmount) where boxSize
+    is finite and greater than 0 and reversalAmount is greater than 0.
+  - The bars argument is non-null; every non-empty list contains non-null Bar instances
+    because the follow-up generator rejects null source-bar elements.
+  - For every non-empty list, every source bar has a non-null close price because
+    aggregate explicitly rejects missing close prices and invalid-input testing is
+    not requested by the metamorphic relation.
+  - '{Non-empty source lists are chronological, contiguous, and evenly spaced=for
+    a fixed positive duration P, bar i covers [T+i*P, T+(i+1)*P].}'
+  - All numeric values used for close, open, high, low, amount, volume, and boxSize
+    are representable by the participating NumFactory and remain representable after
+    multiplication by 2.0.
+  - Unless a scenario explicitly tests nullable volume or amount, bars have non-null
+    volume and amount and non-negative trade counts; all bars in a list use numerically
+    compatible Num values with the first bar's NumFactory.
+  - Invalid lists with uneven or non-contiguous intervals, null close prices, null
+    list references, or null bar elements are excluded because the supplied relation
+    specifies positive scaling of valid executions rather than an exception-preservation
+    relation.
+  diversity:
+    branchAndBoundaryCoverage:
+    - empty input early return
+    - singleton input
+    - no-threshold flat and sub-box movement
+    - initial UP and initial DOWN emission from Direction.NONE
+    - exact box threshold
+    - multi-brick while-loop emission from one source bar
+    - pending volume amount and trades accumulated before first emission
+    - UP continuation
+    - DOWN continuation
+    - UP reversal below threshold and at threshold
+    - DOWN reversal at threshold
+    - reversalAmount values 1, 2, and 3
+    - source-bar null volume and amount handling
+    - first and subsequent brick end-time resolution
+    - default and explicit receiver constructors
+  scenarios:
+  - id: EMPTY_LIST
+    category: BOUNDARY
+    description: Empty source list with a legal explicit aggregator configuration.
+    preconditions:
+    - bars is List.of()
+    - receiver is RenkoBarAggregator(1.0, 2)
+    expectedSourceBehavior:
+    - aggregate returns an empty Renko-brick list without inspecting a source bar
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: SINGLE_ANCHOR_BAR
+    category: BOUNDARY
+    description: One valid bar establishes the initial close anchor but cannot move
+      away from it.
+    preconditions:
+    - receiver is RenkoBarAggregator(1.0, 2)
+    - bars has one bar with close 10, non-null volume 5, amount 20, and trades 1
+    expectedSourceBehavior:
+    - aggregate returns no brick because the only close price is the initial lastBrickClose
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: FLAT_MULTI_BAR_NO_EMISSION
+    category: NORMAL
+    description: Multiple contiguous bars all close at the anchor price.
+    preconditions:
+    - receiver is RenkoBarAggregator(1.0, 2)
+    - close-price sequence is [10, 10, 10]
+    - each bar has non-null volume, amount, and trades
+    expectedSourceBehavior:
+    - aggregate returns no brick and exercises both Direction.NONE threshold checks
+      without entering either loop
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: SUB_BOX_UPWARD_MOVE
+    category: BOUNDARY
+    description: A positive move remains strictly below one box.
+    preconditions:
+    - receiver is RenkoBarAggregator(1.0, 2)
+    - close-price sequence is [10, 10.5]
+    - all numeric bar fields are non-null
+    expectedSourceBehavior:
+    - aggregate returns no brick because 10.5 is less than 10 plus one box
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: EXACT_INITIAL_UP_BOX
+    category: BOUNDARY
+    description: The first upward movement is exactly one box.
+    preconditions:
+    - receiver is RenkoBarAggregator(1.0, 2)
+    - close-price sequence is [10, 11]
+    - the second bar has volume 7, amount 14, and trades 3
+    expectedSourceBehavior:
+    - aggregate emits exactly one UP brick from open 10 to close 11
+    - the emitted brick carries accumulated fields from both source bars
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EXACT_INITIAL_DOWN_BOX
+    category: BOUNDARY
+    description: The first downward movement is exactly one box while direction is
+      NONE.
+    preconditions:
+    - receiver is RenkoBarAggregator(1.0, 2)
+    - close-price sequence is [10, 9]
+    - all numeric bar fields are non-null
+    expectedSourceBehavior:
+    - aggregate emits exactly one DOWN brick from open 10 to close 9
+    - the initial Direction.NONE downward-emission loop is reached
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MULTI_UP_BRICKS_ONE_SOURCE_BAR
+    category: NORMAL
+    description: One later source bar crosses three upward boxes.
+    preconditions:
+    - receiver is RenkoBarAggregator(1.0, 2)
+    - close-price sequence is [10, 13]
+    - the second bar has non-zero volume, amount, and trades
+    expectedSourceBehavior:
+    - aggregate emits three consecutive UP bricks with closes 11, 12, and 13
+    - only the first brick emitted from the second source bar carries pending volume,
+      amount, and trades; later bricks carry zero values and zero trades
+    - later same-source bricks have end times advanced by one source period
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PENDING_FIELDS_AND_DELAYED_FIRST_BRICK_TIME
+    category: NORMAL
+    description: Two earlier bars produce no brick, then a later bar produces the
+      first brick.
+    preconditions:
+    - receiver is RenkoBarAggregator(1.0, 2)
+    - close-price sequence is [10, 10, 11]
+    - volumes are [2, 3, 5], amounts are [4, 6, 10], and trades are [1, 2, 3]
+    expectedSourceBehavior:
+    - aggregate emits one UP brick carrying volume 10, amount 20, and trades 6
+    - the first brick end time equals the third source bar end time because it is
+      later than nextBrickEndTime
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UP_CONTINUATION_AFTER_INITIAL_UP
+    category: NORMAL
+    description: An established UP direction continues through additional exact box
+      movement.
+    preconditions:
+    - receiver is RenkoBarAggregator(1.0, 2)
+    - close-price sequence is [10, 11, 12]
+    - all numeric bar fields are non-null
+    expectedSourceBehavior:
+    - aggregate emits two UP bricks with closes 11 and 12
+    - the second source bar establishes UP direction and the third enters the UP continuation
+      loop
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UP_RETRACE_BELOW_TWO_BOX_REVERSAL
+    category: BOUNDARY
+    description: An UP trend retraces by less than the configured two-box reversal
+      distance.
+    preconditions:
+    - receiver is RenkoBarAggregator(1.0, 2)
+    - close-price sequence is [10, 11, 9.5]
+    - all numeric bar fields are non-null
+    expectedSourceBehavior:
+    - aggregate emits only the initial UP brick
+    - no DOWN brick is emitted because 9.5 is greater than the reversal threshold
+      of 9
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UP_EXACT_TWO_BOX_REVERSAL
+    category: BOUNDARY
+    description: An UP trend retraces by exactly the two-box reversal distance.
+    preconditions:
+    - receiver is RenkoBarAggregator(1.0, 2)
+    - close-price sequence is [10, 11, 9]
+    - all numeric bar fields are non-null
+    expectedSourceBehavior:
+    - aggregate emits the initial UP brick followed by two DOWN bricks with closes
+      10 and 9
+    - the UP reversal guard and its downward emission loop are entered at equality
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UP_OVERSHOOT_REVERSAL
+    category: NORMAL
+    description: A later close crosses the two-box UP reversal threshold by additional
+      boxes.
+    preconditions:
+    - receiver is RenkoBarAggregator(1.0, 2)
+    - close-price sequence is [10, 12, 8]
+    - all numeric bar fields are non-null
+    expectedSourceBehavior:
+    - aggregate emits two UP bricks followed by four DOWN bricks
+    - multiple reversal bricks from the final source bar receive pending fields only
+      on the first such brick
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DOWN_CONTINUATION
+    category: NORMAL
+    description: An established DOWN direction continues through more than one box
+      in a later bar.
+    preconditions:
+    - receiver is RenkoBarAggregator(1.0, 2)
+    - close-price sequence is [10, 9, 7]
+    - all numeric bar fields are non-null
+    expectedSourceBehavior:
+    - aggregate emits DOWN bricks with closes 9, 8, and 7
+    - the Direction.DOWN continuation loop emits two bricks from the final source
+      bar
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DOWN_EXACT_TWO_BOX_REVERSAL
+    category: BOUNDARY
+    description: A DOWN trend rises by exactly the configured two-box reversal distance.
+    preconditions:
+    - receiver is RenkoBarAggregator(1.0, 2)
+    - close-price sequence is [10, 9, 11]
+    - all numeric bar fields are non-null
+    expectedSourceBehavior:
+    - aggregate emits the initial DOWN brick followed by two UP bricks with closes
+      10 and 11
+    - the Direction.DOWN upward-reversal guard is entered at equality
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ONE_BOX_REVERSAL_CONFIGURATION
+    category: EDGE
+    description: The smallest legal reversalAmount allows a one-box trend reversal.
+    preconditions:
+    - receiver is RenkoBarAggregator(1.0, 1)
+    - close-price sequence is [10, 11, 10]
+    - all numeric bar fields are non-null
+    expectedSourceBehavior:
+    - aggregate emits one UP brick and then one DOWN brick
+    - the reversal comparison uses one box rather than the default two boxes
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: THREE_BOX_REVERSAL_NOT_REACHED
+    category: BOUNDARY
+    description: A larger legal reversalAmount blocks a retracement that would reverse
+      under the default configuration.
+    preconditions:
+    - receiver is RenkoBarAggregator(1.0, 3)
+    - close-price sequence is [10, 11, 8.5]
+    - all numeric bar fields are non-null
+    expectedSourceBehavior:
+    - aggregate emits only the initial UP brick
+    - no reversal occurs because 8.5 is greater than the three-box threshold of 8
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DEFAULT_CONSTRUCTOR_HALF_BOX_UPWARD
+    category: NORMAL
+    description: The one-argument constructor is used with an exact fractional box
+      size.
+    preconditions:
+    - receiver is RenkoBarAggregator(0.5)
+    - close-price sequence is [10, 11]
+    - all numeric bar fields are non-null
+    expectedSourceBehavior:
+    - aggregate emits two UP bricks with closes 10.5 and 11
+    - the receiver uses the documented default reversalAmount of 2
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NULL_VOLUME_AND_AMOUNT_ARE_SKIPPED
+    category: EDGE
+    description: Valid source bars expose nullable volume and amount while retaining
+      non-null close prices.
+    preconditions:
+    - receiver is RenkoBarAggregator(1.0, 2)
+    - close-price sequence is [10, 11]
+    - first bar volume and amount are null, with trades 2
+    - second bar volume is 7, amount is 3, and trades are 4
+    expectedSourceBehavior:
+    - aggregate emits one UP brick
+    - the emitted brick has volume 7, amount 3, and trades 6 because null volume and
+      amount are not added while trades are always accumulated
+    targetCases: 1
+    emptyOutputAllowed: false

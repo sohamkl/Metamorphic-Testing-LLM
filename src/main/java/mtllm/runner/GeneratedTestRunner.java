@@ -1,15 +1,16 @@
 package mtllm.runner;
 
 import mtllm.config.PromptConfig;
+import mtllm.sut.CompiledClassPath;
 import mtllm.sut.SutContext;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Compiles and optionally executes the generated JUnit 5 test class.
@@ -25,6 +26,10 @@ public final class GeneratedTestRunner {
     private final String junitConsoleJar;
     private final String mavenCommand;
     private ActualResultTestSplitter.SplitResult lastSplitResult;
+    private GeneratedTestQualityGate.ValidationResult lastQualityResult =
+            GeneratedTestQualityGate.ValidationResult.valid();
+    /** Scenarios proven unsatisfiable, so the gate stops demanding them. */
+    private Set<String> retiredScenarioIds = Set.of();
 
     public GeneratedTestRunner(Path repoRoot, Path classesDir, Path supportSourceDir, String junitConsoleJar, String mavenCommand) {
         this.repoRoot = repoRoot;
@@ -36,9 +41,10 @@ public final class GeneratedTestRunner {
 
     public TestRunResult compileAndRun(Path generatedTestFile, PromptConfig config, SutContext sutContext) throws Exception {
         lastSplitResult = null;
-        String countValidationError = validateGeneratedTestCount(generatedTestFile, config);
-        if (countValidationError != null) {
-            return TestRunResult.failed("Generated JUnit validation failed:\n" + countValidationError);
+        lastQualityResult =
+                GeneratedTestQualityGate.validateDetailed(generatedTestFile, config, retiredScenarioIds);
+        if (!lastQualityResult.passed()) {
+            return TestRunResult.failed("Generated JUnit validation failed:\n" + lastQualityResult.error());
         }
         if (junitConsoleJar.isBlank()) {
             return runWithMavenIfAvailable(generatedTestFile, config, sutContext);
@@ -49,21 +55,8 @@ public final class GeneratedTestRunner {
         if (!compileResult.passed()) {
             return compileResult;
         }
+        RuntimeResourceCopier.copyFor(config, classesDir);
         return run(config.generatedClassName());
-    }
-
-    private String validateGeneratedTestCount(Path generatedTestFile, PromptConfig config) throws IOException {
-        int testCount = 0;
-        for (String line : Files.readAllLines(generatedTestFile, StandardCharsets.UTF_8)) {
-            String trimmed = line.trim();
-            if ("@Test".equals(trimmed) || trimmed.startsWith("@Test(")) {
-                testCount++;
-            }
-        }
-        if (testCount > config.count()) {
-            return "Expected at most " + config.count() + " JUnit test methods, found " + testCount + ".";
-        }
-        return null;
     }
 
     private TestRunResult runWithMavenIfAvailable(Path generatedTestFile, PromptConfig config, SutContext sutContext) throws Exception {
@@ -75,26 +68,31 @@ public final class GeneratedTestRunner {
 
         prepareMavenTestSources(generatedTestFile, config, sutContext);
 
+        RuntimeResourceCopier.copyFor(config, repoRoot.resolve("target").resolve("test-classes"));
+
         List<String> command = new ArrayList<>();
         command.add(mavenCommand);
         command.add("test");
+        if (!config.mavenProfiles().isEmpty()) {
+            command.add("-P" + String.join(",", config.mavenProfiles()));
+        }
         command.add("-Dtest=" + config.generatedClassName());
 
         try {
             Files.deleteIfExists(repoRoot.resolve("target")
                     .resolve("surefire-reports")
                     .resolve("TEST-" + config.generatedClassName() + ".xml"));
-            ProcessResult result = runProcess(command, repoRoot);
-            if (result.exitCode == 0) {
-                return splitActualResults(generatedTestFile, config, result.output);
+            ProcessRunner.Result result = ProcessRunner.run(command, repoRoot);
+            if (result.exitCode() == 0) {
+                return splitActualResults(generatedTestFile, config, result.output());
             }
-            if (isCompilationFailure(result.output)) {
-                return TestRunResult.failed("Maven compilation failed:\n" + result.output);
+            if (isCompilationFailure(result.output())) {
+                return TestRunResult.failed("Maven compilation failed:\n" + result.output());
             }
-            if (isExpectedTestFailureOutput(result.output)) {
-                return splitActualResults(generatedTestFile, config, result.output);
+            if (isExpectedTestFailureOutput(result.output())) {
+                return splitActualResults(generatedTestFile, config, result.output());
             }
-            return TestRunResult.failed("Maven test failed:\n" + result.output);
+            return TestRunResult.failed("Maven test failed:\n" + result.output());
         } catch (IOException e) {
             return TestRunResult.skipped(
                     "Generated test was written, but Maven could not be started. "
@@ -114,17 +112,21 @@ public final class GeneratedTestRunner {
         clearJavaFiles(stagedTestSourceDir);
         clearJavaFiles(stagedSupportSourceDir);
         copyJavaFileIfPresent(generatedTestFile, stagedTestSourceDir);
-        copyJavaFileIfPresent(config.sutClassFile(), supportSourceDir);
-        copyJavaFileIfPresent(config.sutClassFile(), stagedSupportSourceDir);
+        copyUncompiledJavaFileIfPresent(config.sutClassFile(), supportSourceDir, config);
+        copyUncompiledJavaFileIfPresent(config.sutClassFile(), stagedSupportSourceDir, config);
         for (SutContext.SourceFile supportFile : sutContext.supportFiles()) {
-            copyJavaFileIfPresent(supportFile.path(), supportSourceDir);
-            copyJavaFileIfPresent(supportFile.path(), stagedSupportSourceDir);
+            copyUncompiledJavaFileIfPresent(supportFile.path(), supportSourceDir, config);
+            copyUncompiledJavaFileIfPresent(supportFile.path(), stagedSupportSourceDir, config);
         }
         if (config.mode().usesDeveloperMrHelpers()) {
             copyJavaFileIfPresent(config.developerMrFile(), supportSourceDir);
             copyJavaFileIfPresent(config.developerMrFile(), stagedSupportSourceDir);
         }
         for (Path file : generatedDataSourceFiles(config)) {
+            copyJavaFileIfPresent(file, supportSourceDir);
+            copyJavaFileIfPresent(file, stagedSupportSourceDir);
+        }
+        for (Path file : generatedSupportSourceFiles(config)) {
             copyJavaFileIfPresent(file, supportSourceDir);
             copyJavaFileIfPresent(file, stagedSupportSourceDir);
         }
@@ -135,6 +137,13 @@ public final class GeneratedTestRunner {
             return;
         }
         Files.copy(sourceFile, targetDir.resolve(sourceFile.getFileName()), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+    }
+
+    private void copyUncompiledJavaFileIfPresent(Path sourceFile, Path targetDir, PromptConfig config)
+            throws IOException {
+        if (!CompiledClassPath.contains(config.sutClasspath(), sourceFile)) {
+            copyJavaFileIfPresent(sourceFile, targetDir);
+        }
     }
 
     private void clearJavaFiles(Path targetDir) throws IOException {
@@ -171,18 +180,35 @@ public final class GeneratedTestRunner {
         return lastSplitResult;
     }
 
+    GeneratedTestQualityGate.ValidationResult lastQualityResult() {
+        return lastQualityResult;
+    }
+
+    /**
+     * Marks scenarios as unsatisfiable so later validations stop requiring them. Additive, because
+     * separate runs can retire different scenarios and none of them become satisfiable again.
+     */
+    void retireScenarios(Set<String> scenarioIds) {
+        Set<String> merged = new LinkedHashSet<>(retiredScenarioIds);
+        merged.addAll(scenarioIds);
+        retiredScenarioIds = Set.copyOf(merged);
+    }
+
     private TestRunResult compile(Path generatedTestFile, PromptConfig config, SutContext sutContext) throws Exception {
         List<String> command = new ArrayList<>();
         command.add("javac");
         command.add("-cp");
-        command.add(classpath());
+        command.add(classpath(config));
         command.add("-d");
         command.add(classesDir.toString());
-        if (config.sutClassFile() != null) {
+        if (config.sutClassFile() != null
+                && !CompiledClassPath.contains(config.sutClasspath(), config.sutClassFile())) {
             command.add(config.sutClassFile().toString());
         }
         for (SutContext.SourceFile supportFile : sutContext.supportFiles()) {
-            command.add(supportFile.path().toString());
+            if (!CompiledClassPath.contains(config.sutClasspath(), supportFile.path())) {
+                command.add(supportFile.path().toString());
+            }
         }
         if (config.mode().usesDeveloperMrHelpers() && config.developerMrFile() != null) {
             command.add(config.developerMrFile().toString());
@@ -190,13 +216,14 @@ public final class GeneratedTestRunner {
         for (Path file : generatedDataSourceFiles(config)) {
             command.add(file.toString());
         }
+        command.addAll(generatedSupportSourceFiles(config).stream().map(Path::toString).toList());
         command.add(generatedTestFile.toString());
 
-        ProcessResult result = runProcess(command, repoRoot);
-        if (result.exitCode == 0) {
-            return TestRunResult.passed(result.output);
+        ProcessRunner.Result result = ProcessRunner.run(command, repoRoot);
+        if (result.exitCode() == 0) {
+            return TestRunResult.passed(result.output());
         }
-        return TestRunResult.failed("Compilation failed:\n" + result.output);
+        return TestRunResult.failed("Compilation failed:\n" + result.output());
     }
 
     private List<Path> generatedDataSourceFiles(PromptConfig config) throws IOException {
@@ -211,6 +238,18 @@ public final class GeneratedTestRunner {
         }
     }
 
+    private List<Path> generatedSupportSourceFiles(PromptConfig config) throws IOException {
+        Path generatedSupportDir = config.outputRoot().resolve("generated-support");
+        if (!Files.isDirectory(generatedSupportDir)) {
+            return List.of();
+        }
+        try (var stream = Files.list(generatedSupportDir)) {
+            return stream.filter(path -> path.getFileName().toString().endsWith(".java"))
+                    .sorted()
+                    .toList();
+        }
+    }
+
     private TestRunResult run(String generatedClassName) throws Exception {
         List<String> command = new ArrayList<>();
         command.add("java");
@@ -221,14 +260,14 @@ public final class GeneratedTestRunner {
         command.add("--select-class");
         command.add(generatedClassName);
 
-        ProcessResult result = runProcess(command, repoRoot);
-        if (result.exitCode == 0) {
-            return TestRunResult.passed(result.output);
+        ProcessRunner.Result result = ProcessRunner.run(command, repoRoot);
+        if (result.exitCode() == 0) {
+            return TestRunResult.passed(result.output());
         }
-        if (isExpectedTestFailureOutput(result.output)) {
-            return TestRunResult.passed("Generated failing-only suite found MR violations:\n" + result.output);
+        if (isExpectedTestFailureOutput(result.output())) {
+            return TestRunResult.passed("Generated failing-only suite found MR violations:\n" + result.output());
         }
-        return TestRunResult.failed("JUnit execution failed:\n" + result.output);
+        return TestRunResult.failed("JUnit execution failed:\n" + result.output());
     }
 
     private static boolean isCompilationFailure(String output) {
@@ -248,34 +287,17 @@ public final class GeneratedTestRunner {
                 || lower.matches("(?s).*tests failed: [1-9][0-9]*.*");
     }
 
-    private String classpath() {
-        return junitConsoleJar + pathSeparator() + repoRoot + pathSeparator() + classesDir;
+    private String classpath(PromptConfig config) {
+        List<String> entries = new ArrayList<>();
+        entries.add(junitConsoleJar);
+        entries.add(repoRoot.toString());
+        entries.add(classesDir.toString());
+        entries.addAll(config.sutClasspath().stream().map(Path::toString).toList());
+        return String.join(pathSeparator(), entries);
     }
 
     private static String pathSeparator() {
         return System.getProperty("path.separator");
     }
 
-    private static ProcessResult runProcess(List<String> command, Path workDir) throws IOException, InterruptedException {
-        ProcessBuilder builder = new ProcessBuilder(command)
-                .directory(workDir.toFile())
-                .redirectErrorStream(true);
-        String existingPath = builder.environment().getOrDefault("PATH", "");
-        builder.environment().put("PATH", "/bin:/usr/bin:/opt/homebrew/bin:/usr/local/bin:" + existingPath);
-        Process process = builder.start();
-        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-        process.getInputStream().transferTo(buffer);
-        int exitCode = process.waitFor();
-        return new ProcessResult(exitCode, buffer.toString(StandardCharsets.UTF_8));
-    }
-
-    private static final class ProcessResult {
-        private final int exitCode;
-        private final String output;
-
-        private ProcessResult(int exitCode, String output) {
-            this.exitCode = exitCode;
-            this.output = output == null ? "" : output;
-        }
-    }
 }

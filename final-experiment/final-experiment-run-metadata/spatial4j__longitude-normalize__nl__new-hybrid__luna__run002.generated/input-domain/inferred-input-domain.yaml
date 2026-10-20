@@ -1,0 +1,231 @@
+InputDomain:
+  summary: Finite IEEE-754 longitude values, including in-range values, endpoint aliases,
+    values on both sides of the documented range, repeated-turn values, signed zero,
+    and large finite magnitudes; each follow-up is computed as sourceLongitude + 360.0.
+  globalConstraints:
+  - The source input is a finite double; NaN and infinities are excluded because they
+    do not identify a finite longitude on the globe, and the supplied method produces
+    a NaN result for them through its remainder calculation.
+  - The follow-up is formed only by Java double addition of 360.0 to the same source
+    value, with no pre-normalization or other transformation.
+  - A source and follow-up result satisfy the relation when they identify the same
+    longitude modulo 360 degrees, treating -180 and +180 as the documented same-spot
+    endpoint aliases and allowing ordinary floating-point representation effects.
+  - The source-case budget counts individual source values across scenarios; all listed
+    targetCases sum to 25.
+  diversity:
+    sourceRange:
+    - '[-180, 180]'
+    - (-infinity, -180)
+    - (180, +infinity)
+    normalizationBranch:
+    - already-in-range return
+    - negative remainder off < 0
+    - positive nonzero remainder
+    - off == 0 with positive source
+    boundaryRelation:
+    - exact endpoints
+    - one representable step outside each endpoint
+    - farther outside after one or more turns
+    longitudeMagnitude:
+    - zero and small magnitudes
+    - hundreds to thousands of degrees
+    - large finite doubles where addition or remainder precision matters
+    signAndRepresentation:
+    - negative values
+    - positive values
+    - -0.0 and +0.0
+    - endpoint sign aliases
+    followUpPosition:
+    - follow-up remains in the direct-range branch
+    - follow-up crosses above +180
+    - follow-up remains far outside and is reduced by remainder
+  scenarios:
+  - id: IN_RANGE_INTERIOR_VALUES
+    category: NORMAL
+    description: Source longitudes strictly inside the documented -180..180 interval,
+      away from both endpoints; the source uses the common-case return while the follow-up
+      is one turn above the range.
+    preconditions:
+    - sourceLongitude is one of -179.0, -45.0, 0.0, 45.0, or 179.0.
+    - -180.0 < sourceLongitude and sourceLongitude < 180.0.
+    - followUpLongitude equals sourceLongitude + 360.0 and is greater than 180.0.
+    expectedSourceBehavior:
+    - normLonDEG(sourceLongitude) returns the source value unchanged through the first
+      if branch.
+    - normLonDEG(followUpLongitude) takes the out-of-range path and identifies the
+      same longitude as the unchanged source result.
+    - Values near both signs of the interior exercise the positive and negative sides
+      without relying on endpoint aliasing.
+    targetCases: 5
+    emptyOutputAllowed: false
+  - id: EXACT_ENDPOINT_MINUS_180
+    category: BOUNDARY
+    description: Source is the lower inclusive endpoint, whose follow-up is +180 and
+      therefore enters the direct-range branch as the other documented endpoint alias.
+    preconditions:
+    - sourceLongitude equals -180.0 exactly.
+    - followUpLongitude equals 180.0 exactly.
+    expectedSourceBehavior:
+    - The source result is -180.0 and is returned unchanged.
+    - The follow-up result is +180.0 and is returned unchanged.
+    - The two results are accepted as the same globe position because the API explicitly
+      treats both endpoints as valid representations of the same spot.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EXACT_ENDPOINT_PLUS_180
+    category: BOUNDARY
+    description: Source is the upper inclusive endpoint; adding one turn produces
+      540 and exercises the positive out-of-range reduction.
+    preconditions:
+    - sourceLongitude equals 180.0 exactly.
+    - followUpLongitude equals 540.0 exactly.
+    expectedSourceBehavior:
+    - The source result is +180.0 through the direct-range branch.
+    - The follow-up result is reduced from outside the range and is +180.0.
+    - The relation holds without requiring a -180/+180 alias conversion.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: JUST_BELOW_LOWER_ENDPOINT
+    category: EDGE
+    description: Source is the first representable double below -180, exercising the
+      negative-remainder path immediately outside the lower boundary.
+    preconditions:
+    - sourceLongitude equals -180.0 - Math.ulp(180.0).
+    - sourceLongitude is less than -180.0.
+    - followUpLongitude equals sourceLongitude + 360.0 and is greater than 180.0.
+    expectedSourceBehavior:
+    - The source bypasses the direct-range branch.
+    - Its remainder off is negative, so the method returns 180.0 + off, just below
+      +180.0.
+    - The follow-up reduces to the same longitude modulo 360, subject to double rounding.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: JUST_ABOVE_UPPER_ENDPOINT
+    category: EDGE
+    description: Source is the first representable double above +180, exercising the
+      positive nonzero-remainder path immediately outside the upper boundary.
+    preconditions:
+    - sourceLongitude equals 180.0 + Math.ulp(180.0).
+    - sourceLongitude is greater than 180.0.
+    - followUpLongitude equals sourceLongitude + 360.0 and is greater than 540.0.
+    expectedSourceBehavior:
+    - The source bypasses the direct-range branch.
+    - Its positive nonzero remainder causes the return -180.0 + off, just above -180.0.
+    - The follow-up identifies the same longitude after one additional full turn.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_REMAINDER_OUTSIDE
+    category: NORMAL
+    description: Positive out-of-range values whose shifted remainder is positive
+      and nonzero, producing an output near the opposite signed boundary.
+    preconditions:
+    - sourceLongitude is one of 181.0, 270.0, or 359.0.
+    - sourceLongitude is greater than 180.0 and is not congruent to 180 modulo 360.
+    - followUpLongitude equals sourceLongitude + 360.0.
+    expectedSourceBehavior:
+    - The source takes the out-of-range path with off greater than 0.
+    - The result is -180.0 + off and lies in (-180.0, 180.0).
+    - The follow-up follows the same positive-remainder behavior for the same modulo-360
+      longitude.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: NEGATIVE_REMAINDER_OUTSIDE
+    category: NORMAL
+    description: Negative out-of-range values whose shifted remainder is negative,
+      producing a result near the positive side of the range.
+    preconditions:
+    - sourceLongitude is one of -181.0, -270.0, or -359.0.
+    - sourceLongitude is less than -180.0.
+    - followUpLongitude equals sourceLongitude + 360.0.
+    expectedSourceBehavior:
+    - The source takes the out-of-range path with off less than 0.
+    - The result is 180.0 + off and lies in (-180.0, 180.0).
+    - The follow-up has the same normalized globe position after one full turn.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: POSITIVE_SEAM_REMAINDER_ZERO
+    category: EDGE
+    description: Positive values congruent to +180 modulo 360, exercising the explicit
+      off == 0 and sourceLongitude > 0 sentinel path.
+    preconditions:
+    - sourceLongitude is one of 540.0, 900.0, or 360180.0.
+    - sourceLongitude is greater than 180.0.
+    - (sourceLongitude + 180.0) % 360.0 equals 0.0.
+    - followUpLongitude equals sourceLongitude + 360.0.
+    expectedSourceBehavior:
+    - The source bypasses the direct-range branch.
+    - The explicit off == 0 and positive-source condition returns +180.0.
+    - The follow-up also normalizes to +180.0, preserving the endpoint representation
+      and globe position.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: NEGATIVE_SEAM_AND_NEGATIVE_MULTIPLE_PATHS
+    category: EDGE
+    description: Negative values at distinct remainder sentinels, including a negative
+      exact remainder zero and a negative remainder of -180.
+    preconditions:
+    - sourceLongitude is one of -540.0, -360.0, or -720.0.
+    - sourceLongitude is less than -180.0.
+    - followUpLongitude equals sourceLongitude + 360.0.
+    expectedSourceBehavior:
+    - -540.0 exercises off == -0.0, which is not less than zero and does not satisfy
+      the positive-source special case, yielding -180.0.
+    - -360.0 and -720.0 exercise a negative off of -180.0 and yield 0.0.
+    - Each follow-up remains equivalent modulo 360, including the distinct -180 and
+      0 normalized results for their respective source positions.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: SIGNED_ZERO
+    category: EDGE
+    description: Both signed zero representations exercise the in-range identity return
+      and the observable sign change caused by adding 360.
+    preconditions:
+    - sourceLongitude is either -0.0 or +0.0.
+    - -180.0 <= sourceLongitude and sourceLongitude <= 180.0.
+    - followUpLongitude equals sourceLongitude + 360.0 and is +360.0.
+    expectedSourceBehavior:
+    - normLonDEG(sourceLongitude) returns the source zero representation unchanged
+      because zero is in range.
+    - normLonDEG(360.0) follows the positive nonzero-remainder path and returns +0.0.
+    - The source and follow-up denote the same longitude even if a test records the
+      sign bit separately.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: MULTI_TURN_FINITE_MAGNITUDES
+    category: NORMAL
+    description: Finite longitudes several turns from the normal interval, checking
+      reduction after substantial positive and negative offsets rather than only one-turn
+      examples.
+    preconditions:
+    - sourceLongitude is one of 1080.5, -1080.5, 1000000.25, or -1000000.25.
+    - Absolute sourceLongitude is greater than 720.0.
+    - followUpLongitude equals sourceLongitude + 360.0 and is finite.
+    expectedSourceBehavior:
+    - The source uses the remainder-based path rather than the common-case return.
+    - The normalized result is within the documented inclusive range.
+    - The follow-up result represents the same modulo-360 longitude, with comparison
+      accounting for the endpoint aliases and finite floating-point rounding.
+    targetCases: 4
+    emptyOutputAllowed: false
+  - id: LARGE_FINITE_PRECISION_VALUES
+    category: EDGE
+    description: Very large but finite doubles probe the implementation's Java remainder
+      and addition precision, including values for which adding 360 may be rounded
+      at the source magnitude.
+    preconditions:
+    - sourceLongitude is one of 9007199254740992.0, -9007199254740992.0, Double.MAX_VALUE,
+      or -Double.MAX_VALUE.
+    - sourceLongitude is finite and outside [-180.0, 180.0].
+    - followUpLongitude equals the Java double expression sourceLongitude + 360.0
+      and is finite.
+    expectedSourceBehavior:
+    - Both invocations complete through the finite remainder-based path and produce
+      a result in the method's documented range.
+    - If sourceLongitude + 360.0 rounds to the same representable double as sourceLongitude,
+      the relation is still checked against that actual follow-up value rather than
+      an idealized decimal value.
+    - The oracle compares globe position modulo 360 and does not require bitwise equality
+      when floating-point remainder precision or endpoint representation differs.
+    targetCases: 4
+    emptyOutputAllowed: false

@@ -1,0 +1,424 @@
+InputDomain:
+  summary: Valid non-geo CircleImpl/Rectangle inputs whose source and jointly translated
+    follow-up coordinates are accepted by the same SpatialContext. Cases target the
+    bounding-box shortcut, the bounding-box equality exception, phase-2 closest/farthest-corner
+    decisions, degenerate shapes, tangencies, and empty-shape sentinel representations
+    where the MR can reconstruct them.
+  globalConstraints:
+  - Use a flat, non-geo SpatialContext; neither source nor follow-up rectangles may
+    use antimeridian-crossing or world-wrap coordinate semantics.
+  - Circle center coordinates, rectangle min/max coordinates, radius, and all values
+    after adding SHIFT_X=17.5 and SHIFT_Y=-9.25 must be finite and accepted by the
+    source circle context.
+  - For non-empty rectangles, minX <= maxX and minY <= maxY; degenerate point and
+    line rectangles with equality on either axis are included.
+  - For non-empty circles, radius is finite, radius >= 0, and is within the distance
+    bounds accepted by the SpatialContext used to construct CircleImpl.
+  - Source rectangle and source circle must use coordinate values for which the follow-up
+    constructors in generateFollowUp succeed using circle.getContext().
+  - Empty-circle and empty-rectangle cases are included only when their source sentinel
+    coordinates can be passed through generateFollowUp and reconstructed by context.makePoint
+    and RectangleImpl without construction failure; unsupported empty encodings are
+    excluded because the supplied MR explicitly reconstructs both shapes from their
+    coordinates.
+  diversity:
+    boundingBoxRelation:
+    - DISJOINT
+    - WITHIN
+    - CONTAINS
+    - INTERSECTS
+    - CONTAINS_WITH_EQUAL_RECTANGLE
+    phase2Geometry:
+    - center_outside_both_axes_closest_corner_outside_circle
+    - center_outside_both_axes_closest_corner_on_circle
+    - rectangle_spans_x_axis
+    - rectangle_spans_y_axis
+    - rectangle_spans_both_axes
+    - farthest_corner_inside_circle
+    - farthest_corner_on_circle
+    - farthest_corner_outside_circle
+    - equal_distance_x_farthest_selection
+    - equal_distance_y_farthest_selection
+    shapeDegeneracy:
+    - positive_radius_circle
+    - zero_radius_circle
+    - area_rectangle
+    - point_rectangle
+    - vertical_line_rectangle
+    - horizontal_line_rectangle
+    - empty_circle_if_reconstructible
+    - empty_rectangle_if_reconstructible
+    expectedRelations:
+    - DISJOINT
+    - WITHIN
+    - CONTAINS
+    - INTERSECTS
+  scenarios:
+  - id: BBOX_DISJOINT
+    category: NORMAL
+    description: Circle enclosing box is disjoint from the rectangle.
+    preconditions:
+    - circle.isEmpty() is false
+    - circle.getBoundingBox().relate(rectangle) == SpatialRelation.DISJOINT
+    expectedSourceBehavior:
+    - relate(rectangle) returns SpatialRelation.DISJOINT through the bounding-box
+      shortcut
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BBOX_WITHIN_RECTANGLE
+    category: NORMAL
+    description: The complete circle enclosing box is within a larger rectangle.
+    preconditions:
+    - circle.isEmpty() is false
+    - circle.getBoundingBox().relate(rectangle) == SpatialRelation.WITHIN
+    - circle.getBoundingBox().equals(rectangle) is false
+    expectedSourceBehavior:
+    - relate(rectangle) returns SpatialRelation.WITHIN through the bounding-box shortcut
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BBOX_EQUALS_RECTANGLE_IDENTITY_EXCEPTION
+    category: EDGE
+    description: Rectangle has exactly the same coordinates as the circle cached enclosing
+      box.
+    preconditions:
+    - circle.isEmpty() is false
+    - rectangle.equals(circle.getBoundingBox()) is true
+    - circle.getBoundingBox().relate(rectangle) == SpatialRelation.CONTAINS
+    expectedSourceBehavior:
+    - relate(rectangle) returns SpatialRelation.WITHIN via the explicit enclosingBox.equals(rectangle)
+      exception
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BBOX_CONTAINS_RECTANGLE_FULLY_INSIDE_CIRCLE
+    category: NORMAL
+    description: Rectangle is inside the circle bounding box and its phase-2 farthest
+      corner is in the circle.
+    preconditions:
+    - circle.isEmpty() is false
+    - circle.getBoundingBox().relate(rectangle) == SpatialRelation.CONTAINS
+    - rectangle.equals(circle.getBoundingBox()) is false
+    - circle.contains(rectangle.getMinX(), rectangle.getMinY()) is true
+    - circle.contains(rectangle.getMinX(), rectangle.getMaxY()) is true
+    - circle.contains(rectangle.getMaxX(), rectangle.getMinY()) is true
+    - circle.contains(rectangle.getMaxX(), rectangle.getMaxY()) is true
+    expectedSourceBehavior:
+    - relate(rectangle) returns SpatialRelation.CONTAINS after the farthest-point
+      containment check
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BBOX_CONTAINS_RECTANGLE_FARTHEST_CORNER_OUTSIDE
+    category: NORMAL
+    description: Rectangle is contained by the enclosing box but extends outside the
+      circular boundary.
+    preconditions:
+    - circle.isEmpty() is false
+    - circle.getBoundingBox().relate(rectangle) == SpatialRelation.CONTAINS
+    - rectangle.equals(circle.getBoundingBox()) is false
+    - at least one rectangle corner is contained by circle
+    - at least one rectangle corner is not contained by circle
+    expectedSourceBehavior:
+    - relate(rectangle) returns SpatialRelation.INTERSECTS after phase 2 rejects the
+      farthest corner
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BBOX_CONTAINS_CORNER_RECTANGLE_OUTSIDE_CIRCLE
+    category: NORMAL
+    description: A small rectangle lies in a bounding-box corner outside the circle,
+      with the center outside both rectangle axes.
+    preconditions:
+    - circle.isEmpty() is false
+    - circle.getBoundingBox().relate(rectangle) == SpatialRelation.CONTAINS
+    - circle.getCenter().getX() < rectangle.getMinX() or circle.getCenter().getX()
+      > rectangle.getMaxX()
+    - circle.getCenter().getY() < rectangle.getMinY() or circle.getCenter().getY()
+      > rectangle.getMaxY()
+    - the rectangle corner closest to circle.getCenter() is not contained by circle
+    expectedSourceBehavior:
+    - relate(rectangle) returns SpatialRelation.DISJOINT from the phase-2 closest-corner
+      test
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BBOX_INTERSECTS_CORNER_RECTANGLE_OUTSIDE_CIRCLE
+    category: NORMAL
+    description: Bounding boxes overlap at a corner although the rectangle itself
+      is outside the circle.
+    preconditions:
+    - circle.isEmpty() is false
+    - circle.getBoundingBox().relate(rectangle) == SpatialRelation.INTERSECTS
+    - circle.getCenter().getX() < rectangle.getMinX() or circle.getCenter().getX()
+      > rectangle.getMaxX()
+    - circle.getCenter().getY() < rectangle.getMinY() or circle.getCenter().getY()
+      > rectangle.getMaxY()
+    - the rectangle corner closest to circle.getCenter() is not contained by circle
+    expectedSourceBehavior:
+    - relate(rectangle) returns SpatialRelation.DISJOINT despite intersecting enclosing
+      boxes
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BBOX_INTERSECTS_CORNER_TANGENCY
+    category: BOUNDARY
+    description: The nearest rectangle corner lies exactly on the circle boundary
+      while both axes are outside the rectangle.
+    preconditions:
+    - circle.isEmpty() is false
+    - circle.getBoundingBox().relate(rectangle) == SpatialRelation.INTERSECTS
+    - circle.getCenter().getX() < rectangle.getMinX() or circle.getCenter().getX()
+      > rectangle.getMaxX()
+    - circle.getCenter().getY() < rectangle.getMinY() or circle.getCenter().getY()
+      > rectangle.getMaxY()
+    - the closest rectangle corner is contained by circle
+    - the closest rectangle corner has context distance from circle.getCenter() equal
+      to circle.getRadius()
+    expectedSourceBehavior:
+    - relate(rectangle) returns SpatialRelation.INTERSECTS rather than DISJOINT
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BBOX_INTERSECTS_RECTANGLE_SPANS_X_AXIS
+    category: NORMAL
+    description: Rectangle spans the circle x-axis but not the circle y-axis.
+    preconditions:
+    - circle.isEmpty() is false
+    - circle.getBoundingBox().relate(rectangle) == SpatialRelation.INTERSECTS
+    - rectangle.getMinX() <= circle.getCenter().getX()
+    - circle.getCenter().getX() <= rectangle.getMaxX()
+    - circle.getCenter().getY() < rectangle.getMinY() or circle.getCenter().getY()
+      > rectangle.getMaxY()
+    expectedSourceBehavior:
+    - relate(rectangle) returns SpatialRelation.INTERSECTS without taking the both-axes-outside
+      closest-corner disjoint return
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BBOX_INTERSECTS_RECTANGLE_SPANS_Y_AXIS
+    category: NORMAL
+    description: Rectangle spans the circle y-axis but not the circle x-axis.
+    preconditions:
+    - circle.isEmpty() is false
+    - circle.getBoundingBox().relate(rectangle) == SpatialRelation.INTERSECTS
+    - rectangle.getMinY() <= circle.getCenter().getY()
+    - circle.getCenter().getY() <= rectangle.getMaxY()
+    - circle.getCenter().getX() < rectangle.getMinX() or circle.getCenter().getX()
+      > rectangle.getMaxX()
+    expectedSourceBehavior:
+    - relate(rectangle) returns SpatialRelation.INTERSECTS without taking the both-axes-outside
+      closest-corner disjoint return
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BBOX_INTERSECTS_RECTANGLE_CONTAINS_CENTER
+    category: NORMAL
+    description: Rectangle contains the circle center but does not contain the entire
+      enclosing box.
+    preconditions:
+    - circle.isEmpty() is false
+    - circle.getBoundingBox().relate(rectangle) == SpatialRelation.INTERSECTS
+    - rectangle.getMinX() <= circle.getCenter().getX()
+    - circle.getCenter().getX() <= rectangle.getMaxX()
+    - rectangle.getMinY() <= circle.getCenter().getY()
+    - circle.getCenter().getY() <= rectangle.getMaxY()
+    expectedSourceBehavior:
+    - relate(rectangle) returns SpatialRelation.INTERSECTS
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FARTHEST_X_DISTANCE_TIE_CONTAINED
+    category: BOUNDARY
+    description: Circle center is exactly midway between rectangle minX and maxX,
+      exercising the false side of the strict farthest-X comparison.
+    preconditions:
+    - circle.isEmpty() is false
+    - circle.getBoundingBox().relate(rectangle) == SpatialRelation.CONTAINS
+    - rectangle.getMaxX() - circle.getCenter().getX() == circle.getCenter().getX()
+      - rectangle.getMinX()
+    - all four rectangle corners are contained by circle
+    expectedSourceBehavior:
+    - relate(rectangle) returns SpatialRelation.CONTAINS with farthestX selected as
+      rectangle.getMinX()
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FARTHEST_Y_DISTANCE_TIE_CONTAINED
+    category: BOUNDARY
+    description: Circle center is exactly midway between rectangle minY and maxY,
+      exercising the false side of the strict farthest-Y comparison.
+    preconditions:
+    - circle.isEmpty() is false
+    - circle.getBoundingBox().relate(rectangle) == SpatialRelation.CONTAINS
+    - rectangle.getMaxY() - circle.getCenter().getY() == circle.getCenter().getY()
+      - rectangle.getMinY()
+    - all four rectangle corners are contained by circle
+    expectedSourceBehavior:
+    - relate(rectangle) returns SpatialRelation.CONTAINS with farthestY selected as
+      rectangle.getMinY()
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FARTHEST_CORNER_CIRCLE_TANGENCY
+    category: BOUNDARY
+    description: The phase-2 farthest rectangle corner is exactly on the circle boundary.
+    preconditions:
+    - circle.isEmpty() is false
+    - circle.getBoundingBox().relate(rectangle) == SpatialRelation.CONTAINS
+    - the farthest rectangle corner selected from the center is contained by circle
+    - the selected farthest corner has context distance from circle.getCenter() equal
+      to circle.getRadius()
+    expectedSourceBehavior:
+    - relate(rectangle) returns SpatialRelation.CONTAINS
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_RADIUS_POINT_RECTANGLE_INSIDE
+    category: EDGE
+    description: Degenerate rectangle is a point strictly inside a positive-radius
+      circle.
+    preconditions:
+    - circle.isEmpty() is false
+    - circle.getRadius() > 0
+    - rectangle.getMinX() == rectangle.getMaxX()
+    - rectangle.getMinY() == rectangle.getMaxY()
+    - circle.getBoundingBox().relate(rectangle) == SpatialRelation.CONTAINS
+    - circle.contains(rectangle.getMinX(), rectangle.getMinY()) is true
+    expectedSourceBehavior:
+    - relate(rectangle) returns SpatialRelation.CONTAINS
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_RADIUS_POINT_RECTANGLE_OUTSIDE_INSIDE_BBOX
+    category: EDGE
+    description: Degenerate rectangle is a point in an enclosing-box corner but outside
+      the positive-radius circle.
+    preconditions:
+    - circle.isEmpty() is false
+    - circle.getRadius() > 0
+    - rectangle.getMinX() == rectangle.getMaxX()
+    - rectangle.getMinY() == rectangle.getMaxY()
+    - circle.getBoundingBox().relate(rectangle) == SpatialRelation.CONTAINS
+    - circle.contains(rectangle.getMinX(), rectangle.getMinY()) is false
+    expectedSourceBehavior:
+    - relate(rectangle) returns SpatialRelation.DISJOINT through the closest-point
+      test
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_RADIUS_POINT_RECTANGLE_TANGENT
+    category: BOUNDARY
+    description: Degenerate point rectangle is exactly on the circle boundary.
+    preconditions:
+    - circle.isEmpty() is false
+    - circle.getRadius() > 0
+    - rectangle.getMinX() == rectangle.getMaxX()
+    - rectangle.getMinY() == rectangle.getMaxY()
+    - circle.contains(rectangle.getMinX(), rectangle.getMinY()) is true
+    - the point has context distance from circle.getCenter() equal to circle.getRadius()
+    expectedSourceBehavior:
+    - relate(rectangle) returns a non-DISJOINT relation
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: VERTICAL_LINE_RECTANGLE_CROSSES_CIRCLE
+    category: EDGE
+    description: Degenerate vertical line rectangle spans the circle y-axis and intersects
+      the circle.
+    preconditions:
+    - circle.isEmpty() is false
+    - circle.getRadius() > 0
+    - rectangle.getMinX() == rectangle.getMaxX()
+    - rectangle.getMinY() < rectangle.getMaxY()
+    - rectangle.getMinY() <= circle.getCenter().getY()
+    - circle.getCenter().getY() <= rectangle.getMaxY()
+    - circle.getBoundingBox().relate(rectangle) == SpatialRelation.INTERSECTS
+    expectedSourceBehavior:
+    - relate(rectangle) returns SpatialRelation.INTERSECTS
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: HORIZONTAL_LINE_RECTANGLE_CROSSES_CIRCLE
+    category: EDGE
+    description: Degenerate horizontal line rectangle spans the circle x-axis and
+      intersects the circle.
+    preconditions:
+    - circle.isEmpty() is false
+    - circle.getRadius() > 0
+    - rectangle.getMinY() == rectangle.getMaxY()
+    - rectangle.getMinX() < rectangle.getMaxX()
+    - rectangle.getMinX() <= circle.getCenter().getX()
+    - circle.getCenter().getX() <= rectangle.getMaxX()
+    - circle.getBoundingBox().relate(rectangle) == SpatialRelation.INTERSECTS
+    expectedSourceBehavior:
+    - relate(rectangle) returns SpatialRelation.INTERSECTS
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_RADIUS_EQUAL_POINT_RECTANGLE
+    category: EDGE
+    description: Zero-radius circle and point rectangle have identical center and
+      enclosing-box coordinates.
+    preconditions:
+    - circle.isEmpty() is false
+    - circle.getRadius() == 0.0
+    - rectangle.getMinX() == rectangle.getMaxX()
+    - rectangle.getMinY() == rectangle.getMaxY()
+    - rectangle.equals(circle.getBoundingBox()) is true
+    expectedSourceBehavior:
+    - relate(rectangle) returns SpatialRelation.WITHIN through the enclosing-box equality
+      exception
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_RADIUS_INSIDE_AREA_RECTANGLE
+    category: EDGE
+    description: Zero-radius circle center is strictly inside a non-degenerate rectangle.
+    preconditions:
+    - circle.isEmpty() is false
+    - circle.getRadius() == 0.0
+    - rectangle.getMinX() < circle.getCenter().getX()
+    - circle.getCenter().getX() < rectangle.getMaxX()
+    - rectangle.getMinY() < circle.getCenter().getY()
+    - circle.getCenter().getY() < rectangle.getMaxY()
+    expectedSourceBehavior:
+    - relate(rectangle) returns SpatialRelation.WITHIN through the bounding-box shortcut
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_RADIUS_DISJOINT_RECTANGLE
+    category: EDGE
+    description: Zero-radius circle point and rectangle enclosing box are disjoint.
+    preconditions:
+    - circle.isEmpty() is false
+    - circle.getRadius() == 0.0
+    - circle.getBoundingBox().relate(rectangle) == SpatialRelation.DISJOINT
+    expectedSourceBehavior:
+    - relate(rectangle) returns SpatialRelation.DISJOINT
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_RADIUS_BOUNDARY_OF_RECTANGLE
+    category: BOUNDARY
+    description: Zero-radius circle center lies on a rectangle boundary but rectangle
+      is not equal to the point bounding box.
+    preconditions:
+    - circle.isEmpty() is false
+    - circle.getRadius() == 0.0
+    - rectangle.equals(circle.getBoundingBox()) is false
+    - circle.getCenter().getX() == rectangle.getMinX() or circle.getCenter().getX()
+      == rectangle.getMaxX() or circle.getCenter().getY() == rectangle.getMinY() or
+      circle.getCenter().getY() == rectangle.getMaxY()
+    - rectangle.getMinX() <= circle.getCenter().getX()
+    - circle.getCenter().getX() <= rectangle.getMaxX()
+    - rectangle.getMinY() <= circle.getCenter().getY()
+    - circle.getCenter().getY() <= rectangle.getMaxY()
+    expectedSourceBehavior:
+    - relate(rectangle) returns a non-DISJOINT relation
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EMPTY_CIRCLE_RECONSTRUCTIBLE
+    category: EDGE
+    description: Empty circle sentinel is tested only when the MR can reconstruct
+      its center and shifted enclosing rectangle values.
+    preconditions:
+    - circle.isEmpty() is true
+    - generateFollowUp(circle, rectangle) completes without construction failure
+    - rectangle.isEmpty() is false
+    expectedSourceBehavior:
+    - source invocation completes and produces a SpatialRelation determined by the
+      cached empty enclosing box and rectangle relation
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EMPTY_RECTANGLE_RECONSTRUCTIBLE
+    category: EDGE
+    description: Empty rectangle sentinel is tested only when its min/max coordinates
+      survive follow-up RectangleImpl reconstruction.
+    preconditions:
+    - circle.isEmpty() is false
+    - rectangle.isEmpty() is true
+    - generateFollowUp(circle, rectangle) completes without construction failure
+    expectedSourceBehavior:
+    - source invocation completes and produces a SpatialRelation from enclosingBox.relate(rectangle)
+    targetCases: 1
+    emptyOutputAllowed: false

@@ -15,11 +15,17 @@ public final class SutContext {
     private final Path classFile;
     private final String classSource;
     private final List<SourceFile> supportFiles;
+    private final String apiDescription;
 
     public SutContext(Path classFile, String classSource, List<SourceFile> supportFiles) {
+        this(classFile, classSource, supportFiles, "");
+    }
+
+    public SutContext(Path classFile, String classSource, List<SourceFile> supportFiles, String apiDescription) {
         this.classFile = classFile;
         this.classSource = classSource == null ? "" : classSource;
         this.supportFiles = Collections.unmodifiableList(new ArrayList<>(supportFiles));
+        this.apiDescription = apiDescription == null ? "" : apiDescription;
     }
 
     public Path classFile() {
@@ -32,6 +38,10 @@ public final class SutContext {
 
     public List<SourceFile> supportFiles() {
         return supportFiles;
+    }
+
+    public String apiDescription() {
+        return apiDescription;
     }
 
     /**

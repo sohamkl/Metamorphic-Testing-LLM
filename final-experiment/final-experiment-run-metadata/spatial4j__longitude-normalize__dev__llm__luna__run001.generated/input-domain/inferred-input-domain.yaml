@@ -1,0 +1,262 @@
+InputDomain:
+  summary: Finite IEEE-754 longitude values exercising the in-range fast path, both
+    modulo-sign branches, positive-multiple sentinels, boundary values, signed zero,
+    large magnitudes, floating-point precision limits, and the supplied follow-up
+    transformation longitude + 360.0.
+  globalConstraints:
+  - Each source input is one finite IEEE-754 double; NaN and infinities are excluded
+    because they are not finite longitude values and the supplied metamorphic relation
+    is defined for longitude shifting rather than non-finite arithmetic.
+  - The follow-up input is generated exactly as sourceInput + 360.0.
+  - Every source case is evaluated independently with normLonDEG(sourceInput), normLonDEG(sourceInput
+    + 360.0), and the supplied assertion using a 1e-9 degree tolerance.
+  - Source inputs may be far outside [-180.0, 180.0]; no finite magnitude class is
+    excluded merely because it is inconvenient to transform.
+  diversity:
+    numericClass:
+    - negative_zero
+    - zero
+    - negative_finite
+    - positive_finite
+    sourceRange:
+    - inside_closed_interval
+    - just_below_minus_180
+    - just_above_180
+    - multiple_revolutions
+    - very_large_finite
+    - near_positive_overflow
+    sourceBranch:
+    - in_range_return_as_is
+    - negative_remainder_branch
+    - positive_nonzero_remainder_branch
+    - positive_zero_remainder_sentinel
+    - negative_zero_remainder_fallback
+    boundaryRelation:
+    - ordinary_equal_outputs
+    - antimeridian_representation_pair
+    - exact_range_endpoint
+    - just_outside_range
+    precisionScale:
+    - ordinary_degree_scale
+    - sub_degree_offset
+    - ulp_scale_near_180
+    - multi_trillion_degree_scale
+    followUpArithmetic:
+    - ordinary_finite_shift
+    - rounded_finite_shift
+    - positive_infinity_overflow
+  scenarios:
+  - id: INTERIOR_IN_RANGE_VALUES
+    category: NORMAL
+    description: Finite longitudes strictly between -180 and 180, including ordinary
+      positive and negative fractional values.
+    preconditions:
+    - -180.0 < longitudeDeg and longitudeDeg < 180.0.
+    - longitudeDeg is not zero and is not within 1e-9 degrees of either antimeridian
+      endpoint.
+    expectedSourceBehavior:
+    - The first condition in normLonDEG is true.
+    - The source result is exactly the input value, avoiding modulo arithmetic and
+      its associated precision shift.
+    - The follow-up is shifted by one full revolution and should normalize to the
+      same longitude within the supplied tolerance.
+    targetCases: 4
+    emptyOutputAllowed: false
+  - id: CLOSED_RANGE_ENDPOINTS
+    category: BOUNDARY
+    description: The two documented inclusive endpoints of the normalized interval.
+    preconditions:
+    - longitudeDeg is exactly -180.0 or exactly 180.0.
+    expectedSourceBehavior:
+    - The in-range fast path returns the endpoint unchanged.
+    - The source and follow-up results are both recognized by the supplied assertion
+      as antimeridian representations, even when one is -180.0 and the other is 180.0.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: SIGNED_ZERO_IN_RANGE
+    category: EDGE
+    description: Positive zero and negative zero, which both satisfy the in-range
+      test but can retain different IEEE-754 sign bits.
+    preconditions:
+    - longitudeDeg is +0.0 or -0.0, tested by raw IEEE-754 sign rather than numeric
+      inequality.
+    expectedSourceBehavior:
+    - The in-range fast path returns the zero value as supplied, without modulo arithmetic.
+    - The follow-up input is numerically 360.0 and normalizes to zero; the supplied
+      relation compares the results as equal because their numeric difference is zero.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: JUST_OUTSIDE_POSITIVE_BOUND
+    category: BOUNDARY
+    description: Positive values immediately above 180 degrees, including values at
+      ordinary and sub-degree resolution.
+    preconditions:
+    - longitudeDeg > 180.0.
+    - longitudeDeg < 181.0.
+    expectedSourceBehavior:
+    - The in-range condition is false.
+    - longitudeDeg + 180.0 is positive and its remainder modulo 360.0 is positive
+      and nonzero for the selected ordinary cases.
+    - The result follows the positive nonzero remainder path, -180.0 + off, and lies
+      just below 180.0.
+    - Adding 360.0 should produce the same normalized result within 1e-9 degrees.
+    targetCases: 4
+    emptyOutputAllowed: false
+  - id: JUST_OUTSIDE_NEGATIVE_BOUND
+    category: BOUNDARY
+    description: Negative values immediately below -180 degrees, including values
+      at ordinary and sub-degree resolution.
+    preconditions:
+    - longitudeDeg < -180.0.
+    - longitudeDeg > -181.0.
+    expectedSourceBehavior:
+    - The in-range condition is false.
+    - longitudeDeg + 180.0 is negative and its Java remainder modulo 360.0 is negative
+      and nonzero.
+    - The result follows the negative remainder path, 180.0 + off, and lies just above
+      -180.0.
+    - Adding 360.0 should preserve the normalized result within 1e-9 degrees.
+    targetCases: 4
+    emptyOutputAllowed: false
+  - id: POSITIVE_EXACT_REVOLUTION_SENTINELS
+    category: EDGE
+    description: Positive out-of-range values whose shifted modulo expression has
+      zero remainder.
+    preconditions:
+    - longitudeDeg is a positive multiple of 360.0.
+    - longitudeDeg > 180.0, with representative values such as 360.0, 720.0, and 1080.0.
+    expectedSourceBehavior:
+    - The in-range condition is false.
+    - (longitudeDeg + 180.0) % 360.0 is exactly zero.
+    - Because longitudeDeg > 0.0, the off == 0.0 && longitudeDeg > 0.0 sentinel returns
+      180.0 rather than -180.0.
+    - The follow-up also remains on the positive antimeridian representation and satisfies
+      the special antimeridian allowance when applicable.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: NEGATIVE_EXACT_REVOLUTION_SENTINELS
+    category: EDGE
+    description: Negative out-of-range values aligned with complete revolutions.
+    preconditions:
+    - longitudeDeg is a negative multiple of 360.0.
+    - longitudeDeg < -180.0, with representative values such as -360.0, -720.0, and
+      -1080.0.
+    expectedSourceBehavior:
+    - The in-range condition is false.
+    - The modulo result is zero with the sign behavior of a negative dividend.
+    - The positive-input sentinel condition is false, so the fallback expression returns
+      the negative antimeridian representation -180.0.
+    - The follow-up remains an antimeridian result and is accepted by the supplied
+      antimeridian equivalence.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: POSITIVE_NONMULTIPLE_REMAINDERS
+    category: NORMAL
+    description: Positive longitudes more than 180 degrees from the normal interval
+      with a positive, nonzero modulo remainder.
+    preconditions:
+    - longitudeDeg > 180.0.
+    - longitudeDeg is not a multiple of 360.0.
+    - (longitudeDeg + 180.0) % 360.0 > 0.0.
+    expectedSourceBehavior:
+    - The method uses the positive nonzero remainder branch and returns -180.0 + off.
+    - The result is in [-180.0, 180.0] and is not produced by the in-range fast path.
+    - The follow-up result matches the source result within 1e-9 degrees, except that
+      antimeridian representations are accepted by the supplied special case.
+    targetCases: 4
+    emptyOutputAllowed: false
+  - id: NEGATIVE_NONMULTIPLE_REMAINDERS
+    category: NORMAL
+    description: Negative longitudes more than 180 degrees from the normal interval
+      with a negative, nonzero modulo remainder.
+    preconditions:
+    - longitudeDeg < -180.0.
+    - longitudeDeg is not a multiple of 360.0.
+    - (longitudeDeg + 180.0) % 360.0 < 0.0.
+    expectedSourceBehavior:
+    - The method uses the negative remainder branch and returns 180.0 + off.
+    - The result is in [-180.0, 180.0] and is not produced by the in-range fast path.
+    - The follow-up result matches the source result within 1e-9 degrees.
+    targetCases: 4
+    emptyOutputAllowed: false
+  - id: ANTIMeridian_REPRESENTATION_CROSSINGS
+    category: EDGE
+    description: Inputs for which the source and follow-up can use opposite numeric
+      representations of the same antimeridian.
+    preconditions:
+    - longitudeDeg is selected from exact antimeridian-producing values including
+      -180.0, 180.0, -540.0, 540.0, and further finite revolution-aligned values.
+    - Both normalized outputs are within 1e-9 degrees of either -180.0 or 180.0.
+    expectedSourceBehavior:
+    - normLonDEG may preserve -180.0 or 180.0 rather than merging them.
+    - The supplied assertion returns successfully through its bothAreAntimeridian
+      exception when the representations differ.
+    targetCases: 4
+    emptyOutputAllowed: false
+  - id: SUBDEGREE_BOUNDARY_OFFSETS
+    category: BOUNDARY
+    description: Values just outside the range and just away from revolution sentinels
+      by measurable fractional offsets.
+    preconditions:
+    - longitudeDeg is one of 180.0 + k, -180.0 - k, 360.0 + k, or -360.0 - k.
+    - k is finite, nonzero, and selected from 1e-12, 1e-9, 1e-6, and 1e-3 degrees
+      where representable.
+    expectedSourceBehavior:
+    - Inputs on opposite sides of the range exercise different signs of the Java remainder.
+    - Nonzero offsets avoid the exact off == 0.0 sentinel and expose whether the modulo
+      arithmetic preserves the offset.
+    - The follow-up relation must hold within the supplied 1e-9-degree tolerance,
+      with the antimeridian exception used when an offset rounds onto an endpoint.
+    targetCases: 4
+    emptyOutputAllowed: false
+  - id: ULPS_NEAR_ANTIMERIDIAN
+    category: EDGE
+    description: Representable neighboring doubles around 180.0 and -180.0, selected
+      using one or two ulps rather than decimal literals alone.
+    preconditions:
+    - longitudeDeg is a finite representable double immediately above 180.0, immediately
+      below 180.0, immediately above -180.0, or immediately below -180.0.
+    - Values are selected with Math.nextUp or Math.nextDown relative to the endpoint.
+    expectedSourceBehavior:
+    - Values inside the interval use the unchanged fast path, while values outside
+      use modulo normalization.
+    - The scenario distinguishes exact endpoint handling from the nearest representable
+      out-of-range behavior.
+    - The follow-up comparison uses the supplied tolerance and antimeridian recognition
+      rather than requiring one canonical endpoint.
+    targetCases: 4
+    emptyOutputAllowed: false
+  - id: LARGE_FINITE_MAGNITUDES
+    category: EDGE
+    description: Very large but finite longitudes spanning magnitudes where adding
+      360.0 can lose low-order bits while modulo remains reachable.
+    preconditions:
+    - longitudeDeg is finite and has absolute value at least 2^40 degrees.
+    - longitudeDeg is selected below the positive overflow threshold for the dedicated
+      overflow scenario.
+    - Representatives include both signs and magnitudes around 2^40, 2^52, and 2^53
+      degrees.
+    expectedSourceBehavior:
+    - The in-range condition is false and the method reaches its modulo path.
+    - The normalized result remains the value produced by the Java double remainder
+      and the corresponding branch, rather than an assumed decimal mathematical remainder.
+    - The follow-up is compared using the supplied 1e-9-degree tolerance, exposing
+      precision effects without changing the specified relation.
+    targetCases: 4
+    emptyOutputAllowed: false
+  - id: POSITIVE_FOLLOWUP_OVERFLOW
+    category: EDGE
+    description: Largest finite positive source values for which adding the required
+      360.0 overflows to positive infinity.
+    preconditions:
+    - longitudeDeg is finite and greater than Double.MAX_VALUE - 360.0, so longitudeDeg
+      + 360.0 evaluates to positive infinity.
+    - longitudeDeg > 180.0.
+    expectedSourceBehavior:
+    - The source call reaches the out-of-range modulo path with a finite source input.
+    - The follow-up call receives positive infinity; the source arithmetic then produces
+      a non-finite modulo intermediate rather than an in-range result.
+    - The supplied assertion is exercised as written, including Java NaN comparison
+      behavior, without imposing an unprovided exception or canonical longitude rule.
+    targetCases: 1
+    emptyOutputAllowed: false

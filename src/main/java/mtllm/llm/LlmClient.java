@@ -8,4 +8,13 @@ package mtllm.llm;
  */
 public interface LlmClient {
     String complete(String prompt) throws Exception;
+
+    /**
+     * Tokens billed across every call this client has made, including repair attempts.
+     *
+     * <p>Defaults to empty so test fakes and any non-OpenAI client keep working unchanged.</p>
+     */
+    default TokenUsage tokenUsage() {
+        return TokenUsage.EMPTY;
+    }
 }

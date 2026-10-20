@@ -12,15 +12,18 @@ import java.util.List;
  * which SUT to test, which method to focus on, what MR to use, and how many examples to ask for.</p>
  */
 public final class PromptConfig {
+    private final Path projectRoot;
+    private final boolean automaticDiscovery;
     private final Path sutClassFile;
     private final String targetFunction;
     private final List<Path> sutSupportFiles;
+    private final List<Path> sutClasspath;
     private final String sutDescription;
     private final String mrInput;
     private final String mrOutput;
     private final String mr;
     private final int count;
-    private final String inputDomain;
+    private final InputDomainRequirements inputDomainRequirements;
     private final String generatedClassName;
     private final GenerationMode mode;
     private final boolean jsonRequired;
@@ -33,17 +36,23 @@ public final class PromptConfig {
     private final Path outputRoot;
     private final int maxRepairAttempts;
     private final InputGenerator inputGenerator;
+    private final List<String> mavenProfiles;
+    private final List<String> randoopTargetClasses;
+    private final String randoopSeedExamples;
 
     public PromptConfig(
+            Path projectRoot,
+            boolean automaticDiscovery,
             Path sutClassFile,
             String targetFunction,
             List<Path> sutSupportFiles,
+            List<Path> sutClasspath,
             String sutDescription,
             String mrInput,
             String mrOutput,
             String mr,
             int count,
-            String inputDomain,
+            InputDomainRequirements inputDomainRequirements,
             String generatedClassName,
             GenerationMode mode,
             boolean jsonRequired,
@@ -55,16 +64,24 @@ public final class PromptConfig {
             String developerAssertMethod,
             Path outputRoot,
             int maxRepairAttempts,
-            InputGenerator inputGenerator) {
+            InputGenerator inputGenerator,
+            List<String> mavenProfiles,
+            List<String> randoopTargetClasses,
+            String randoopSeedExamples) {
+        this.projectRoot = projectRoot;
+        this.automaticDiscovery = automaticDiscovery;
         this.sutClassFile = sutClassFile;
         this.targetFunction = valueOrEmpty(targetFunction);
         this.sutSupportFiles = Collections.unmodifiableList(new ArrayList<>(sutSupportFiles));
+        this.sutClasspath = Collections.unmodifiableList(new ArrayList<>(sutClasspath));
         this.sutDescription = valueOrEmpty(sutDescription);
         this.mrInput = valueOrEmpty(mrInput);
         this.mrOutput = valueOrEmpty(mrOutput);
         this.mr = valueOrEmpty(mr);
         this.count = count;
-        this.inputDomain = valueOrEmpty(inputDomain);
+        this.inputDomainRequirements = inputDomainRequirements == null
+                ? InputDomainRequirements.empty()
+                : inputDomainRequirements;
         this.generatedClassName = valueOrEmpty(generatedClassName).isEmpty()
                 ? "GeneratedMetamorphicTest"
                 : generatedClassName.trim();
@@ -79,10 +96,21 @@ public final class PromptConfig {
         this.outputRoot = outputRoot;
         this.maxRepairAttempts = maxRepairAttempts;
         this.inputGenerator = inputGenerator == null ? InputGenerator.LLM : inputGenerator;
+        this.mavenProfiles = Collections.unmodifiableList(new ArrayList<>(mavenProfiles));
+        this.randoopTargetClasses = Collections.unmodifiableList(new ArrayList<>(randoopTargetClasses));
+        this.randoopSeedExamples = valueOrEmpty(randoopSeedExamples);
     }
 
     public Path sutClassFile() {
         return sutClassFile;
+    }
+
+    public Path projectRoot() {
+        return projectRoot;
+    }
+
+    public boolean automaticDiscovery() {
+        return automaticDiscovery;
     }
 
     public String targetFunction() {
@@ -93,8 +121,22 @@ public final class PromptConfig {
         return sutSupportFiles;
     }
 
+    public List<Path> sutClasspath() {
+        return sutClasspath;
+    }
+
     public String sutDescription() {
         return sutDescription;
+    }
+
+    /** The input-transformation half of the relation, in prose. Blank when the developer owns this half. */
+    public String mrInput() {
+        return mrInput;
+    }
+
+    /** The output-relation half of the relation, in prose. Blank when the developer owns this half. */
+    public String mrOutput() {
+        return mrOutput;
     }
 
     public String metamorphicRelationStatement() {
@@ -112,7 +154,11 @@ public final class PromptConfig {
     }
 
     public String inputDomain() {
-        return inputDomain;
+        return inputDomainRequirements.asText();
+    }
+
+    public InputDomainRequirements inputDomainRequirements() {
+        return inputDomainRequirements;
     }
 
     public String generatedClassName() {
@@ -163,17 +209,32 @@ public final class PromptConfig {
         return inputGenerator;
     }
 
+    public List<String> mavenProfiles() {
+        return mavenProfiles;
+    }
+
+    public List<String> randoopTargetClasses() {
+        return randoopTargetClasses;
+    }
+
+    public String randoopSeedExamples() {
+        return randoopSeedExamples;
+    }
+
     public PromptConfig withOutputMode(GenerationMode newMode, boolean newJsonRequired, boolean newTestSuiteRequired, String newGeneratedClassName) {
         return new PromptConfig(
+                projectRoot,
+                automaticDiscovery,
                 sutClassFile,
                 targetFunction,
                 sutSupportFiles,
+                sutClasspath,
                 sutDescription,
                 mrInput,
                 mrOutput,
                 mr,
                 count,
-                inputDomain,
+                inputDomainRequirements,
                 newGeneratedClassName,
                 newMode,
                 newJsonRequired,
@@ -185,7 +246,134 @@ public final class PromptConfig {
                 developerAssertMethod,
                 outputRoot,
                 maxRepairAttempts,
-                inputGenerator);
+                inputGenerator,
+                mavenProfiles,
+                randoopTargetClasses,
+                randoopSeedExamples);
+    }
+
+    public PromptConfig withRandoopSeedExamples(String newRandoopSeedExamples) {
+        return new PromptConfig(
+                projectRoot,
+                automaticDiscovery,
+                sutClassFile,
+                targetFunction,
+                sutSupportFiles,
+                sutClasspath,
+                sutDescription,
+                mrInput,
+                mrOutput,
+                mr,
+                count,
+                inputDomainRequirements,
+                generatedClassName,
+                mode,
+                jsonRequired,
+                testSuiteRequired,
+                mrProvider,
+                developerMrFile,
+                developerMrSource,
+                developerFollowUpMethod,
+                developerAssertMethod,
+                outputRoot,
+                maxRepairAttempts,
+                inputGenerator,
+                mavenProfiles,
+                randoopTargetClasses,
+                newRandoopSeedExamples);
+    }
+
+    public PromptConfig withInputGenerator(InputGenerator newInputGenerator) {
+        return new PromptConfig(
+                projectRoot,
+                automaticDiscovery,
+                sutClassFile,
+                targetFunction,
+                sutSupportFiles,
+                sutClasspath,
+                sutDescription,
+                mrInput,
+                mrOutput,
+                mr,
+                count,
+                inputDomainRequirements,
+                generatedClassName,
+                mode,
+                jsonRequired,
+                testSuiteRequired,
+                mrProvider,
+                developerMrFile,
+                developerMrSource,
+                developerFollowUpMethod,
+                developerAssertMethod,
+                outputRoot,
+                maxRepairAttempts,
+                newInputGenerator,
+                mavenProfiles,
+                randoopTargetClasses,
+                randoopSeedExamples);
+    }
+
+    public PromptConfig withSutClasspath(List<Path> newSutClasspath) {
+        return new PromptConfig(
+                projectRoot,
+                automaticDiscovery,
+                sutClassFile,
+                targetFunction,
+                sutSupportFiles,
+                newSutClasspath,
+                sutDescription,
+                mrInput,
+                mrOutput,
+                mr,
+                count,
+                inputDomainRequirements,
+                generatedClassName,
+                mode,
+                jsonRequired,
+                testSuiteRequired,
+                mrProvider,
+                developerMrFile,
+                developerMrSource,
+                developerFollowUpMethod,
+                developerAssertMethod,
+                outputRoot,
+                maxRepairAttempts,
+                inputGenerator,
+                mavenProfiles,
+                randoopTargetClasses,
+                randoopSeedExamples);
+    }
+
+    public PromptConfig withInputDomainRequirements(InputDomainRequirements newRequirements) {
+        return new PromptConfig(
+                projectRoot,
+                automaticDiscovery,
+                sutClassFile,
+                targetFunction,
+                sutSupportFiles,
+                sutClasspath,
+                sutDescription,
+                mrInput,
+                mrOutput,
+                mr,
+                count,
+                newRequirements,
+                generatedClassName,
+                mode,
+                jsonRequired,
+                testSuiteRequired,
+                mrProvider,
+                developerMrFile,
+                developerMrSource,
+                developerFollowUpMethod,
+                developerAssertMethod,
+                outputRoot,
+                maxRepairAttempts,
+                inputGenerator,
+                mavenProfiles,
+                randoopTargetClasses,
+                randoopSeedExamples);
     }
 
     private static String valueOrEmpty(String value) {

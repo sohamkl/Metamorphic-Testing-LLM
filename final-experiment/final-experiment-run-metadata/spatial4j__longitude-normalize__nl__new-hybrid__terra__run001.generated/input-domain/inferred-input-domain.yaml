@@ -1,0 +1,328 @@
+InputDomain:
+  summary: Finite IEEE-754 double longitudes for which Java evaluation of arg0 + 360.0
+    preserves an exactly measurable full-turn increment; cases cover the in-range
+    fast return, both out-of-range remainder signs, the positive-wrap +180 sentinel,
+    exact-turn boundaries, signed zero, direct/out-of-range follow-up transitions,
+    and a large precisely incrementable magnitude.
+  globalConstraints:
+  - 'arg0 is a finite double: !Double.isNaN(arg0) && !Double.isInfinite(arg0). NaN
+    and infinities are excluded because the API documents a longitude range and the
+    stated same-spot-on-the-globe relation has no geographic meaning for non-finite
+    values; the implementation would otherwise propagate NaN through %.'
+  - The follow-up is computed using Java double arithmetic as followUp = arg0 + 360.0.
+  - MR-applicable sources satisfy (arg0 + 360.0) - arg0 == 360.0. Finite magnitudes
+    where adding 360.0 is rounded to a different increment or to no change are excluded
+    because the generated follow-up is not representably one full 360-degree turn.
+  - 'Compare source and follow-up normalized results as circular longitudes: numerically
+    equal results are equivalent, and -180.0 and +180.0 are also equivalent because
+    the target method deliberately preserves either endpoint when it is already in
+    range.'
+  - All concrete source values below are exactly representable binary integers or
+    halves, so their stated branch conditions and expected normalized values are measurable
+    without decimal-rounding ambiguity.
+  diversity:
+    controlFlowPartition:
+    - distinct
+    - fast-return condition, negative off condition, positive off==0 sentinel condition,
+      and remaining off condition
+    - in-range; off<0; off==0&&arg0>0; final else
+    rangePosition:
+    - distinct
+    - position relative to -180 and +180
+    - -180 boundary; interior; +180 boundary; just outside either boundary; several
+      turns outside
+    remainderClass:
+    - distinct
+    - (arg0 + 180) % 360 result
+    - -359; -180; -179.5; -1; -0.5; 0; 0.5; 1; 179.5; 180; 196
+    followUpTransition:
+    - distinct
+    - whether arg0 + 360 enters the fast-return range or remains out of range
+    - outer-to-fast-return; fast-return-to-outer; outer-to-outer; fast-return-to-fast-return
+    floatingPointScale:
+    - distinct
+    - source magnitude while retaining an exact representable +360 increment
+    - zero; ordinary longitude-scale values; multi-turn values; +/-2^52
+  scenarios:
+  - id: NEGATIVE_RANGE_ENDPOINT
+    category: BOUNDARY
+    description: Source is the inclusive -180-degree endpoint and takes the common
+      in-range return.
+    preconditions:
+    - arg0 == -180.0
+    expectedSourceBehavior:
+    - Returns arg0 unchanged as -180.0 through the in-range fast return.
+    - Its follow-up is +180.0, so endpoint-equivalent comparison is required rather
+      than raw numeric equality.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_RANGE_ENDPOINT
+    category: BOUNDARY
+    description: Source is the inclusive +180-degree endpoint and takes the common
+      in-range return.
+    preconditions:
+    - arg0 == 180.0
+    expectedSourceBehavior:
+    - Returns arg0 unchanged as +180.0 through the in-range fast return.
+    - The follow-up is 540.0 and reaches the positive exact-wrap sentinel.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_SIGNED_ZERO
+    category: EDGE
+    description: Source is negative zero, which satisfies the in-range comparison
+      and is returned directly.
+    preconditions:
+    - Double.doubleToRawLongBits(arg0) == Double.doubleToRawLongBits(-0.0)
+    expectedSourceBehavior:
+    - Returns the input directly through the in-range fast return.
+    - Normalization represents the same zero longitude as the +0.0 case.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_SIGNED_ZERO
+    category: EDGE
+    description: Source is positive zero, separately covering the other IEEE-754 zero
+      representation.
+    preconditions:
+    - Double.doubleToRawLongBits(arg0) == Double.doubleToRawLongBits(0.0)
+    expectedSourceBehavior:
+    - Returns arg0 unchanged as 0.0 through the in-range fast return.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: IN_RANGE_NEGATIVE_HALF
+    category: NORMAL
+    description: Source is an ordinary negative interior longitude.
+    preconditions:
+    - arg0 == -0.5
+    expectedSourceBehavior:
+    - Returns -0.5 unchanged through the in-range fast return.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: IN_RANGE_POSITIVE_HALF
+    category: NORMAL
+    description: Source is an ordinary positive interior longitude.
+    preconditions:
+    - arg0 == 0.5
+    expectedSourceBehavior:
+    - Returns 0.5 unchanged through the in-range fast return.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: IN_RANGE_NEAR_NEGATIVE_ENDPOINT
+    category: BOUNDARY
+    description: Source is inside the range and one half degree above the negative
+      endpoint.
+    preconditions:
+    - arg0 == -179.5
+    expectedSourceBehavior:
+    - Returns -179.5 unchanged through the in-range fast return.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: IN_RANGE_NEAR_POSITIVE_ENDPOINT
+    category: BOUNDARY
+    description: Source is inside the range and one half degree below the positive
+      endpoint.
+    preconditions:
+    - arg0 == 179.5
+    expectedSourceBehavior:
+    - Returns 179.5 unchanged through the in-range fast return.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: JUST_BELOW_NEGATIVE_RANGE
+    category: BOUNDARY
+    description: Source is just below -180 and produces a negative remainder offset.
+    preconditions:
+    - arg0 == -180.5
+    expectedSourceBehavior:
+    - Bypasses the fast return.
+    - Computes off == -0.5, takes off < 0, and returns 179.5.
+    - The follow-up is 179.5 and uses the in-range fast return.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: JUST_ABOVE_POSITIVE_RANGE
+    category: BOUNDARY
+    description: Source is just above +180 and uses the final remainder branch.
+    preconditions:
+    - arg0 == 180.5
+    expectedSourceBehavior:
+    - Bypasses the fast return.
+    - Computes off == 0.5 and returns -179.5 through the final else branch.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_REMAINDER_NEAR_MINUS_360
+    category: EDGE
+    description: Source produces an off value near -360, exercising the negative-offset
+      correction with a different remainder magnitude.
+    preconditions:
+    - arg0 == -539.0
+    expectedSourceBehavior:
+    - Computes off == -359.0.
+    - Takes off < 0 and returns -179.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_REMAINDER_NEAR_PLUS_360
+    category: EDGE
+    description: Source produces an off value near +360, exercising the final branch
+      near its upper remainder limit.
+    preconditions:
+    - arg0 == 539.0
+    expectedSourceBehavior:
+    - Computes off == 359.0.
+    - Returns 179.0 through the final else branch.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_REMAINDER_MINUS_ONE
+    category: NORMAL
+    description: Source has a small negative remainder offset outside the negative
+      side.
+    preconditions:
+    - arg0 == -541.0
+    expectedSourceBehavior:
+    - Computes off == -1.0.
+    - Takes off < 0 and returns 179.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_REMAINDER_PLUS_ONE
+    category: NORMAL
+    description: Source has a small positive remainder offset outside the positive
+      side.
+    preconditions:
+    - arg0 == 541.0
+    expectedSourceBehavior:
+    - Computes off == 1.0.
+    - Returns -179.0 through the final else branch.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_NEAR_FULL_TURN
+    category: EDGE
+    description: Source is just short of one negative full turn and has a large-magnitude
+      negative remainder.
+    preconditions:
+    - arg0 == -359.5
+    expectedSourceBehavior:
+    - Computes off == -179.5.
+    - Takes off < 0 and returns 0.5.
+    - The follow-up is 0.5 and uses the in-range fast return.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_NEAR_FULL_TURN
+    category: EDGE
+    description: Source is just short of one positive full turn and has a large positive
+      remainder.
+    preconditions:
+    - arg0 == 359.5
+    expectedSourceBehavior:
+    - Computes off == 179.5.
+    - Returns -0.5 through the final else branch.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_EXACT_FULL_TURN
+    category: BOUNDARY
+    description: Source is exactly -360, producing the negative-remainder representation
+      of -180.
+    preconditions:
+    - arg0 == -360.0
+    expectedSourceBehavior:
+    - Computes off == -180.0.
+    - Does not satisfy off < 0 and returns 0.0 through the final else branch.
+    - The follow-up is 0.0 and uses the in-range fast return.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_EXACT_FULL_TURN
+    category: BOUNDARY
+    description: Source is exactly +360, producing the positive-remainder representation
+      of +180.
+    preconditions:
+    - arg0 == 360.0
+    expectedSourceBehavior:
+    - Computes off == 180.0.
+    - Returns 0.0 through the final else branch.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_EXACT_180_WRAP
+    category: BOUNDARY
+    description: Source is -540, whose remainder is signed zero and therefore selects
+      the final else branch rather than the positive-wrap sentinel.
+    preconditions:
+    - arg0 == -540.0
+    expectedSourceBehavior:
+    - Computes off equal to zero with a negative source longitude.
+    - Does not satisfy off == 0 && arg0 > 0 and returns -180.0.
+    - The follow-up is -180.0 and uses the in-range fast return.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_EXACT_180_WRAP_SENTINEL
+    category: BOUNDARY
+    description: Source is +540, the out-of-range positive longitude that reaches
+      the explicit +180 sentinel.
+    preconditions:
+    - arg0 == 540.0
+    expectedSourceBehavior:
+    - Computes off == 0.0.
+    - Satisfies off == 0 && arg0 > 0 and returns +180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_HALF_AFTER_EXACT_WRAP
+    category: EDGE
+    description: Source is beyond a negative exact wrap with a half-degree offset.
+    preconditions:
+    - arg0 == -540.5
+    expectedSourceBehavior:
+    - Computes off == -0.5.
+    - Takes off < 0 and returns 179.5.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_HALF_AFTER_EXACT_WRAP
+    category: EDGE
+    description: Source is beyond a positive exact wrap with a half-degree offset.
+    preconditions:
+    - arg0 == 540.5
+    expectedSourceBehavior:
+    - Computes off == 0.5.
+    - Returns -179.5 through the final else branch.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_MULTI_TURN_SENTINEL
+    category: EDGE
+    description: Source is a negative multi-turn longitude that normalizes to the
+      negative endpoint.
+    preconditions:
+    - arg0 == -900.0
+    expectedSourceBehavior:
+    - Computes off equal to zero for a negative source.
+    - Returns -180.0 through the final else branch.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_MULTI_TURN_SENTINEL
+    category: EDGE
+    description: Source is a positive multi-turn longitude that normalizes to the
+      positive endpoint.
+    preconditions:
+    - arg0 == 900.0
+    expectedSourceBehavior:
+    - Computes off == 0.0.
+    - Satisfies the positive exact-wrap sentinel and returns +180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LARGE_POSITIVE_EXACT_INCREMENT
+    category: EDGE
+    description: Source is a large finite longitude at 2^52, testing modulo normalization
+      at a magnitude that still admits an exact Java +360 follow-up increment.
+    preconditions:
+    - arg0 == 4503599627370496.0
+    - (arg0 + 360.0) - arg0 == 360.0
+    expectedSourceBehavior:
+    - Bypasses the in-range fast return.
+    - Computes off == 196.0 and returns 16.0 through the final else branch.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LARGE_NEGATIVE_EXACT_INCREMENT
+    category: EDGE
+    description: Source is the negative counterpart at -2^52, testing a large negative
+      input that still admits an exact Java +360 follow-up increment.
+    preconditions:
+    - arg0 == -4503599627370496.0
+    - (arg0 + 360.0) - arg0 == 360.0
+    expectedSourceBehavior:
+    - Bypasses the in-range fast return.
+    - Computes off == 164.0 and returns -16.0 through the final else branch.
+    targetCases: 1
+    emptyOutputAllowed: false

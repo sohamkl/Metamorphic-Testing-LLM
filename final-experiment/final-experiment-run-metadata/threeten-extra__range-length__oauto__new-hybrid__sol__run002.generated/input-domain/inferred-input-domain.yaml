@@ -1,0 +1,318 @@
+InputDomain:
+  summary: Valid LocalDateRange receivers whose end can be extended by 23 days and
+    whose bounded source and follow-up lengths are representable as int values, plus
+    transformable unbounded-start ranges that exercise the Integer.MAX_VALUE sentinel
+    path.
+  globalConstraints:
+  - The source receiver is non-null and is successfully constructed by one of the
+    supplied public LocalDateRange construction paths.
+  - The source satisfies getStart().compareTo(getEnd()) <= 0 and all constructor invariants
+    enforced by LocalDateRange.
+  - The source end satisfies getEnd().compareTo(LocalDate.MAX.minusDays(23)) <= 0,
+    so getEnd().plusDays(23) used by generateFollowUp is representable.
+  - Sources unbounded at the end, including ofUnbounded(), ofUnboundedEnd(...), and
+    any range whose end is LocalDate.MAX, are excluded because generateFollowUp calls
+    LocalDate.MAX.plusDays(23), which throws before assertRelation can skip the sentinel
+    output.
+  - For a source bounded at both ends, getEnd().toEpochDay() - getStart().toEpochDay()
+    is between 0 and Integer.MAX_VALUE - 23 inclusive, ensuring both source and 23-day-extended
+    lengths are representable as int values.
+  - Bounded sources longer than Integer.MAX_VALUE - 23 days are excluded because the
+    source or follow-up length cannot support the arithmetic relation as two normally
+    returned int outputs.
+  - A source with getStart() equal to LocalDate.MIN is allowed only as an unbounded-start
+    range; lengthInDays() is then expected to return Integer.MAX_VALUE and assertRelation
+    intentionally skips it.
+  - No null, malformed, reverse-ordered, negative-period, or otherwise construction-invalid
+    input is included because the metamorphic relation requests valid LocalDateRange
+    receivers rather than invalid-input behavior.
+  diversity:
+    boundedness:
+    - bounded-at-both-ends
+    - unbounded-start-with-finite-end
+    sourceLengthClass:
+    - zero
+    - one
+    - '22'
+    - '23'
+    - '24'
+    - calendar-dependent
+    - large
+    - Integer.MAX_VALUE-minus-25
+    - Integer.MAX_VALUE-minus-24
+    - Integer.MAX_VALUE-minus-23
+    - sentinel
+    constructionPath:
+    - of-date-date
+    - of-date-period
+    - ofClosed
+    - ofEmpty
+    - from
+    - parse-date-date
+    - parse-date-period
+    - parse-period-date
+    - ofUnboundedStart
+    calendarTransition:
+    - none
+    - month-end
+    - year-end
+    - leap-day
+    - non-leap-century
+    - leap-century
+    - epoch
+    endpointBoundary:
+    - LocalDate.MIN-plus-1
+    - LocalDate.MIN-plus-2
+    - ordinary-date
+    - LocalDate.MAX-minus-24
+    - LocalDate.MAX-minus-23
+    relationDisposition:
+    - exact-increase-asserted
+    - skipped-for-source-sentinel
+    - skipped-for-follow-up-sentinel
+  scenarios:
+  - id: EMPTY_RANGE_CONSTRUCTIONS
+    category: EDGE
+    description: Empty bounded ranges created through distinct supplied construction
+      paths.
+    preconditions:
+    - Exercise one source from each of LocalDateRange.of(d, d), LocalDateRange.of(d,
+      Period.ZERO), and LocalDateRange.ofEmpty(d).
+    - Each selected d is strictly after LocalDate.MIN.plusDays(1) and no later than
+      LocalDate.MAX.minusDays(23).
+    expectedSourceBehavior:
+    - lengthInDays() returns 0.
+    - The source output is not the unbounded sentinel.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: SINGLE_DAY_RANGES
+    category: BOUNDARY
+    description: Smallest non-empty half-open ranges at ordinary, month-boundary,
+      and leap-day locations.
+    preconditions:
+    - Use the pairs ["2023-06-14", "2023-06-15"], ["2023-01-31", "2023-02-01"], and
+      ["2024-02-29", "2024-03-01"] as start-inclusive and end-exclusive dates.
+    expectedSourceBehavior:
+    - lengthInDays() returns 1 for every source.
+    - The source output is not the unbounded sentinel.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: LENGTH_JUST_BELOW_EXTRA_DAYS
+    category: BOUNDARY
+    description: A bounded range whose source length is one day below the 23-day extension
+      amount.
+    preconditions:
+    - The source is bounded at both ends.
+    - getEnd().toEpochDay() - getStart().toEpochDay() equals 22.
+    expectedSourceBehavior:
+    - lengthInDays() returns 22.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LENGTH_EQUAL_TO_EXTRA_DAYS
+    category: BOUNDARY
+    description: A bounded range whose source length exactly equals the 23-day extension
+      amount.
+    preconditions:
+    - The source is bounded at both ends.
+    - getEnd().toEpochDay() - getStart().toEpochDay() equals 23.
+    expectedSourceBehavior:
+    - lengthInDays() returns 23.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LENGTH_JUST_ABOVE_EXTRA_DAYS
+    category: BOUNDARY
+    description: A bounded range whose source length is one day above the 23-day extension
+      amount.
+    preconditions:
+    - The source is bounded at both ends.
+    - getEnd().toEpochDay() - getStart().toEpochDay() equals 24.
+    expectedSourceBehavior:
+    - lengthInDays() returns 24.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MONTH_END_TRANSITIONS
+    category: NORMAL
+    description: Bounded ranges crossing month ends with different month lengths.
+    preconditions:
+    - Use one range crossing January to February in a non-leap year, one crossing
+      April to May, and one crossing February to March in a leap year.
+    - Use respective source lengths of 5, 17, and 29 days so the cases are not duplicate
+      one-day ranges.
+    expectedSourceBehavior:
+    - lengthInDays() equals the end-exclusive epoch day minus the start-inclusive
+      epoch day.
+    - Each returned length is finite and non-negative.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: YEAR_END_TRANSITIONS
+    category: NORMAL
+    description: Bounded ranges crossing year boundaries over short, annual, and multi-year
+      intervals.
+    preconditions:
+    - Include one range from "2023-12-31" to "2024-01-01".
+    - Include one range from "2023-01-01" to "2024-01-01".
+    - Include one range from "2023-07-01" to "2025-01-01".
+    expectedSourceBehavior:
+    - The respective source lengths are 1, 365, and 550 days.
+    - None of the outputs equals Integer.MAX_VALUE.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: LEAP_DAY_PLACEMENT
+    category: NORMAL
+    description: Ranges that end on, start on, or span across February 29.
+    preconditions:
+    - Include ["2024-02-28", "2024-02-29"], ["2024-02-29", "2024-03-02"], and ["2024-02-28",
+      "2024-03-02"].
+    expectedSourceBehavior:
+    - The respective source lengths are 1, 2, and 3 days.
+    - Half-open endpoint treatment is reflected by the exact epoch-day differences.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: CENTURY_LEAP_RULES
+    category: NORMAL
+    description: Annual ranges covering a non-leap century and a leap century.
+    preconditions:
+    - Include LocalDateRange.of("1900-01-01", "1901-01-01").
+    - Include LocalDateRange.of("2000-01-01", "2001-01-01").
+    expectedSourceBehavior:
+    - The 1900 source returns 365.
+    - The 2000 source returns 366.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: EPOCH_RELATIVE_RANGES
+    category: NORMAL
+    description: Bounded ranges before, across, and after the LocalDate epoch.
+    preconditions:
+    - Include ["1969-12-01", "1969-12-31"], ["1969-12-31", "1970-01-02"], and ["1970-01-01",
+      "1970-02-10"].
+    expectedSourceBehavior:
+    - The respective source lengths are 30, 2, and 40 days.
+    - Dates with negative epoch days still produce non-negative range lengths.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: CALENDAR_PERIOD_CONSTRUCTION
+    category: NORMAL
+    description: Ranges constructed with supplied LocalDate-and-Period factory where
+      month or year addition has calendar-dependent results.
+    preconditions:
+    - Include LocalDateRange.of(LocalDate.parse("2023-01-31"), Period.ofMonths(1)).
+    - Include LocalDateRange.of(LocalDate.parse("2024-01-31"), Period.ofMonths(1)).
+    - Include LocalDateRange.of(LocalDate.parse("2024-02-29"), Period.ofYears(1)).
+    expectedSourceBehavior:
+    - The respective source lengths are 28, 29, and 365 days.
+    - Every constructed end is on or after its start.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: CLOSED_RANGE_NORMALIZATION
+    category: NORMAL
+    description: Closed ranges whose inclusive ends are normalized internally to exclusive
+      ends.
+    preconditions:
+    - Include LocalDateRange.ofClosed("2023-05-10", "2023-05-10").
+    - Include LocalDateRange.ofClosed("2023-05-10", "2023-05-31").
+    expectedSourceBehavior:
+    - The single-date closed range returns 1.
+    - The 22-date closed range returns 22.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: TEMPORAL_CONVERSION_BRANCHES
+    category: NORMAL
+    description: Ranges obtained through supplied from(Temporal) branches for annual,
+      monthly, half-year, quarter, and week temporals.
+    preconditions:
+    - Exercise Year 2023, YearMonth 2024-02, YearHalf representing the first half
+      of 2024, YearQuarter representing the fourth quarter of 2023, and YearWeek representing
+      ISO week 53 of 2020.
+    - Construct each source using LocalDateRange.from(temporal).
+    expectedSourceBehavior:
+    - The Year 2023 source returns 365.
+    - The YearMonth 2024-02 source returns 29.
+    - The first half of 2024 source returns 182.
+    - The fourth quarter of 2023 source returns 92.
+    - The ISO week source returns 7.
+    targetCases: 5
+    emptyOutputAllowed: false
+  - id: PARSE_GRAMMAR_BRANCHES
+    category: NORMAL
+    description: Valid parsed ranges covering all three documented parse layouts.
+    preconditions:
+    - Parse "2007-12-03/2007-12-31" as date/date.
+    - Parse "2024-02-01/P1M" as date/period.
+    - Parse "P1M/2024-03-31" as period/date.
+    expectedSourceBehavior:
+    - The respective source lengths are 28, 29, and 31 days.
+    - Each parsed source is bounded at both ends.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: EARLIEST_FINITE_ENDPOINTS
+    category: EDGE
+    description: Bounded ranges at the earliest endpoint positions permitted by constructor
+      validation.
+    preconditions:
+    - Include a range from LocalDate.MIN.plusDays(1) to LocalDate.MIN.plusDays(2).
+    - Include an empty range at LocalDate.MIN.plusDays(2).
+    expectedSourceBehavior:
+    - The first source returns 1.
+    - The empty source returns 0.
+    - Neither source is classified as unbounded at the start.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LATEST_TRANSFORMABLE_ENDPOINTS
+    category: EDGE
+    description: Sources whose ends are at the final two positions compatible with
+      adding 23 days.
+    preconditions:
+    - Include a source ending at LocalDate.MAX.minusDays(24) with length 23.
+    - Include a source ending at LocalDate.MAX.minusDays(23) with length 23.
+    expectedSourceBehavior:
+    - lengthInDays() returns 23 for each source.
+    - Extending the first source ends at LocalDate.MAX.minusDays(1), so its relation
+      remains numerically asserted.
+    - Extending the second source ends at LocalDate.MAX, causing the follow-up output
+      to use the sentinel and the supplied assertion to skip.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: MAXIMUM_ASSERTABLE_INT_LENGTHS
+    category: BOUNDARY
+    description: Very long bounded ranges immediately below the largest source length
+      allowed by the 23-day transformation.
+    preconditions:
+    - Use bounded sources with lengths Integer.MAX_VALUE minus 25, Integer.MAX_VALUE
+      minus 24, and Integer.MAX_VALUE minus 23.
+    - Choose starts and calculated ends for which start.plusDays(length) and end.plusDays(23)
+      are representable LocalDate values.
+    expectedSourceBehavior:
+    - lengthInDays() returns 2147483622, 2147483623, and 2147483624 respectively.
+    - The first two follow-ups remain below Integer.MAX_VALUE and permit a non-vacuous
+      increase check.
+    - The third follow-up has length Integer.MAX_VALUE, which the supplied assertion
+      treats as its sentinel and skips.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: UNBOUNDED_START_SENTINEL_PATHS
+    category: EDGE
+    description: Transformable ranges with an unbounded start and varied finite ends.
+    preconditions:
+    - Construct sources with LocalDateRange.ofUnboundedStart(end).
+    - Use ends LocalDate.MIN.plusDays(2), "1970-01-01", "2000-02-29", and LocalDate.MAX.minusDays(23).
+    expectedSourceBehavior:
+    - lengthInDays() returns Integer.MAX_VALUE for every source regardless of the
+      finite end.
+    - The supplied assertion skips every case because the source output is the documented
+      unbounded-range sentinel.
+    - Adding 23 days to each selected end remains representable.
+    targetCases: 4
+    emptyOutputAllowed: false
+  - id: LARGE_FINITE_SPANS
+    category: NORMAL
+    description: Long but safely representable bounded ranges that exercise whole-day
+      subtraction far beyond ordinary calendar intervals.
+    preconditions:
+    - Use a representable bounded start and create ends exactly 10000, 1000000, and
+      100000000 days later.
+    - Each resulting end is no later than LocalDate.MAX.minusDays(23).
+    expectedSourceBehavior:
+    - lengthInDays() returns 10000, 1000000, and 100000000 respectively.
+    - None of the outputs uses the unbounded sentinel.
+    targetCases: 3
+    emptyOutputAllowed: false

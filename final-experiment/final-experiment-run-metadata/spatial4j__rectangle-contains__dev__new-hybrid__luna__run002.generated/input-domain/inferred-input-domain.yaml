@@ -1,0 +1,407 @@
+InputDomain:
+  summary: Finite geographic RectangleImpl and Point inputs in one geo SpatialContext,
+    covering ordinary boxes, dateline-wrapping boxes, longitude and latitude boundaries,
+    degenerate boxes, and the 150-degree co-rotation paths used by the metamorphic
+    relation.
+  globalConstraints:
+  - Use a non-null geo SpatialContext for the rectangle and create the probe point
+    with that context; the metamorphic transformation applies geographic longitude
+    normalization and the target branches on ctx.isGeo().
+  - Use finite longitude and latitude coordinates; rectangle latitude bounds satisfy
+    minY <= maxY, as required by RectangleImpl.reset when assertions are enabled.
+  - Use longitude values in the geographic interval [-180.0, 180.0] for points and
+    rectangle endpoints, while allowing minX > maxX because RectangleImpl defines
+    that as a dateline-wrapping rectangle.
+  - Use a non-null rectangle and point; the supplied follow-up generator requires
+    both and calls rectangle.getContext(), point.getX(), point.getY(), and context.makePoint(...).
+  - 'Do not use non-geographic contexts: they are reachable by RectangleImpl but the
+    supplied relation describes eastward rotation on a globe and its follow-up relies
+    on geographic longitude wrapping; relate(Point) has materially different non-geo
+    behavior because it skips the ctx.isGeo() normalization branch.'
+  - 'Do not use NaN or infinite coordinates: they are construction-level sentinel
+    or invalid numeric inputs rather than ordinary geographic points and would make
+    the 150-degree normalization and boundary observations non-geographic.'
+  diversity:
+    longitudeTopology:
+    - ordinary non-wrapping minX <= maxX
+    - dateline-wrapping minX > maxX
+    - world-width minX=-180.0 and maxX=180.0
+    - zero-width minX=maxX
+    latitudePosition:
+    - strictly below minY
+    - equal to minY
+    - strictly inside
+    - equal to maxY
+    - strictly above maxY
+    longitudePosition:
+    - inside without adjustment
+    - exactly on minX
+    - exactly on maxX
+    - below minX and adjusted by +360
+    - above maxX and adjusted by -360
+    - outside after adjustment
+    rotationPath:
+    - follow-up remains ordinary
+    - follow-up becomes dateline-wrapping
+    - source is dateline-wrapping and follow-up is ordinary
+    - rotation lands on normalized -180.0
+    rectangleConstruction:
+    - direct four-coordinate constructor
+    - Point lower-left and upper-right constructor
+    - Rectangle copy constructor
+  scenarios:
+  - id: ORDINARY_INTERIOR_SHORT_CIRCUIT
+    category: NORMAL
+    description: A point lies strictly inside a non-wrapping box in both longitude
+      and latitude, so the geographic longitude code returns CONTAINS through its
+      in-range short circuit.
+    preconditions:
+    - Construct rectangle with minX=-40.0, maxX=40.0, minY=-20.0, maxY=20.0.
+    - Use point (-5.0, 3.0).
+    - After the 150-degree follow-up, the rectangle remains non-wrapping.
+    expectedSourceBehavior:
+    - The latitude comparisons do not reject the point.
+    - pX is between minX and maxX, so source relation is CONTAINS.
+    - The follow-up is expected to assert the same CONTAINS relation.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_MIN_LONGITUDE_BOUNDARY
+    category: BOUNDARY
+    description: A point is exactly on the ordinary rectangle's minimum longitude.
+    preconditions:
+    - Construct rectangle with minX=-40.0, maxX=40.0, minY=-20.0, maxY=20.0.
+    - Use point (-40.0, 0.0).
+    expectedSourceBehavior:
+    - The inclusive comparisons leave the point in the rectangle.
+    - Source relation is CONTAINS.
+    - The equality is preserved by the co-rotation.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_MAX_LONGITUDE_BOUNDARY
+    category: BOUNDARY
+    description: A point is exactly on the ordinary rectangle's maximum longitude.
+    preconditions:
+    - Construct rectangle with minX=-40.0, maxX=40.0, minY=-20.0, maxY=20.0.
+    - Use point (40.0, 0.0).
+    expectedSourceBehavior:
+    - The point passes the longitude upper-bound check.
+    - Source relation is CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_LONGITUDE_BELOW_AND_OUTSIDE
+    category: NORMAL
+    description: A point is west of a non-wrapping box and remains outside after the
+      source adds 360 degrees.
+    preconditions:
+    - Construct rectangle with minX=-40.0, maxX=40.0, minY=-20.0, maxY=20.0.
+    - Use point (-100.0, 0.0).
+    expectedSourceBehavior:
+    - The point passes latitude checks and enters the pX < minX adjustment branch.
+    - After adding 360.0, the adjusted longitude is 260.0, still outside the box.
+    - Source relation is DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_LONGITUDE_ABOVE_AND_OUTSIDE
+    category: NORMAL
+    description: A point is east of a non-wrapping box and remains outside after the
+      source subtracts 360 degrees.
+    preconditions:
+    - Construct rectangle with minX=-40.0, maxX=40.0, minY=-20.0, maxY=20.0.
+    - Use point (100.0, 0.0).
+    expectedSourceBehavior:
+    - The point enters the pX > maxX adjustment branch.
+    - After subtracting 360.0, the adjusted longitude is -260.0, still outside the
+      box.
+    - Source relation is DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WEST_DATELINE_ENDPOINT_ADJUSTMENT
+    category: BOUNDARY
+    description: A point at +180.0 is outside the ordinary box numerically but becomes
+      its minimum endpoint after the -360 adjustment.
+    preconditions:
+    - Construct rectangle with minX=-180.0, maxX=-100.0, minY=-20.0, maxY=20.0.
+    - Use point (180.0, 0.0).
+    expectedSourceBehavior:
+    - The point enters the pX > maxX branch.
+    - Subtracting 360.0 produces -180.0, exactly minX.
+    - Source relation is CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EAST_DATELINE_ENDPOINT_ADJUSTMENT
+    category: BOUNDARY
+    description: A point at -180.0 is outside the ordinary box numerically but becomes
+      its maximum endpoint after the +360 adjustment.
+    preconditions:
+    - Construct rectangle with minX=100.0, maxX=180.0, minY=-20.0, maxY=20.0.
+    - Use point (-180.0, 0.0).
+    expectedSourceBehavior:
+    - The point enters the pX < minX branch.
+    - Adding 360.0 produces 180.0, exactly maxX.
+    - Source relation is CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DATELINE_WRAP_INTERIOR_EAST
+    category: EDGE
+    description: A dateline-wrapping box contains a point on its eastern side, exercising
+      rawWidth < 0 and the unwrapped maxX.
+    preconditions:
+    - Construct rectangle with minX=170.0, maxX=-170.0, minY=-20.0, maxY=20.0.
+    - Use point (175.0, 0.0).
+    expectedSourceBehavior:
+    - rawWidth is -340.0 and the local maxX is unwrapped to 190.0.
+    - The point is directly between 170.0 and 190.0 after unwrapping.
+    - Source relation is CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DATELINE_WRAP_INTERIOR_WEST
+    category: EDGE
+    description: A dateline-wrapping box contains a point on its western side, requiring
+      the point's +360 adjustment.
+    preconditions:
+    - Construct rectangle with minX=170.0, maxX=-170.0, minY=-20.0, maxY=20.0.
+    - Use point (-175.0, 0.0).
+    expectedSourceBehavior:
+    - The rectangle is unwrapped to [170.0, 190.0].
+    - The point is less than minX and is shifted from -175.0 to 185.0.
+    - Source relation is CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DATELINE_WRAP_OUTSIDE
+    category: NORMAL
+    description: A point lies between the ordinary numeric endpoints but outside the
+      wrapped geographic interval.
+    preconditions:
+    - Construct rectangle with minX=170.0, maxX=-170.0, minY=-20.0, maxY=20.0.
+    - Use point (0.0, 0.0).
+    expectedSourceBehavior:
+    - The rectangle is unwrapped to [170.0, 190.0].
+    - The point is shifted to 360.0 by the pX < minX branch and remains outside.
+    - Source relation is DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DATELINE_WRAP_ENDPOINT_ANTIMERIDIAN
+    category: BOUNDARY
+    description: A wrapped rectangle is probed at the -170.0 endpoint represented
+      by the normalized maximum longitude.
+    preconditions:
+    - Construct rectangle with minX=170.0, maxX=-170.0, minY=-20.0, maxY=20.0.
+    - Use point (-170.0, 0.0).
+    expectedSourceBehavior:
+    - The point is below minX and is shifted to 190.0.
+    - The shifted point equals the unwrapped maxX.
+    - Source relation is CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DATELINE_WRAP_ENDPOINT_170
+    category: BOUNDARY
+    description: A wrapped rectangle is probed at its minX endpoint.
+    preconditions:
+    - Construct rectangle with minX=170.0, maxX=-170.0, minY=-20.0, maxY=20.0.
+    - Use point (170.0, 0.0).
+    expectedSourceBehavior:
+    - The point is not shifted because it is equal to minX.
+    - Source relation is CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LATITUDE_BELOW_EARLY_DISJOINT
+    category: BOUNDARY
+    description: A point has an otherwise usable longitude but lies strictly below
+      the rectangle, taking the early latitude DISJOINT return.
+    preconditions:
+    - Construct rectangle with minX=-40.0, maxX=40.0, minY=-20.0, maxY=20.0.
+    - Use point (0.0, -20.000001).
+    expectedSourceBehavior:
+    - The y < minY check returns before any longitude normalization or adjustment.
+    - Source relation is DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LATITUDE_ABOVE_EARLY_DISJOINT
+    category: BOUNDARY
+    description: A point has an otherwise usable longitude but lies strictly above
+      the rectangle, taking the other early latitude DISJOINT return.
+    preconditions:
+    - Construct rectangle with minX=-40.0, maxX=40.0, minY=-20.0, maxY=20.0.
+    - Use point (0.0, 20.000001).
+    expectedSourceBehavior:
+    - The y > maxY check returns before longitude processing.
+    - Source relation is DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LATITUDE_MIN_BOUNDARY
+    category: BOUNDARY
+    description: A point is exactly on the rectangle's minimum latitude and inside
+      in longitude.
+    preconditions:
+    - Construct rectangle with minX=-40.0, maxX=40.0, minY=-20.0, maxY=20.0.
+    - Use point (0.0, -20.0).
+    expectedSourceBehavior:
+    - Latitude comparisons are inclusive, so processing continues.
+    - Source relation is CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LATITUDE_MAX_BOUNDARY
+    category: BOUNDARY
+    description: A point is exactly on the rectangle's maximum latitude and inside
+      in longitude.
+    preconditions:
+    - Construct rectangle with minX=-40.0, maxX=40.0, minY=-20.0, maxY=20.0.
+    - Use point (0.0, 20.0).
+    expectedSourceBehavior:
+    - Latitude comparisons are inclusive.
+    - Source relation is CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_WIDTH_VERTICAL_LINE
+    category: EDGE
+    description: A zero-width ordinary rectangle is probed exactly on its longitude.
+    preconditions:
+    - Construct rectangle with minX=20.0, maxX=20.0, minY=-20.0, maxY=20.0.
+    - Use point (20.0, 0.0).
+    expectedSourceBehavior:
+    - rawWidth is zero, so no dateline unwrap occurs.
+    - The point satisfies both inclusive longitude comparisons.
+    - Source relation is CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_WIDTH_LINE_OFF_LONGITUDE
+    category: EDGE
+    description: A zero-width ordinary rectangle is probed just outside its only longitude.
+    preconditions:
+    - Construct rectangle with minX=20.0, maxX=20.0, minY=-20.0, maxY=20.0.
+    - Use point (20.000001, 0.0).
+    expectedSourceBehavior:
+    - The point is greater than maxX and is shifted by -360.0.
+    - The shifted value remains outside the zero-width interval.
+    - Source relation is DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_HEIGHT_HORIZONTAL_LINE
+    category: EDGE
+    description: A zero-height rectangle is probed on its latitude and inside its
+      longitude.
+    preconditions:
+    - Construct rectangle with minX=-40.0, maxX=40.0, minY=10.0, maxY=10.0.
+    - Use point (0.0, 10.0).
+    expectedSourceBehavior:
+    - The equal latitude bounds accept the point.
+    - Source relation is CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WORLD_LONGITUDE_RANGE
+    category: EDGE
+    description: A rectangle spans -180.0 through +180.0, exercising the target method's
+      ordinary point comparisons for a full longitude range.
+    preconditions:
+    - Construct rectangle with minX=-180.0, maxX=180.0, minY=-20.0, maxY=20.0.
+    - Use point (0.0, 0.0).
+    expectedSourceBehavior:
+    - The point is directly between the longitude endpoints.
+    - Source relation is CONTAINS.
+    - The follow-up specifically tests the supplied 150-degree normalization of both
+      world endpoints.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FOLLOWUP_CREATES_DATELINE_WRAP
+    category: EDGE
+    description: The source box is ordinary, but adding 150 degrees makes normalized
+      follow-up minX greater than maxX, forcing the follow-up through dateline-unwrapping
+      logic.
+    preconditions:
+    - Construct rectangle with minX=-20.0, maxX=60.0, minY=-20.0, maxY=20.0.
+    - Use point (10.0, 0.0).
+    - The follow-up longitudes normalize to 130.0 and -150.0, so follow-up minX >
+      maxX.
+    expectedSourceBehavior:
+    - The source point is directly inside the ordinary rectangle.
+    - Source relation is CONTAINS.
+    - The metamorphic assertion requires the follow-up relation to remain CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FOLLOWUP_LANDS_ON_NEGATIVE_180
+    category: EDGE
+    description: The follow-up normalization maps a rotated rectangle endpoint to
+      -180.0, exercising the documented +180-to--180 normalization boundary.
+    preconditions:
+    - Construct rectangle with minX=30.0, maxX=60.0, minY=-20.0, maxY=20.0.
+    - Use point (45.0, 0.0).
+    - The rotated minX is 180.0 before normalization and is expected to normalize
+      to -180.0 according to the supplied relation's comment.
+    expectedSourceBehavior:
+    - The source point is strictly inside the rectangle.
+    - Source relation is CONTAINS.
+    - The follow-up assertion compares the source result with the relation after the
+      endpoint normalization.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POINT_CONSTRUCTOR_PATH
+    category: NORMAL
+    description: A normal interior case uses the supplied lower-left/upper-right Point
+      constructor path for the receiver.
+    preconditions:
+    - Create lower-left and upper-right points with the geo context, using (-30.0,
+      -10.0) and (30.0, 10.0).
+    - Construct RectangleImpl from those two points and the same context.
+    - Use probe point (0.0, 0.0).
+    expectedSourceBehavior:
+    - The constructor extracts the expected coordinate bounds.
+    - The probe is inside both dimensions.
+    - Source relation is CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: RECTANGLE_COPY_PATH
+    category: NORMAL
+    description: A dateline-wrapping case uses the supplied Rectangle copy constructor,
+      preserving minX > maxX.
+    preconditions:
+    - Create an original RectangleImpl with minX=170.0, maxX=-170.0, minY=-20.0, maxY=20.0.
+    - Construct the target RectangleImpl by copying that rectangle with the same geo
+      context.
+    - Use probe point (179.0, 0.0).
+    expectedSourceBehavior:
+    - The copied receiver retains the dateline-wrapping coordinate order.
+    - The probe lies in the eastern portion of the wrapped interval.
+    - Source relation is CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DATELINE_ROTATION_REMAINS_WRAPPED
+    category: EDGE
+    description: A wide dateline-wrapping source rectangle remains dateline-wrapping
+      after the 150-degree co-rotation, testing two successive unwrap paths.
+    preconditions:
+    - Construct rectangle with minX=100.0, maxX=-100.0, minY=-30.0, maxY=30.0.
+    - Use point (150.0, 0.0).
+    - The rotated endpoints normalize to -110.0 and 50.0, so the follow-up also has
+      minX > maxX.
+    expectedSourceBehavior:
+    - The source rectangle unwraps to [100.0, 260.0].
+    - The source point is inside that unwrapped interval.
+    - Source relation is CONTAINS and the follow-up is expected to remain CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DATELINE_WEST_SIDE_OUTSIDE
+    category: NORMAL
+    description: A point near the western hemisphere is outside a narrow dateline-wrapping
+      box even after the source's +360 adjustment.
+    preconditions:
+    - Construct rectangle with minX=170.0, maxX=-170.0, minY=-20.0, maxY=20.0.
+    - Use point (-160.0, 0.0).
+    expectedSourceBehavior:
+    - The rectangle unwraps to [170.0, 190.0].
+    - The point shifts to 200.0 and is greater than the unwrapped maxX.
+    - Source relation is DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DATELINE_EAST_SIDE_OUTSIDE
+    category: NORMAL
+    description: A point just east of the wrapped interval is outside after the source's
+      -360 adjustment.
+    preconditions:
+    - Construct rectangle with minX=170.0, maxX=-170.0, minY=-20.0, maxY=20.0.
+    - Use point (160.0, 0.0).
+    expectedSourceBehavior:
+    - The point shifts to 520.0 through the pX < minX branch.
+    - It remains outside the unwrapped interval [170.0, 190.0].
+    - Source relation is DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false

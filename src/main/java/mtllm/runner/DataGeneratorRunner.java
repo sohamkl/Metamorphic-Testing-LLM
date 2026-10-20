@@ -2,10 +2,16 @@ package mtllm.runner;
 
 import mtllm.config.PromptConfig;
 import mtllm.report.HtmlReportWriter;
+import mtllm.sut.CompiledClassPath;
 import mtllm.sut.SutContext;
+import mtllm.util.GeneratedNames;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.PrintStream;
+import java.lang.reflect.Method;
+import java.net.URL;
+import java.net.URLClassLoader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -37,14 +43,28 @@ public final class DataGeneratorRunner {
         lastSummary = ExecutedDataSummary.empty();
         Files.createDirectories(classesDir);
 
+        String sourceConsistencyError = validateDeterministicSourceGeneration(generatedFile);
+        if (sourceConsistencyError != null) {
+            return TestRunResult.failed("Generated source-input consistency validation failed:\n"
+                    + sourceConsistencyError);
+        }
+
         TestRunResult compileResult = compile(generatedFile, config, sutContext);
         if (!compileResult.passed()) {
             return compileResult;
         }
 
-        TestRunResult runResult = run(config.generatedClassName());
+        RuntimeResourceCopier.copyFor(config, classesDir);
+
+        TestRunResult runResult = run(config.generatedClassName(), config);
         if (!runResult.passed()) {
             return runResult;
+        }
+
+        String repeatedExecutionError = validateRepeatedExecution(config.generatedClassName(), config);
+        if (repeatedExecutionError != null) {
+            return TestRunResult.failed("Generated source-input consistency validation failed:\n"
+                    + repeatedExecutionError);
         }
 
         String validationError = validateJsonOutput(runResult.output(), config);
@@ -54,6 +74,118 @@ public final class DataGeneratorRunner {
         }
 
         return writeSplitAndReport(runResult.output(), config, sutContext);
+    }
+
+    private String validateDeterministicSourceGeneration(Path generatedFile) throws IOException {
+        String source = Files.readString(generatedFile, StandardCharsets.UTF_8);
+        List<String> forbiddenConstructs = List.of(
+                "java.util.Random",
+                "new Random(",
+                "Math.random(",
+                "ThreadLocalRandom",
+                "SecureRandom",
+                "UUID.randomUUID(",
+                "System.currentTimeMillis(",
+                "System.nanoTime(",
+                "Instant.now(",
+                "LocalDate.now(",
+                "LocalDateTime.now(");
+
+        List<String> found = new ArrayList<>();
+        String compactSource = stripCommentsAndLiterals(source).replaceAll("\\s+", "");
+        for (String forbidden : forbiddenConstructs) {
+            if (compactSource.contains(forbidden.replaceAll("\\s+", ""))) {
+                found.add(forbidden);
+            }
+        }
+        if (found.isEmpty()) {
+            return null;
+        }
+
+        return "The data generator uses nondeterministic source construction: "
+                + String.join(", ", found)
+                + ". generateSources() is called by both JSON execution and generated JUnit tests, so its "
+                + "ordered values must be repeatable. Replace these constructs with explicit fixtures or an "
+                + "immutable value table.";
+    }
+
+    private String stripCommentsAndLiterals(String source) {
+        StringBuilder code = new StringBuilder(source.length());
+        int state = 0;
+
+        for (int i = 0; i < source.length(); i++) {
+            char current = source.charAt(i);
+            char next = i + 1 < source.length() ? source.charAt(i + 1) : '\0';
+
+            if (state == 0) {
+                if (current == '/' && next == '/') {
+                    state = 1;
+                    i++;
+                } else if (current == '/' && next == '*') {
+                    state = 2;
+                    i++;
+                } else if (current == '"') {
+                    state = 3;
+                } else if (current == '\'') {
+                    state = 4;
+                } else {
+                    code.append(current);
+                }
+            } else if (state == 1) {
+                if (current == '\n') {
+                    state = 0;
+                    code.append(current);
+                }
+            } else if (state == 2) {
+                if (current == '*' && next == '/') {
+                    state = 0;
+                    i++;
+                }
+            } else if (state == 3 || state == 4) {
+                char closingQuote = state == 3 ? '"' : '\'';
+                if (current == '\\') {
+                    i++;
+                } else if (current == closingQuote) {
+                    state = 0;
+                }
+            }
+        }
+        return code.toString();
+    }
+
+    private String validateRepeatedExecution(String className, PromptConfig config) {
+        try (URLClassLoader loader = new URLClassLoader(
+                classLoaderUrls(config),
+                DataGeneratorRunner.class.getClassLoader())) {
+            Class<?> generatedClass = Class.forName(className, true, loader);
+            Method main = generatedClass.getMethod("main", String[].class);
+            String firstOutput = invokeMainAndCaptureOutput(main);
+            String secondOutput = invokeMainAndCaptureOutput(main);
+
+            if (firstOutput.trim().equals(secondOutput.trim())) {
+                return null;
+            }
+            return "The generated class produced different executed JSON when main() was invoked twice in "
+                    + "the same JVM. generateSources() and the SUT/MR execution must be deterministic so JSON "
+                    + "and JUnit use the same indexed cases. Use explicit ordered fixtures instead of "
+                    + "randomness, time, or mutable global state.";
+        } catch (Exception exception) {
+            Throwable cause = exception.getCause() == null ? exception : exception.getCause();
+            return "The generated class could not be executed repeatedly in the same JVM: "
+                    + cause.getClass().getSimpleName() + ": " + cause.getMessage();
+        }
+    }
+
+    private String invokeMainAndCaptureOutput(Method main) throws Exception {
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        PrintStream originalOut = System.out;
+        try (PrintStream capturedOut = new PrintStream(buffer, true, StandardCharsets.UTF_8)) {
+            System.setOut(capturedOut);
+            main.invoke(null, (Object) new String[0]);
+        } finally {
+            System.setOut(originalOut);
+        }
+        return buffer.toString(StandardCharsets.UTF_8);
     }
 
     /**
@@ -94,8 +226,6 @@ public final class DataGeneratorRunner {
                     splitResult.allEntries,
                     splitResult.passingEntries,
                     splitResult.failingEntries,
-                    splitResult.passingIndexes,
-                    splitResult.failingIndexes,
                     outputFile,
                     splitResult.passingFile,
                     splitResult.failingFile,
@@ -118,38 +248,59 @@ public final class DataGeneratorRunner {
         command.add("javac");
         command.add("-encoding");
         command.add("UTF-8");
+        command.add("-cp");
+        command.add(classpath(config));
         command.add("-d");
         command.add(classesDir.toString());
-        if (config.sutClassFile() != null) {
+        if (config.sutClassFile() != null
+                && !CompiledClassPath.contains(config.sutClasspath(), config.sutClassFile())) {
             command.add(config.sutClassFile().toString());
         }
         for (SutContext.SourceFile supportFile : sutContext.supportFiles()) {
-            command.add(supportFile.path().toString());
+            if (!CompiledClassPath.contains(config.sutClasspath(), supportFile.path())) {
+                command.add(supportFile.path().toString());
+            }
         }
         if (config.mode().usesDeveloperMrHelpers() && config.developerMrFile() != null) {
             command.add(config.developerMrFile().toString());
         }
         command.add(generatedFile.toString());
 
-        ProcessResult result = runProcess(command, repoRoot);
-        if (result.exitCode == 0) {
-            return TestRunResult.passed(result.output);
+        ProcessRunner.Result result = ProcessRunner.run(command, repoRoot);
+        if (result.exitCode() == 0) {
+            return TestRunResult.passed(result.output());
         }
-        return TestRunResult.failed("Compilation failed:\n" + result.output);
+        return TestRunResult.failed("Compilation failed:\n" + result.output());
     }
 
-    private TestRunResult run(String className) throws Exception {
+    private TestRunResult run(String className, PromptConfig config) throws Exception {
         List<String> command = new ArrayList<>();
         command.add("java");
         command.add("-cp");
-        command.add(classesDir.toString());
+        command.add(classpath(config));
         command.add(className);
 
-        ProcessResult result = runProcess(command, repoRoot);
-        if (result.exitCode == 0) {
-            return TestRunResult.passed(result.output);
+        ProcessRunner.Result result = ProcessRunner.run(command, repoRoot);
+        if (result.exitCode() == 0) {
+            return TestRunResult.passed(result.output());
         }
-        return TestRunResult.failed("Execution failed:\n" + result.output);
+        return TestRunResult.failed("Execution failed:\n" + result.output());
+    }
+
+    private String classpath(PromptConfig config) {
+        List<String> entries = new ArrayList<>();
+        entries.add(classesDir.toString());
+        entries.addAll(config.sutClasspath().stream().map(Path::toString).toList());
+        return String.join(System.getProperty("path.separator"), entries);
+    }
+
+    private URL[] classLoaderUrls(PromptConfig config) throws IOException {
+        List<URL> urls = new ArrayList<>();
+        urls.add(classesDir.toUri().toURL());
+        for (Path entry : config.sutClasspath()) {
+            urls.add(entry.toUri().toURL());
+        }
+        return urls.toArray(URL[]::new);
     }
 
     private String validateJsonOutput(String output, PromptConfig config) {
@@ -170,27 +321,21 @@ public final class DataGeneratorRunner {
         List<String> entries = splitTopLevelObjects(rawJson);
         List<String> passing = new ArrayList<>();
         List<String> failing = new ArrayList<>();
-        List<Integer> passingIndexes = new ArrayList<>();
-        List<Integer> failingIndexes = new ArrayList<>();
-
-        for (int i = 0; i < entries.size(); i++) {
-            String entry = entries.get(i);
+        for (String entry : entries) {
             if (hasPassedValue(entry, true)) {
                 passing.add(entry);
-                passingIndexes.add(i);
             } else if (hasPassedValue(entry, false)) {
                 failing.add(entry);
-                failingIndexes.add(i);
             }
         }
 
-        String baseName = baseName(config.generatedClassName());
+        String baseName = GeneratedNames.baseName(config.generatedClassName());
         Path passingFile = outputDir.resolve(baseName + "Passing.json");
         Path failingFile = outputDir.resolve(baseName + "Failing.json");
         Files.writeString(passingFile, prettyPrintJsonLike(toJsonArray(passing)) + System.lineSeparator(), StandardCharsets.UTF_8);
         Files.writeString(failingFile, prettyPrintJsonLike(toJsonArray(failing)) + System.lineSeparator(), StandardCharsets.UTF_8);
 
-        return new SplitResult(entries, passing, failing, passingIndexes, failingIndexes, passingFile, failingFile);
+        return new SplitResult(entries, passing, failing, passingFile, failingFile);
     }
 
     private boolean hasPassedValue(String entry, boolean expectedValue) {
@@ -241,23 +386,6 @@ public final class DataGeneratorRunner {
 
     private String toJsonArray(List<String> entries) {
         return "[" + String.join(",", entries) + "]";
-    }
-
-    private String baseName(String generatedClassName) {
-        if (generatedClassName.endsWith("Data")) {
-            return generatedClassName.substring(0, generatedClassName.length() - "Data".length());
-        }
-        return generatedClassName;
-    }
-
-    private int countOccurrences(String text, String search) {
-        int count = 0;
-        int index = 0;
-        while ((index = text.indexOf(search, index)) != -1) {
-            count++;
-            index += search.length();
-        }
-        return count;
     }
 
     private String prettyPrintJsonLike(String json) {
@@ -331,35 +459,10 @@ public final class DataGeneratorRunner {
         }
     }
 
-    private ProcessResult runProcess(List<String> command, Path workDir) throws IOException, InterruptedException {
-        ProcessBuilder builder = new ProcessBuilder(command)
-                .directory(workDir.toFile())
-                .redirectErrorStream(true);
-        String existingPath = builder.environment().getOrDefault("PATH", "");
-        builder.environment().put("PATH", "/bin:/usr/bin:/opt/homebrew/bin:/usr/local/bin:" + existingPath);
-        Process process = builder.start();
-        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-        process.getInputStream().transferTo(buffer);
-        int exitCode = process.waitFor();
-        return new ProcessResult(exitCode, buffer.toString(StandardCharsets.UTF_8));
-    }
-
-    private static final class ProcessResult {
-        private final int exitCode;
-        private final String output;
-
-        private ProcessResult(int exitCode, String output) {
-            this.exitCode = exitCode;
-            this.output = output == null ? "" : output;
-        }
-    }
-
     public static final class ExecutedDataSummary {
         private final List<String> allEntries;
         private final List<String> passingEntries;
         private final List<String> failingEntries;
-        private final List<Integer> passingIndexes;
-        private final List<Integer> failingIndexes;
         private final Path fullJsonFile;
         private final Path passingJsonFile;
         private final Path failingJsonFile;
@@ -369,8 +472,6 @@ public final class DataGeneratorRunner {
                 List<String> allEntries,
                 List<String> passingEntries,
                 List<String> failingEntries,
-                List<Integer> passingIndexes,
-                List<Integer> failingIndexes,
                 Path fullJsonFile,
                 Path passingJsonFile,
                 Path failingJsonFile,
@@ -378,8 +479,6 @@ public final class DataGeneratorRunner {
             this.allEntries = List.copyOf(allEntries);
             this.passingEntries = List.copyOf(passingEntries);
             this.failingEntries = List.copyOf(failingEntries);
-            this.passingIndexes = List.copyOf(passingIndexes);
-            this.failingIndexes = List.copyOf(failingIndexes);
             this.fullJsonFile = fullJsonFile;
             this.passingJsonFile = passingJsonFile;
             this.failingJsonFile = failingJsonFile;
@@ -387,7 +486,7 @@ public final class DataGeneratorRunner {
         }
 
         private static ExecutedDataSummary empty() {
-            return new ExecutedDataSummary(List.of(), List.of(), List.of(), List.of(), List.of(), null, null, null, null);
+            return new ExecutedDataSummary(List.of(), List.of(), List.of(), null, null, null, null);
         }
 
         public boolean present() {
@@ -404,14 +503,6 @@ public final class DataGeneratorRunner {
 
         public List<String> failingEntries() {
             return failingEntries;
-        }
-
-        public List<Integer> passingIndexes() {
-            return passingIndexes;
-        }
-
-        public List<Integer> failingIndexes() {
-            return failingIndexes;
         }
 
         public List<Integer> allIndexes() {
@@ -443,8 +534,6 @@ public final class DataGeneratorRunner {
         private final List<String> allEntries;
         private final List<String> passingEntries;
         private final List<String> failingEntries;
-        private final List<Integer> passingIndexes;
-        private final List<Integer> failingIndexes;
         private final Path passingFile;
         private final Path failingFile;
 
@@ -452,21 +541,17 @@ public final class DataGeneratorRunner {
                 List<String> allEntries,
                 List<String> passingEntries,
                 List<String> failingEntries,
-                List<Integer> passingIndexes,
-                List<Integer> failingIndexes,
                 Path passingFile,
                 Path failingFile) {
             this.allEntries = allEntries;
             this.passingEntries = passingEntries;
             this.failingEntries = failingEntries;
-            this.passingIndexes = passingIndexes;
-            this.failingIndexes = failingIndexes;
             this.passingFile = passingFile;
             this.failingFile = failingFile;
         }
 
         private static SplitResult empty() {
-            return new SplitResult(List.of(), List.of(), List.of(), List.of(), List.of(), null, null);
+            return new SplitResult(List.of(), List.of(), List.of(), null, null);
         }
 
         private String message() {

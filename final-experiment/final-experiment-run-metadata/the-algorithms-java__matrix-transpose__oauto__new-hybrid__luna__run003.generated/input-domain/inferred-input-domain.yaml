@@ -1,0 +1,405 @@
+InputDomain:
+  summary: Non-empty rectangular double matrices, including ordinary finite values
+    and Java double edge values, tested against the transpose follow-up; the source
+    and transposed invocations must return equal integer ranks.
+  globalConstraints:
+  - The source matrix has at least 1 row and at least 1 column, because computeRank
+    reads matrix.length and matrix[0].length and generateFollowUp reads source[0].
+  - Every row is non-null and has exactly the same positive length as the first row,
+    because both deepCopy and generateFollowUp index every row through that common
+    column count.
+  - Matrix elements are supplied as Java double values; no finite-only element restriction
+    is imposed by the supplied MatrixRank source.
+  - Each source case is paired with the exact matrix returned by MatrixRankMetamorphicSpec.generateFollowUp,
+    and assertRelation requires identical source and follow-up integer outputs.
+  - No INVALID cases are included because the supplied metamorphic relation constructs
+    a transpose only for non-empty rectangular matrices and does not specify invalid-input
+    behavior.
+  diversity:
+    shape:
+    - 1x1
+    - 1xN with N>1
+    - Mx1 with M>1
+    - square NxN with N>1
+    - tall MxN with M>N
+    - wide MxN with N>M
+    valueClass:
+    - all zero
+    - positive finite
+    - negative finite
+    - mixed-sign finite
+    - sub-EPSILON magnitude
+    - exact EPSILON magnitude
+    - large finite
+    - small finite
+    - NaN
+    - positive infinity
+    - negative infinity
+    pivotPath:
+    - no pivot in any column
+    - first-row pivot
+    - later-row pivot
+    - pivot after zero columns
+    - multiple marked rows
+    - elimination of other rows
+    - normalization with trailing columns
+    dependency:
+    - zero rank
+    - rank one
+    - dependent rows
+    - dependent columns
+    - full row rank
+    - full column rank
+  scenarios:
+  - id: SINGLE_NONZERO_ENTRY
+    category: NORMAL
+    description: A 1x1 matrix containing a nonzero finite value exercises the smallest
+      successful pivot and normalization path.
+    preconditions:
+    - matrix has exactly 1 row and 1 column
+    - matrix[0][0] is finite and nonzero
+    expectedSourceBehavior:
+    - validateInputMatrix is reached for a non-empty rectangular matrix
+    - the sole column selects the sole row as a pivot and computeRank returns an integer
+      rank
+    - the source matrix remains unchanged because computeRank operates on a deep copy
+    - the transposed 1x1 follow-up is identical and assertRelation requires the same
+      output
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: SINGLE_ZERO_ENTRY
+    category: BOUNDARY
+    description: A 1x1 zero matrix exercises the no-pivot sentinel return from findPivotRow.
+    preconditions:
+    - matrix has exactly 1 row and 1 column
+    - matrix[0][0] equals 0.0
+    expectedSourceBehavior:
+    - findPivotRow finds no unmarked nonzero entry and returns the row count sentinel
+    - no normalization or elimination is entered for the only column
+    - computeRank returns an integer result without modifying the source matrix
+    - transpose preserves the same 1x1 input for assertRelation
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ALL_ZERO_RECTANGULAR
+    category: BOUNDARY
+    description: Non-square all-zero matrices exercise repeated no-pivot columns in
+      both tall and wide shapes.
+    preconditions:
+    - matrix is either 1x3 or 3x1
+    - every element equals 0.0
+    expectedSourceBehavior:
+    - every column reaches the findPivotRow row-count sentinel
+    - rank remains at the zero-rank result
+    - the transpose changes shape but preserves the all-zero structure and must produce
+      the same output
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: SQUARE_IDENTITY
+    category: NORMAL
+    description: An identity matrix exercises one pivot per column without row elimination
+      between distinct pivot rows.
+    preconditions:
+    - matrix is 3x3
+    - matrix[r][c] equals 1.0 when r equals c and 0.0 otherwise
+    expectedSourceBehavior:
+    - each successive column selects its corresponding unmarked row
+    - each pivot value is already 1.0, while normalization still traverses any trailing
+      columns
+    - computeRank returns the full square rank
+    - the transposed follow-up is identical and must satisfy assertRelation
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: TALL_FULL_ROW_RANK
+    category: NORMAL
+    description: A tall matrix with independent rows exercises more rows than columns
+      and the marked-row search.
+    preconditions:
+    - matrix has 3 rows and 2 columns
+    - the first two rows are linearly independent, for example [1.0, 0.0] and [0.0,
+      1.0]
+    - the third row is finite and arbitrary
+    expectedSourceBehavior:
+    - at most one pivot is counted per column because there are only two columns
+    - rowMarked prevents a row already used as a pivot from being selected again
+    - computeRank returns an integer bounded by the two-column width
+    - the 2x3 transpose exercises the corresponding wide path and assertRelation compares
+      the outputs
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: WIDE_FULL_COLUMN_RANK
+    category: NORMAL
+    description: A wide matrix with independent columns exercises more columns than
+      rows and columns that remain after all rows are marked.
+    preconditions:
+    - matrix has 2 rows and 3 columns
+    - the first two columns are independent, for example rows [1.0, 0.0, 2.0] and
+      [0.0, 1.0, 3.0]
+    expectedSourceBehavior:
+    - pivots can mark both available rows
+    - later columns execute findPivotRow with all rows marked and use the row-count
+      sentinel
+    - computeRank returns an integer bounded by the two-row height
+    - the transposed follow-up must return the same output
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: DEPENDENT_ROWS
+    category: NORMAL
+    description: A square matrix with a duplicated or scalar-multiple row exercises
+      elimination and dependent-row suppression.
+    preconditions:
+    - matrix is 3x3
+    - row 1 is a nonzero scalar multiple of row 0
+    - row 2 is not required to be independent
+    - all entries are finite
+    expectedSourceBehavior:
+    - a pivot row is normalized and used to eliminate entries in another row
+    - the dependent row does not contribute an independent pivot after elimination
+    - computeRank returns an integer result without changing the input
+    - transpose converts row dependence into column dependence and must preserve the
+      asserted output
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: DEPENDENT_COLUMNS
+    category: NORMAL
+    description: A rectangular matrix with a duplicated or scalar-multiple column
+      exercises dependent columns directly.
+    preconditions:
+    - matrix has 3 rows and 3 columns
+    - one column is a nonzero scalar multiple of another
+    - at least one remaining column is independent of that pair
+    - all entries are finite
+    expectedSourceBehavior:
+    - elimination can make a later column contain only zero or EPSILON-zero pivot
+      candidates
+    - computeRank returns an integer lower than the number of columns
+    - the transposed follow-up presents the same dependence as dependent rows and
+      must satisfy assertRelation
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: INITIAL_ZERO_COLUMNS
+    category: BOUNDARY
+    description: Leading all-zero columns followed by a nonzero column exercise skipped
+      columns before the first pivot.
+    preconditions:
+    - matrix has 2 rows and 3 columns
+    - column 0 is all zero
+    - column 1 contains at least one finite nonzero value
+    - column 2 is finite and arbitrary
+    expectedSourceBehavior:
+    - the first column uses the no-pivot sentinel without changing rank
+    - a later column selects a pivot and enters normalization and elimination
+    - computeRank returns an integer result after continuing past the skipped column
+    - the transpose must produce the same asserted output
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LATE_PIVOT_ROW
+    category: BOUNDARY
+    description: A column whose first rows are zero and whose pivot is in a later
+      row exercises the top-to-bottom pivot search.
+    preconditions:
+    - matrix has 3 rows and 2 columns
+    - matrix[0][0] and matrix[1][0] equal 0.0
+    - matrix[2][0] is finite and nonzero
+    - at least one trailing value is nonzero
+    expectedSourceBehavior:
+    - findPivotRow skips the first two unmarked rows and returns row index 2
+    - that later row is marked, normalized, and used by elimination
+    - computeRank returns an integer result and leaves the source unchanged
+    - the transposed matrix must yield the same output under assertRelation
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: MARKED_ROW_SKIP
+    category: EDGE
+    description: A matrix forces a previously pivoted row to be skipped while searching
+      for a later pivot.
+    preconditions:
+    - matrix has 3 rows and 3 columns
+    - column 0 has a nonzero value in row 0
+    - after processing column 0, column 1 has no usable pivot in row 0 but has a finite
+      nonzero value in an unmarked lower row
+    - the matrix contains at least two independent pivot opportunities
+    expectedSourceBehavior:
+    - findPivotRow tests rowMarked and does not reuse the row selected for the earlier
+      column
+    - a lower unmarked row is selected for the later pivot
+    - computeRank counts distinct pivot rows rather than merely nonzero columns
+    - transpose must preserve the asserted integer output
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ACTIVE_ELIMINATION
+    category: NORMAL
+    description: A matrix with nonzero entries in a pivot column on other rows exercises
+      the inner elimination loop.
+    preconditions:
+    - matrix has at least 2 rows and 2 columns
+    - a selected pivot column contains a finite nonzero value in at least one other
+      row
+    - the pivot row has at least one trailing column
+    expectedSourceBehavior:
+    - eliminateRows enters for an otherRow whose pivot-column value is not zero
+    - trailing entries are updated using the normalized pivot row
+    - later pivot selection observes the transformed copy rather than the original
+      values
+    - the transpose follow-up must return the same output
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ZERO_ELIMINATION_TARGETS
+    category: EDGE
+    description: A matrix with zero entries in a pivot column on other rows exercises
+      the elimination guard that skips those rows.
+    preconditions:
+    - matrix has at least 2 rows and 2 columns
+    - the selected pivot column has a nonzero pivot
+    - at least one other row has exactly 0.0 in that column
+    - at least one trailing column exists
+    expectedSourceBehavior:
+    - eliminateRows skips the zero-valued other row because isZero returns true
+    - normalization still processes trailing pivot-row entries
+    - computeRank returns an integer result without source mutation
+    - the transposed follow-up must satisfy assertRelation
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: NONUNIT_PIVOT_NORMALIZATION
+    category: NORMAL
+    description: A non-unit pivot with trailing columns exercises division in normalizePivotRow
+      and subsequent elimination.
+    preconditions:
+    - matrix has 2 rows and 3 columns
+    - the first selected pivot is finite and has absolute value greater than or equal
+      to EPSILON
+    - the pivot row has at least one trailing nonzero value
+    - another row has a finite nonzero value in the pivot column
+    expectedSourceBehavior:
+    - normalizePivotRow divides trailing pivot-row entries by the pivot value
+    - eliminateRows uses the normalized trailing values
+    - computeRank returns an integer result based on the transformed copy
+    - the transpose must return the same integer output
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: EPSILON_BELOW_THRESHOLD
+    category: BOUNDARY
+    description: Entries with magnitude strictly below EPSILON exercise the isZero
+      branch.
+    preconditions:
+    - matrix is 2x2
+    - at least one candidate pivot entry has absolute value 0.5e-10
+    - no larger entry in the same candidate position overrides that value
+    - all other entries are finite
+    expectedSourceBehavior:
+    - isZero treats the sub-EPSILON candidate as zero because the source uses Math.abs(value)
+      < 1e-10
+    - the affected column may use the no-pivot sentinel or select a different row
+    - computeRank returns an integer result and the transpose must be compared with
+      assertRelation
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: EPSILON_EXACT_THRESHOLD
+    category: BOUNDARY
+    description: An entry exactly equal in magnitude to EPSILON exercises the strict
+      inequality boundary.
+    preconditions:
+    - matrix is 2x2
+    - at least one candidate pivot entry has absolute value exactly 1e-10 or -1e-10
+    - all other entries are finite
+    expectedSourceBehavior:
+    - isZero does not classify the exact threshold as zero because the comparison
+      is strictly less than EPSILON
+    - the threshold entry is eligible for pivot selection
+    - computeRank returns an integer result and the transposed follow-up must match
+      it
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: NEGATIVE_PIVOTS
+    category: NORMAL
+    description: Mixed-sign finite values exercise pivot selection and normalization
+      with negative divisors.
+    preconditions:
+    - matrix has 2 rows and 3 columns
+    - at least one selected pivot is negative and has absolute value at least EPSILON
+    - at least one trailing pivot-row value is nonzero
+    - all entries are finite
+    expectedSourceBehavior:
+    - normalizePivotRow divides by a negative pivot without any sign-specific branch
+    - elimination processes finite mixed-sign products and differences
+    - computeRank returns an integer result without modifying the source
+    - transpose must satisfy the same-output assertion
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ZERO_ROW_BETWEEN_INDEPENDENT_ROWS
+    category: EDGE
+    description: A zero row between independent rows exercises continued scanning
+      over marked and structurally empty rows.
+    preconditions:
+    - matrix has 3 rows and 2 columns
+    - row 1 is all zero
+    - rows 0 and 2 contain independent finite information
+    expectedSourceBehavior:
+    - zero-row candidates are skipped by findPivotRow in every relevant column
+    - nonzero rows can still supply pivots after the intervening zero row
+    - computeRank returns an integer result and the transpose must preserve it
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LARGE_FINITE_VALUES
+    category: EDGE
+    description: Large finite magnitudes exercise arithmetic in normalization and
+      elimination near double-range limits without using non-finite literals.
+    preconditions:
+    - matrix has 2 rows and 2 columns
+    - at least one entry has magnitude at least 1e300 and is finite
+    - at least one pivot candidate has magnitude at least EPSILON
+    expectedSourceBehavior:
+    - computeRank executes the ordinary pivot, normalization, and elimination code
+      paths with large finite operands
+    - the returned value is an integer if invocation completes
+    - the source matrix remains unchanged and the transpose is checked by assertRelation
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: SMALL_FINITE_VALUES
+    category: EDGE
+    description: Small finite magnitudes exercise the EPSILON classification and arithmetic
+      near underflow without requiring subnormal values.
+    preconditions:
+    - matrix has 2 rows and 2 columns
+    - at least one entry is finite with magnitude between 1e-300 and 1e-10
+    - at least one pivot candidate has magnitude at least 1e-10
+    expectedSourceBehavior:
+    - some small entries may be treated as zero while threshold-sized entries remain
+      eligible
+    - pivot selection and the no-pivot sentinel are both reachable in the same matrix
+    - computeRank returns an integer result and the transpose is required to match
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: NAN_ENTRY
+    category: EDGE
+    description: A structurally valid rectangular matrix containing NaN exercises
+      the source's direct double comparisons and arithmetic with NaN.
+    preconditions:
+    - matrix has at least 1 row and 1 column
+    - at least one element is Double.NaN
+    - all rows remain non-null and equally sized
+    expectedSourceBehavior:
+    - isZero receives a NaN value on any path that examines that element; Math.abs(NaN)
+      is NaN and the strict less-than test is false
+    - pivot selection, normalization, or elimination may therefore follow the nonzero
+      branch for the NaN-containing value
+    - the invocation and its transpose are both executed, and assertRelation checks
+      their returned integer outputs
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: INFINITE_ENTRY
+    category: EDGE
+    description: A structurally valid rectangular matrix containing positive or negative
+      infinity exercises non-finite arithmetic while retaining a rectangular shape.
+    preconditions:
+    - matrix has at least 1 row and 1 column
+    - at least one element is Double.POSITIVE_INFINITY or Double.NEGATIVE_INFINITY
+    - all rows remain non-null and equally sized
+    expectedSourceBehavior:
+    - isZero treats an infinite value as nonzero because its absolute value is not
+      less than EPSILON
+    - normalization or elimination may produce non-finite intermediate values in the
+      deep copy
+    - the source and transpose invocations are both made and their integer outputs
+      are compared by assertRelation
+    targetCases: 2
+    emptyOutputAllowed: false

@@ -1,0 +1,356 @@
+InputDomain:
+  summary: Valid chronological Bar sequences and positive Renko configurations that
+    exercise empty input, threshold equality, continuation, multi-brick emission,
+    reversal, metadata accumulation, and brick-time resolution under the supplied
+    positive price-and-box scaling relation.
+  globalConstraints:
+  - Construct the receiver with a finite positive boxSize B and reversalAmount R >=
+    1; the supplied constructors reject null, non-finite, or non-positive box sizes
+    and non-positive reversal amounts.
+  - Use a non-null List<Bar>; generateFollowUp rejects a null source list.
+  - Every list element must be non-null; generateFollowUp explicitly rejects null
+    source bars.
+  - Every source Bar must have a non-null close price; aggregate throws IllegalArgumentException
+    when a close price is null.
+  - Source bars must be chronological, contiguous, and evenly spaced, as required
+    by aggregate's source-interval validation.
+  - Use price and box values representable by the bars' NumFactory, including their
+    multiplication by 2.0 in the follow-up.
+  - Preserve each source bar's time period, begin time, end time, volume, and trades
+    in the follow-up; scale every non-null price and amount by 2.0 as performed by
+    scaleBar.
+  - Do not include null lists, null elements, null close prices, uneven intervals,
+    or non-contiguous intervals because these are rejected before a meaningful metamorphic
+    output relation can be observed.
+  diversity:
+    boxSize:
+    - '0.5'
+    - '1.0'
+    - '2.0'
+    - '10.0'
+    reversalAmount:
+    - '1'
+    - '2'
+    - '3'
+    listLength:
+    - '0'
+    - '1'
+    - '2'
+    - '3'
+    - '4'
+    - '5'
+    closeMovementFromInitialClose:
+    - zero
+    - strictly less than B
+    - exactly B
+    - between B and R*B
+    - exactly R*B
+    - greater than R*B
+    - multiple of B
+    directionState:
+    - NONE
+    - UP
+    - DOWN
+    metadataPresence:
+    - non-null volume and amount
+    - null volume
+    - null amount
+    - both volume and amount null
+    metadataMagnitude:
+    - zero
+    - positive
+    - accumulated across source bars
+    sourceBarEmissionCount:
+    - '0'
+    - '1'
+    - '2'
+    - '3'
+    - four or more
+    temporalEmissionPattern:
+    - one brick per source bar
+    - multiple bricks from one source bar
+    - later source end after scheduled brick time
+  scenarios:
+  - id: EMPTY_SOURCE_LIST
+    category: EDGE
+    description: Aggregate an empty list with a valid positive Renko configuration.
+    preconditions:
+    - bars.size() == 0.
+    - The receiver has finite boxSize B > 0 and reversalAmount R >= 1.
+    expectedSourceBehavior:
+    - aggregate returns a non-null empty List<Bar> without reading a NumFactory or
+      source interval.
+    - The follow-up also returns an empty list, so the relation observes equal output
+      sizes.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: SINGLE_BAR_SEEDS_STATE_ONLY
+    category: NORMAL
+    description: Use one valid source bar whose close initializes lastBrickClose but
+      cannot be compared with a later close.
+    preconditions:
+    - bars.size() == 1.
+    - The sole bar has a non-null close price C and a valid interval.
+    expectedSourceBehavior:
+    - No brick is emitted because no later source close can reach a threshold.
+    - aggregate returns an empty list.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: INITIAL_UP_THRESHOLD
+    category: BOUNDARY
+    description: Trigger the Direction.NONE upward loop at exactly one box.
+    preconditions:
+    - Use two evenly spaced bars with close prices [C, C + B].
+    - The second close equals lastBrickClose.plus(resolvedBoxSize).
+    expectedSourceBehavior:
+    - Exactly one upward brick is emitted with open C and close C + B.
+    - The brick high is C + B and its low is C.
+    - The follow-up emits one corresponding upward brick with generated prices doubled
+      and unchanged times, volume, amount, and trades.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: INITIAL_DOWN_THRESHOLD
+    category: BOUNDARY
+    description: Trigger the Direction.NONE downward loop at exactly one box.
+    preconditions:
+    - Use two evenly spaced bars with close prices [C, C - B].
+    - The second close equals lastBrickClose.minus(resolvedBoxSize).
+    expectedSourceBehavior:
+    - Exactly one downward brick is emitted with open C and close C - B.
+    - The follow-up preserves the one-brick count and downward direction while scaling
+      generated prices by 2.0.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: SUBTHRESHOLD_MOVEMENT
+    category: BOUNDARY
+    description: Keep later closes strictly inside both one-box thresholds.
+    preconditions:
+    - Use at least two evenly spaced bars.
+    - Every later close is strictly greater than C - B and strictly less than C +
+      B.
+    expectedSourceBehavior:
+    - No Renko brick is emitted.
+    - aggregate returns an empty list even though pending metadata may accumulate.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: EQUALITY_WITHOUT_MOVEMENT
+    category: EDGE
+    description: Supply repeated closes equal to the current brick close.
+    preconditions:
+    - Use at least three evenly spaced bars with close prices [C, C, C].
+    - The repeated equality is below both one-box movement thresholds.
+    expectedSourceBehavior:
+    - No brick is emitted and direction remains NONE.
+    - The inclusive comparisons are exercised without a threshold crossing.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: UPWARD_CONTINUATION_ONE_BRICK
+    category: NORMAL
+    description: Establish UP and emit one additional upward brick without reversal.
+    preconditions:
+    - Use close prices [C, C + B, C + 2B] with evenly spaced intervals.
+    - The third close reaches exactly one additional upward box after the first brick.
+    expectedSourceBehavior:
+    - Two upward bricks are emitted in order.
+    - The Direction.UP continuation loop is exercised without entering a reversal
+      branch.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: DOWNWARD_CONTINUATION_ONE_BRICK
+    category: NORMAL
+    description: Establish DOWN and emit one additional downward brick.
+    preconditions:
+    - Use close prices [C, C - B, C - 2B] with evenly spaced intervals.
+    - The third close reaches exactly one additional downward box after the first
+      brick.
+    expectedSourceBehavior:
+    - Two downward bricks are emitted.
+    - The Direction.DOWN continuation loop is exercised without entering its upward
+      reversal branch.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: MULTIPLE_UP_BRICKS_FROM_ONE_BAR
+    category: BOUNDARY
+    description: Make one source bar cross several upward box boundaries.
+    preconditions:
+    - Use close prices [C, C + 3B].
+    - The second close is exactly three boxes above the initial close.
+    expectedSourceBehavior:
+    - Three upward bricks are emitted from the second source bar.
+    - The first emitted brick receives that source bar's pending volume, amount, and
+      trades.
+    - Additional bricks from the same source bar receive zero volume, zero amount,
+      and zero trades.
+    - Additional brick end times advance by sourcePeriod.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: MULTIPLE_DOWN_BRICKS_FROM_ONE_BAR
+    category: BOUNDARY
+    description: Make one source bar cross several downward box boundaries.
+    preconditions:
+    - Use close prices [C, C - 3B].
+    - The second close is exactly three boxes below the initial close.
+    expectedSourceBehavior:
+    - Three downward bricks are emitted from the second source bar.
+    - Only the first brick from that source bar carries its pending metadata.
+    - Later bricks from that source bar carry zero volume, zero amount, and zero trades.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: UP_REVERSAL_EXACT_THRESHOLD
+    category: BOUNDARY
+    description: Establish UP and reverse at exactly reversalAmount boxes downward.
+    preconditions:
+    - Use reversalAmount R >= 1.
+    - Use close prices [C, C + B, C + B - R*B].
+    - The final close equals lastBrickClose.minus(reversalDistance).
+    expectedSourceBehavior:
+    - The inclusive upward reversal condition is taken.
+    - At least one downward brick follows the preceding upward brick.
+    - The follow-up preserves brick count, direction sequence, timestamps, and metadata
+      while scaling generated prices.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: UP_REVERSAL_JUST_BELOW_THRESHOLD
+    category: BOUNDARY
+    description: Move downward almost far enough to reverse while remaining strictly
+      above the reversal guard's lower boundary.
+    preconditions:
+    - Use reversalAmount R >= 2.
+    - Use close prices [C, C + B, C + B - (R*B - epsilon)].
+    - epsilon is positive, representable by the NumFactory, and smaller than B.
+    expectedSourceBehavior:
+    - The final close is below lastBrickClose but greater than lastBrickClose.minus(reversalDistance).
+    - No downward reversal brick is emitted.
+    - The UP direction remains active.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: DOWN_REVERSAL_EXACT_THRESHOLD
+    category: BOUNDARY
+    description: Establish DOWN and reverse at exactly reversalAmount boxes upward.
+    preconditions:
+    - Use reversalAmount R >= 1.
+    - Use close prices [C, C - B, C - B + R*B].
+    - The final close equals lastBrickClose.plus(reversalDistance).
+    expectedSourceBehavior:
+    - The inclusive downward reversal condition is taken.
+    - At least one upward brick follows the preceding downward brick.
+    - The follow-up preserves output size, direction sequence, timestamps, and metadata
+      while scaling generated prices.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: DOWN_REVERSAL_JUST_BELOW_THRESHOLD
+    category: BOUNDARY
+    description: Move upward without reaching the downward-state reversal distance.
+    preconditions:
+    - Use reversalAmount R >= 2.
+    - Use close prices [C, C - B, C - B + (R*B - epsilon)].
+    - epsilon is positive, representable by the NumFactory, and smaller than B.
+    expectedSourceBehavior:
+    - The final close is below lastBrickClose.plus(reversalDistance).
+    - No upward reversal brick is emitted.
+    - The output remains limited to the earlier downward bricks.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ONE_BOX_REVERSAL_CONFIGURATION
+    category: NORMAL
+    description: Use reversalAmount == 1 so a one-box opposite move reverses immediately.
+    preconditions:
+    - Construct RenkoBarAggregator(B, 1) with finite B > 0.
+    - Use close prices [C, C + B, C] or [C, C - B, C].
+    expectedSourceBehavior:
+    - The opposite one-box move satisfies reversalDistance == resolvedBoxSize.
+    - A brick in the opposite direction is emitted.
+    - The follow-up retains reversalAmount == 1 while doubling boxSize and generated
+      prices.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: REVERSAL_WITH_MULTIPLE_BRICKS
+    category: NORMAL
+    description: Reverse and cross multiple boxes in the new direction within one
+      source bar.
+    preconditions:
+    - Use R == 2 or R == 3.
+    - Use close prices [C, C + B, C + B - (R + 2)*B].
+    - The final close is beyond the reversal threshold by at least two additional
+      boxes.
+    expectedSourceBehavior:
+    - The reversal branch emits multiple downward bricks from the current source bar.
+    - Only the first reversal brick carries that source bar's pending metadata.
+    - Subsequent reversal bricks have zero volume, amount, and trades.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: PENDING_METADATA_ACCUMULATION
+    category: NORMAL
+    description: Accumulate source metadata across non-emitting bars and attach it
+      to the first later brick.
+    preconditions:
+    - Use close prices [C, C + delta, C + B] with 0 < delta < B.
+    - Use positive volume and amount on the source bars.
+    - Use distinct nonzero trade counts on the source bars.
+    expectedSourceBehavior:
+    - The first emitted brick carries the sums of non-null pending volumes and amounts.
+    - The first emitted brick carries the sum of source trade counts accumulated before
+      emission.
+    - The follow-up preserves volume and trades and scales the emitted amount and
+      prices as required by the relation.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: NULL_VOLUME_AND_AMOUNT_METADATA
+    category: EDGE
+    description: Exercise the null checks for source volume and amount.
+    preconditions:
+    - Use a threshold-crossing sequence such as [C, C + B].
+    - At least one source volume is null and at least one source amount is null.
+    - All source close prices are non-null.
+    expectedSourceBehavior:
+    - aggregate does not reject null volume or amount because it adds each only when
+      non-null.
+    - Null metadata contributes nothing to pending totals.
+    - The follow-up retains null source volume and scales each non-null source amount.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ZERO_METADATA_AND_TRADES
+    category: EDGE
+    description: Emit bricks while source volume, amount, and trade counts are zero.
+    preconditions:
+    - Use a threshold-crossing sequence.
+    - Every source bar has zero volume, zero amount, and zero trades.
+    expectedSourceBehavior:
+    - Bricks are created solely from close-price movement.
+    - Emitted volume, amount, and trades remain zero.
+    - The follow-up preserves zero metadata and scales only the generated prices.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BRICK_END_TIME_CATCH_UP
+    category: EDGE
+    description: Exercise resolveBrickEndTime when a later source end time is after
+      the scheduled next brick end time.
+    preconditions:
+    - Use valid contiguous, evenly spaced source bars.
+    - Cause an earlier source bar to emit multiple bricks, advancing nextBrickEndTime
+      beyond that source bar's end time.
+    - Include enough later bars that a later source bar has endTime after the current
+      nextBrickEndTime.
+    expectedSourceBehavior:
+    - Each emitted brick end time is the later of the current source end time and
+      nextBrickEndTime.
+    - Generated time periods and source-derived times are unchanged by the follow-up.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MIXED_CONTINUATION_AND_REVERSAL_SEQUENCE
+    category: NORMAL
+    description: Exercise multiple Direction branches and state transitions in one
+      chronological input.
+    preconditions:
+    - Use R >= 1 and a sequence containing an upward run, a reversal threshold crossing,
+      and a later continuation or opposite transition.
+    - At least one source bar emits multiple bricks.
+    - At least one later source bar tests a reversal condition.
+    expectedSourceBehavior:
+    - The output contains ordered upward and downward brick runs produced by distinct
+      Direction branches.
+    - Metadata is attached only to the first brick emitted from each source bar.
+    - The follow-up has the same brick count and direction sequence, with corresponding
+      generated prices doubled.
+    targetCases: 2
+    emptyOutputAllowed: false

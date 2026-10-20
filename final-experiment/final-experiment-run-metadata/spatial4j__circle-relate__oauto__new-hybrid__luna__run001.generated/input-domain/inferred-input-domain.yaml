@@ -1,0 +1,335 @@
+InputDomain:
+  summary: Finite, non-geodetic Cartesian circle/rectangle pairs whose source and
+    shifted coordinates remain valid in the same SpatialContext; cases target the
+    bounding-box shortcuts, rectangle phase-two distance checks, axis-position branches,
+    equality edge case, zero-radius behavior, and empty-circle sentinel path of CircleImpl.relate(Rectangle).
+  globalConstraints:
+  - Use one non-geo SpatialContext for the CircleImpl, the source Rectangle, and the
+    follow-up objects; do not use antimeridian, pole, or world-wrap coordinates.
+  - Construct each circle with a non-null Point, a finite radius greater than or equal
+    to 0.0, and the same context used by the metamorphic follow-up; the empty-circle
+    scenario is the sole exception and uses an empty point.
+  - Construct each non-empty rectangle with finite coordinates satisfying minX <=
+    maxX and minY <= maxY; rectangles may have zero width or zero height where explicitly
+    stated.
+  - Choose source coordinates so that adding SHIFT_X = 17.5 and SHIFT_Y = -9.25 to
+    the circle center and all rectangle bounds remains finite and valid in the same
+    non-geo context.
+  - For every scenario, invoke CircleImpl.relate(Rectangle) on the source pair, generate
+    the follow-up with the supplied generateFollowUp method, and require assertRelation
+    to observe the identical SpatialRelation.
+  - Do not use null arguments, unsupported coordinate values, negative radii, or malformed
+    rectangles because the supplied metamorphic relation does not request invalid-input
+    behavior.
+  diversity:
+    circleCenterPosition:
+    - centered at (0,0)
+    - negative and positive nonzero coordinates
+    - center on a rectangle boundary
+    - center outside the rectangle on X
+    - center outside the rectangle on Y
+    radius:
+    - '0.0'
+    - '1.0'
+    - '2.0'
+    - '5.0'
+    - '10.0'
+    boundingBoxRelation:
+    - DISJOINT
+    - WITHIN
+    - CONTAINS
+    - INTERSECTS
+    - CONTAINS with exact equality
+    phaseTwoAxisCase:
+    - both axes outside rectangle
+    - X outside and Y inside
+    - X inside and Y outside
+    - both axes inside
+    - axis exactly on a rectangle boundary
+    closestPointDistance:
+    - strictly outside the circle
+    - exactly on the circle boundary
+    - strictly inside the circle
+    farthestPointDistance:
+    - strictly outside the circle
+    - exactly on the circle boundary
+    - strictly inside the circle
+    rectangleDimensionality:
+    - positive width and height
+    - zero width
+    - zero height
+    - zero width and height
+    circleState:
+    - ordinary non-empty circle
+    - zero-radius circle
+    - empty circle
+  scenarios:
+  - id: EMPTY_CIRCLE_SENTINEL
+    category: EDGE
+    description: The receiver is constructed from an empty point, while the rectangle
+      is an ordinary non-empty rectangle.
+    preconditions:
+    - The circle center is an empty Point recognized by point.isEmpty(), so CircleImpl
+      sets radiusDEG to NaN and constructs an empty enclosing rectangle.
+    - Use source rectangle [0.0, 1.0] x [0.0, 1.0].
+    - The shifted empty center and shifted rectangle remain constructible by the supplied
+      follow-up.
+    expectedSourceBehavior:
+    - The empty enclosing-box path must yield SpatialRelation.DISJOINT for the source
+      rectangle.
+    - The follow-up must remain an empty-circle case and produce DISJOINT as well.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BBOX_DISJOINT_WITH_AXIS_SEPARATION
+    category: NORMAL
+    description: The rectangle is separated from the circle's enclosing box, with
+      the rectangle to the positive X side.
+    preconditions:
+    - Use circle center (0.0, 0.0), radius 2.0, and rectangle [3.0, 4.0] x [-1.0,
+      1.0].
+    - The rectangle and the enclosing box [-2.0, 2.0] x [-2.0, 2.0] are disjoint.
+    expectedSourceBehavior:
+    - enclosingBox.relate(rectangle) is DISJOINT, so relate(Rectangle) returns DISJOINT
+      before phase two.
+    - The shifted pair must also return DISJOINT.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: BBOX_WITHIN_RECTANGLE
+    category: NORMAL
+    description: The rectangle strictly contains the circle's enclosing box.
+    preconditions:
+    - Use circle center (0.0, 0.0), radius 2.0, and rectangle [-3.0, 3.0] x [-4.0,
+      4.0].
+    - The enclosing box [-2.0, 2.0] x [-2.0, 2.0] is strictly WITHIN the rectangle.
+    expectedSourceBehavior:
+    - The bounding-box shortcut returns WITHIN without invoking the rectangle phase-two
+      distance tests.
+    - The follow-up must return WITHIN.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: BBOX_EQUALITY_IDENTITY_EDGE
+    category: EDGE
+    description: The rectangle is exactly equal to the circle's calculated enclosing
+      box.
+    preconditions:
+    - Use circle center (0.0, 0.0), radius 2.0, and rectangle [-2.0, 2.0] x [-2.0,
+      2.0].
+    - The enclosing box equals the supplied rectangle according to Rectangle.equals.
+    expectedSourceBehavior:
+    - The bbox relation reaches CONTAINS and the explicit enclosingBox.equals(r) branch
+      changes the result to WITHIN.
+    - The translated pair must preserve the equality relationship and return WITHIN.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: PHASE_TWO_CORNER_DISJOINT
+    category: BOUNDARY
+    description: The rectangle's bounding box intersects the circle's box, but its
+      nearest corner is outside the circle.
+    preconditions:
+    - Use circle center (0.0, 0.0), radius 2.0, and rectangle [1.5, 3.0] x [1.5, 3.0].
+    - The boxes intersect, both circle axes lie outside the rectangle, and the closest
+      rectangle point (1.5, 1.5) has distance greater than 2.0.
+    expectedSourceBehavior:
+    - The phase-two closest-point test returns DISJOINT even though the enclosing
+      boxes intersect.
+    - The shifted pair must return DISJOINT.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: PHASE_TWO_CORNER_TANGENCY
+    category: BOUNDARY
+    description: The rectangle touches the circle at the closest corner while its
+      bounding box intersects the circle's bounding box.
+    preconditions:
+    - Use circle center (0.0, 0.0), radius 2.0, and rectangle [2.0, 3.0] x [0.0, 1.0].
+    - The closest point is (2.0, 0.0), exactly at the circle radius; the X axis is
+      outside the rectangle and the Y axis lies inside it.
+    expectedSourceBehavior:
+    - The closest-point containment check must not classify the touching pair as DISJOINT.
+    - Because the bbox relation is not CONTAINS, the non-disjoint result is INTERSECTS.
+    - The follow-up must return INTERSECTS.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: PHASE_TWO_BOTH_AXES_OUTSIDE_INTERSECTION
+    category: NORMAL
+    description: Both circle axes are outside the rectangle, but the closest rectangle
+      corner lies strictly inside the circle.
+    preconditions:
+    - Use circle center (0.0, 0.0), radius 2.0, and rectangle [1.0, 3.0] x [0.5, 1.5].
+    - The closest point (1.0, 0.5) is inside the circle, while the rectangle's farthest
+      corner is not relevant because the bbox relation is INTERSECTS.
+    expectedSourceBehavior:
+    - The closest-point test must avoid DISJOINT.
+    - Because bboxSect is INTERSECTS, phase two returns INTERSECTS.
+    - The translated pair must return INTERSECTS.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: X_OUTSIDE_Y_INSIDE_INTERSECTION
+    category: NORMAL
+    description: The circle axis is outside the rectangle on X but lies inside it
+      on Y.
+    preconditions:
+    - Use circle center (0.0, 0.0), radius 2.0, and rectangle [1.0, 3.0] x [-1.0,
+      1.0].
+    - xAxis < minX and minY <= yAxis <= maxY; the closest Y coordinate is therefore
+      the circle's Y axis.
+    - The rectangle's bounding box intersects the circle's enclosing box.
+    expectedSourceBehavior:
+    - The condition requiring both axes to differ from their closest coordinates is
+      false, so the code cannot return DISJOINT from the closest-corner test.
+    - The result is INTERSECTS.
+    - The follow-up must return INTERSECTS.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: X_INSIDE_Y_OUTSIDE_INTERSECTION
+    category: NORMAL
+    description: The circle axis is inside the rectangle on X but lies outside it
+      on Y.
+    preconditions:
+    - Use circle center (0.0, 0.0), radius 2.0, and rectangle [-1.0, 1.0] x [1.0,
+      3.0].
+    - minX <= xAxis <= maxX and yAxis < minY; the closest X coordinate is therefore
+      the circle's X axis.
+    - The rectangle's bounding box intersects the circle's enclosing box.
+    expectedSourceBehavior:
+    - The closest-corner DISJOINT check is bypassed because the X axis equals its
+      closest coordinate.
+    - The result is INTERSECTS.
+    - The follow-up must return INTERSECTS.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: BBOX_CONTAINS_RECTANGLE_CONTAINED
+    category: NORMAL
+    description: The circle's enclosing box contains the rectangle and the circle
+      contains the rectangle's farthest corner.
+    preconditions:
+    - Use circle center (0.0, 0.0), radius 2.0, and rectangle [-1.0, 1.0] x [-1.0,
+      1.0].
+    - The bbox relation is CONTAINS.
+    - The farthest rectangle corner has distance sqrt(2), strictly less than the radius.
+    expectedSourceBehavior:
+    - The bbox relation permits the containment test, and contains(farthestX, farthestY)
+      is true.
+    - relate(Rectangle) returns CONTAINS.
+    - The follow-up must return CONTAINS.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: BBOX_CONTAINS_CORNER_OUTSIDE
+    category: NORMAL
+    description: The circle's enclosing box contains the rectangle, but a farthest
+      rectangle corner lies outside the circle.
+    preconditions:
+    - Use circle center (0.0, 0.0), radius 2.0, and rectangle [-1.9, 1.9] x [-1.9,
+      1.9].
+    - The bbox relation is CONTAINS.
+    - The farthest corner distance is greater than 2.0.
+    expectedSourceBehavior:
+    - The closest-point test does not return DISJOINT because the circle axes lie
+      inside the rectangle.
+    - The farthest-point containment check returns false, so the result is INTERSECTS
+      rather than CONTAINS.
+    - The follow-up must return INTERSECTS.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: FARTHEST_CORNER_RADIUS_BOUNDARY
+    category: BOUNDARY
+    description: The rectangle is within the circle's enclosing box and its farthest
+      corner lies exactly on the circle boundary.
+    preconditions:
+    - Use circle center (0.0, 0.0), radius 2.0, and rectangle [0.0, 2.0] x [0.0, 1.0].
+    - The bbox relation is CONTAINS.
+    - The farthest corner (2.0, 1.0) must not be used; instead use rectangle [0.0,
+      2.0] x [0.0, 0.0] so the farthest points include (2.0, 0.0), exactly at radius
+      2.0.
+    expectedSourceBehavior:
+    - The farthest-point containment test exercises the inclusive distance boundary
+      and returns CONTAINS when the boundary point is considered within.
+    - The follow-up must return the same relation.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: AXIS_ON_RECTANGLE_BOUNDARY
+    category: EDGE
+    description: The circle center lies on one or both rectangle boundaries, exercising
+      the strict less-than and greater-than axis tests.
+    preconditions:
+    - Use circle center (0.0, 0.0), radius 2.0, and rectangle [0.0, 1.0] x [0.0, 1.0].
+    - xAxis equals minX and yAxis equals minY, so neither outside-axis branch is selected.
+    - The rectangle is contained by the circle.
+    expectedSourceBehavior:
+    - The phase-two closest-point logic treats boundary-axis coordinates as inside-axis
+      cases.
+    - The farthest-corner test returns CONTAINS.
+    - The follow-up must return CONTAINS.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ZERO_RADIUS_RECTANGLE_CONTAINS_POINT
+    category: EDGE
+    description: The circle has zero radius and its center is strictly inside a positive-area
+      rectangle.
+    preconditions:
+    - Use circle center (0.0, 0.0), radius 0.0, and rectangle [-1.0, 1.0] x [-1.0,
+      1.0].
+    - The zero-radius enclosing box is the point box at (0.0, 0.0), which is WITHIN
+      the rectangle.
+    expectedSourceBehavior:
+    - The enclosing-box shortcut returns WITHIN.
+    - The follow-up must preserve the zero radius and return WITHIN.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ZERO_RADIUS_EQUAL_POINT_RECTANGLE
+    category: EDGE
+    description: The zero-radius circle's enclosing box and the rectangle are both
+      the single point at the circle center.
+    preconditions:
+    - Use circle center (5.0, -3.0), radius 0.0, and zero-width, zero-height rectangle
+      [5.0, 5.0] x [-3.0, -3.0].
+    - The enclosing box equals the rectangle, exercising the explicit equality identity
+      edge case for a no-area shape.
+    expectedSourceBehavior:
+    - The bbox relation reaches CONTAINS and the equality branch returns WITHIN.
+    - The follow-up must return WITHIN.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ZERO_RADIUS_POINT_RECTANGLE_DISJOINT
+    category: EDGE
+    description: The zero-radius circle is separated from a zero-area rectangle point.
+    preconditions:
+    - Use circle center (0.0, 0.0), radius 0.0, and rectangle [1.0, 1.0] x [0.0, 0.0].
+    - The circle's point enclosing box and the rectangle point are disjoint.
+    expectedSourceBehavior:
+    - The enclosing-box shortcut returns DISJOINT.
+    - The follow-up must return DISJOINT.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ZERO_WIDTH_RECTANGLE_INTERSECTION
+    category: EDGE
+    description: A positive-radius circle is related to a vertical zero-width rectangle
+      that crosses the circle's interior.
+    preconditions:
+    - Use circle center (0.0, 0.0), radius 2.0, and rectangle [1.0, 1.0] x [-1.5,
+      1.5].
+    - The rectangle has zero width, its X coordinate is outside the circle axis, and
+      its vertical extent crosses the circle.
+    - The enclosing boxes intersect and the closest point (1.0, 0.0) is strictly inside
+      the circle.
+    expectedSourceBehavior:
+    - The phase-two closest-point check avoids DISJOINT and the non-CONTAINS bbox
+      relation yields INTERSECTS.
+    - The follow-up must return INTERSECTS.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ZERO_HEIGHT_RECTANGLE_INTERSECTION
+    category: EDGE
+    description: A positive-radius circle is related to a horizontal zero-height rectangle
+      that crosses the circle's interior.
+    preconditions:
+    - Use circle center (0.0, 0.0), radius 2.0, and rectangle [-1.5, 1.5] x [1.0,
+      1.0].
+    - The rectangle has zero height, its Y coordinate is outside the circle axis,
+      and its horizontal extent crosses the circle.
+    - The enclosing boxes intersect and the closest point (0.0, 1.0) is strictly inside
+      the circle.
+    expectedSourceBehavior:
+    - The phase-two closest-point check avoids DISJOINT and the result is INTERSECTS.
+    - The follow-up must return INTERSECTS.
+    targetCases: 2
+    emptyOutputAllowed: false

@@ -1,0 +1,322 @@
+InputDomain:
+  summary: Geo RectangleImpl and Point inputs with canonical longitudes, finite ordinary
+    coordinates, valid latitude ordering, dateline-wrapping rectangles, boundary probes,
+    disjoint probes, degenerate rectangles, and the RectangleImpl empty-minX sentinel.
+    The source and follow-up are compared only for inputs for which the supplied 150-degree
+    normalization preserves the rectangle's longitudinal extent.
+  globalConstraints:
+  - rectangle.getContext().isGeo() == true; the MR uses DistanceUtils.normLonDEG and
+    its stated rotational premise is geographic.
+  - Except for the explicit EMPTY_MIN_X_NAN_SENTINEL scenario, rectangle minX, maxX,
+    point.getX(), rectangle minY, rectangle maxY, and point.getY() are finite.
+  - For ordinary scenarios, -180.0 <= rectangle.getMinX() <= 180.0, -180.0 <= rectangle.getMaxX()
+    <= 180.0, and -180.0 <= point.getX() <= 180.0.
+  - rectangle.getMinY() <= rectangle.getMaxY(), and rectangle minY/maxY and point
+    Y are within rectangle.getContext().getWorldBounds().getMinY() through getMaxY().
+  - Exclude ordinary rectangles with rectangle.getMaxX() - rectangle.getMinX() ==
+    360.0, specifically the canonical full-world representation minX=-180.0 and maxX=180.0.
+    The supplied follow-up independently normalizes both endpoints, changing that
+    representation into a zero-width rectangle, so the stated MR does not preserve
+    its geometry.
+  - Do not use infinite coordinates. Their behavior through DistanceUtils.normLonDEG
+    is not specified by the supplied MR or target source.
+  diversity:
+    longitudeTopology:
+    - distinct
+    - non-wrapping, dateline-wrapping, rotation-created wrapping, rotation-removed
+      wrapping, degenerate, and dateline endpoint representations
+    - '[-170,-100], [20,40], [100,170], [170,-170], [100,-100], [170,180], [-180,-170],
+      [30,30]'
+    latitudePosition:
+    - distinct
+    - strict interior, exact lower boundary, exact upper boundary, below, above, and
+      zero-height rectangle
+    - '[-10,10] with y=-11,-10,0,10,11; [5,5]'
+    longitudeProbePath:
+    - distinct
+    - geo short-circuit, pX<minX shift, pX>maxX shift, shifted containment, and shifted
+      disjointness
+    - direct interior/boundary; -175+360; 175-360; central dateline gap
+    specialState:
+    - distinct
+    - ordinary finite rectangle, zero-width line, zero-height line, and minX NaN empty
+      sentinel
+    - finite; minX=maxX=30; minY=maxY=5; minX=NaN
+  scenarios:
+  - id: NON_WRAPPING_STRICT_INTERIOR
+    category: NORMAL
+    description: A point is strictly inside an ordinary non-wrapping rectangle and
+      reaches the geo longitude short-circuit.
+    preconditions:
+    - rectangle coordinates are minX=20.0, maxX=40.0, minY=-10.0, maxY=10.0.
+    - point coordinates are x=30.0, y=0.0.
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS.
+    - The latitude guard does not return DISJOINT and pX lies directly within minX
+      through maxX.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NON_WRAPPING_MIN_X_BOUNDARY
+    category: BOUNDARY
+    description: A point lies exactly on the minimum longitude edge of a non-wrapping
+      rectangle.
+    preconditions:
+    - rectangle coordinates are minX=20.0, maxX=40.0, minY=-10.0, maxY=10.0.
+    - point coordinates are x=20.0, y=0.0.
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS because longitude comparisons are inclusive at
+      the edge.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NON_WRAPPING_MAX_X_BOUNDARY
+    category: BOUNDARY
+    description: A point lies exactly on the maximum longitude edge of a non-wrapping
+      rectangle.
+    preconditions:
+    - rectangle coordinates are minX=20.0, maxX=40.0, minY=-10.0, maxY=10.0.
+    - point coordinates are x=40.0, y=0.0.
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS because longitude comparisons are inclusive at
+      the edge.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LOWER_LATITUDE_BOUNDARY
+    category: BOUNDARY
+    description: A point lies exactly on the rectangle's minimum latitude edge.
+    preconditions:
+    - rectangle coordinates are minX=20.0, maxX=40.0, minY=-10.0, maxY=10.0.
+    - point coordinates are x=30.0, y=-10.0.
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS because the initial latitude checks use strict
+      greater-than and less-than comparisons.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UPPER_LATITUDE_BOUNDARY
+    category: BOUNDARY
+    description: A point lies exactly on the rectangle's maximum latitude edge.
+    preconditions:
+    - rectangle coordinates are minX=20.0, maxX=40.0, minY=-10.0, maxY=10.0.
+    - point coordinates are x=30.0, y=10.0.
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BELOW_MIN_Y
+    category: BOUNDARY
+    description: A point is immediately below the latitude interval, exercising the
+      point.getY() < getMinY() guard.
+    preconditions:
+    - rectangle coordinates are minX=20.0, maxX=40.0, minY=-10.0, maxY=10.0.
+    - point coordinates are x=30.0, y=-11.0.
+    expectedSourceBehavior:
+    - relate(point) returns DISJOINT before executing longitude handling.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ABOVE_MAX_Y
+    category: BOUNDARY
+    description: A point is immediately above the latitude interval, exercising the
+      point.getY() > getMaxY() guard.
+    preconditions:
+    - rectangle coordinates are minX=20.0, maxX=40.0, minY=-10.0, maxY=10.0.
+    - point coordinates are x=30.0, y=11.0.
+    expectedSourceBehavior:
+    - relate(point) returns DISJOINT before executing longitude handling.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NON_WRAPPING_WEST_SHIFTED_DISJOINT
+    category: EDGE
+    description: A longitude west of a non-wrapping rectangle enters the pX < minX
+      branch, is increased by 360 degrees, and remains outside.
+    preconditions:
+    - rectangle coordinates are minX=100.0, maxX=170.0, minY=-10.0, maxY=10.0.
+    - point coordinates are x=-175.0, y=0.0.
+    expectedSourceBehavior:
+    - relate(point) returns DISJOINT.
+    - The geo code changes pX from -175.0 to 185.0 before the final longitude comparison.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NON_WRAPPING_EAST_SHIFTED_DISJOINT
+    category: EDGE
+    description: A longitude east of a non-wrapping rectangle enters the pX > maxX
+      branch, is decreased by 360 degrees, and remains outside.
+    preconditions:
+    - rectangle coordinates are minX=-170.0, maxX=-100.0, minY=-10.0, maxY=10.0.
+    - point coordinates are x=175.0, y=0.0.
+    expectedSourceBehavior:
+    - relate(point) returns DISJOINT.
+    - The geo code changes pX from 175.0 to -185.0 before the final longitude comparison.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DATELINE_WRAP_EASTERN_LOBE_DIRECT_CONTAINS
+    category: NORMAL
+    description: A dateline-wrapping rectangle contains a point in its eastern lobe
+      without shifting the point longitude.
+    preconditions:
+    - rectangle coordinates are minX=170.0, maxX=-170.0, minY=-10.0, maxY=10.0.
+    - point coordinates are x=175.0, y=0.0.
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS.
+    - The source unwraps maxX to 190.0 and takes the direct geo short-circuit.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DATELINE_WRAP_WESTERN_LOBE_SHIFTED_CONTAINS
+    category: EDGE
+    description: A dateline-wrapping rectangle contains a point in its western lobe
+      only after pX is shifted by 360 degrees.
+    preconditions:
+    - rectangle coordinates are minX=170.0, maxX=-170.0, minY=-10.0, maxY=10.0.
+    - point coordinates are x=-175.0, y=0.0.
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS.
+    - The source unwraps maxX to 190.0 and changes pX from -175.0 to 185.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DATELINE_WRAP_CENTRAL_GAP_DISJOINT
+    category: EDGE
+    description: A point in the central longitude gap of a dateline-wrapping rectangle
+      is disjoint after longitude adjustment.
+    preconditions:
+    - rectangle coordinates are minX=170.0, maxX=-170.0, minY=-10.0, maxY=10.0.
+    - point coordinates are x=0.0, y=0.0.
+    expectedSourceBehavior:
+    - relate(point) returns DISJOINT.
+    - The source unwraps maxX to 190.0, shifts pX from 0.0 to 360.0, and fails the
+      final upper-bound comparison.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DATELINE_WRAP_MIN_X_BOUNDARY
+    category: BOUNDARY
+    description: A point is exactly at the minX edge of a wrapping rectangle.
+    preconditions:
+    - rectangle coordinates are minX=170.0, maxX=-170.0, minY=-10.0, maxY=10.0.
+    - point coordinates are x=170.0, y=0.0.
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS.
+    - After unwrapping, pX equals minX and is included by the direct short-circuit.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DATELINE_WRAP_MAX_X_BOUNDARY
+    category: BOUNDARY
+    description: A point is exactly at the raw maxX edge of a wrapping rectangle and
+      is included after shifting.
+    preconditions:
+    - rectangle coordinates are minX=170.0, maxX=-170.0, minY=-10.0, maxY=10.0.
+    - point coordinates are x=-170.0, y=0.0.
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS.
+    - The source unwraps maxX to 190.0 and shifts pX from -170.0 to 190.0, the inclusive
+      upper edge.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_CREATES_DATELINE_WRAP
+    category: EDGE
+    description: A source non-wrapping rectangle becomes a wrapping follow-up rectangle
+      after the specified 150-degree rotation.
+    preconditions:
+    - rectangle coordinates are minX=20.0, maxX=40.0, minY=-10.0, maxY=10.0.
+    - point coordinates are x=30.0, y=0.0.
+    - The generated follow-up longitudes are minX=170.0, maxX=-170.0, and point x=180.0.
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS.
+    - This source establishes a non-wrapping baseline whose follow-up must exercise
+      dateline unwrapping.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_REMOVES_DATELINE_WRAP
+    category: EDGE
+    description: A source wrapping rectangle becomes a non-wrapping follow-up rectangle
+      after rotation.
+    preconditions:
+    - rectangle coordinates are minX=100.0, maxX=-100.0, minY=-10.0, maxY=10.0.
+    - point coordinates are x=150.0, y=0.0.
+    - The generated follow-up longitudes are minX=-110.0, maxX=50.0, and point x=-60.0.
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS.
+    - The source unwraps its maxX to 260.0 and contains the direct point longitude.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_WIDTH_VERTICAL_LINE_CONTAINS
+    category: BOUNDARY
+    description: A zero-width rectangle contains a point exactly on its vertical line
+      segment.
+    preconditions:
+    - rectangle coordinates are minX=30.0, maxX=30.0, minY=-10.0, maxY=10.0.
+    - point coordinates are x=30.0, y=0.0.
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_WIDTH_VERTICAL_LINE_DISJOINT
+    category: BOUNDARY
+    description: A point at the correct latitude but one degree from a zero-width
+      rectangle is disjoint.
+    preconditions:
+    - rectangle coordinates are minX=30.0, maxX=30.0, minY=-10.0, maxY=10.0.
+    - point coordinates are x=31.0, y=0.0.
+    expectedSourceBehavior:
+    - relate(point) returns DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_HEIGHT_HORIZONTAL_LINE_CONTAINS
+    category: BOUNDARY
+    description: A zero-height rectangle contains a point exactly on its horizontal
+      line segment.
+    preconditions:
+    - rectangle coordinates are minX=20.0, maxX=40.0, minY=5.0, maxY=5.0.
+    - point coordinates are x=30.0, y=5.0.
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_HEIGHT_HORIZONTAL_LINE_DISJOINT
+    category: BOUNDARY
+    description: A point one degree above a zero-height rectangle is rejected by the
+      latitude guard.
+    preconditions:
+    - rectangle coordinates are minX=20.0, maxX=40.0, minY=5.0, maxY=5.0.
+    - point coordinates are x=30.0, y=6.0.
+    expectedSourceBehavior:
+    - relate(point) returns DISJOINT before longitude logic.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_DATELINE_ENDPOINT_EQUIVALENCE
+    category: BOUNDARY
+    description: A point represented at +180 degrees is contained by a rectangle adjacent
+      to the -180-degree dateline representation after the pX > maxX adjustment.
+    preconditions:
+    - rectangle coordinates are minX=-180.0, maxX=-170.0, minY=-10.0, maxY=10.0.
+    - point coordinates are x=180.0, y=0.0.
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS.
+    - The source changes pX from 180.0 to -180.0, the inclusive minimum longitude
+      edge.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_DATELINE_ENDPOINT_EQUIVALENCE
+    category: BOUNDARY
+    description: A point represented at -180 degrees is contained by a rectangle adjacent
+      to the +180-degree dateline representation after the pX < minX adjustment.
+    preconditions:
+    - rectangle coordinates are minX=170.0, maxX=180.0, minY=-10.0, maxY=10.0.
+    - point coordinates are x=-180.0, y=0.0.
+    expectedSourceBehavior:
+    - relate(point) returns CONTAINS.
+    - The source changes pX from -180.0 to 180.0, the inclusive maximum longitude
+      edge.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EMPTY_MIN_X_NAN_SENTINEL
+    category: EDGE
+    description: The RectangleImpl empty sentinel is reachable through the public
+      raw-coordinate constructor; this directly invokes the Point overload rather
+      than relate(Shape), so its observable NaN comparison behavior is covered.
+    preconditions:
+    - rectangle coordinates are minX=NaN, maxX=10.0, minY=-10.0, maxY=10.0.
+    - point coordinates are x=0.0, y=0.0.
+    - The invocation is the resolved relate(Point) overload, not relate(Shape).
+    expectedSourceBehavior:
+    - rectangle.isEmpty() is true because minX is NaN.
+    - 'relate(point) returns CONTAINS: the latitude guard is false, longitude comparisons
+      with NaN are false, and the geo branch takes its direct CONTAINS return.'
+    targetCases: 1
+    emptyOutputAllowed: false

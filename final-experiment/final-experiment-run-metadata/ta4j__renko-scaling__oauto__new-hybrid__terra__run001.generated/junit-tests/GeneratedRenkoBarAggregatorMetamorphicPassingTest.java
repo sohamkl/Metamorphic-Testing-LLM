@@ -1,0 +1,291 @@
+import java.lang.reflect.Field;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+
+import org.junit.jupiter.api.Test;
+import org.ta4j.core.Bar;
+import org.ta4j.core.BaseBar;
+import org.ta4j.core.aggregator.RenkoBarAggregator;
+import org.ta4j.core.num.DecimalNum;
+import org.ta4j.core.num.Num;
+
+import mtllm.examples.ta4j.RenkoBarAggregatorMetamorphicSpec;
+
+public class GeneratedRenkoBarAggregatorMetamorphicPassingTest {
+
+    private static final Duration PERIOD = Duration.ofMinutes(1);
+    private static final Instant START = Instant.parse("2020-01-01T00:00:00Z");
+
+    private static void exercise(RenkoBarAggregator aggregator, List<Bar> sourceBars) {
+        List<Bar> sourceOutput = aggregator.aggregate(sourceBars);
+        Object[] followUp = generateFollowUp(aggregator, sourceBars);
+        RenkoBarAggregator followUpAggregator = (RenkoBarAggregator) followUp[0];
+        @SuppressWarnings("unchecked")
+        List<Bar> followUpBars = (List<Bar>) followUp[1];
+        List<Bar> followUpOutput = followUpAggregator.aggregate(followUpBars);
+        RenkoBarAggregatorMetamorphicSpec.assertRelation(sourceOutput, followUpOutput);
+    }
+
+    private static Object[] generateFollowUp(RenkoBarAggregator aggregator, List<Bar> bars) {
+        try {
+            Field boxSizeField = RenkoBarAggregator.class.getDeclaredField("boxSize");
+            Field reversalAmountField = RenkoBarAggregator.class.getDeclaredField("reversalAmount");
+            boxSizeField.setAccessible(true);
+            reversalAmountField.setAccessible(true);
+            Number boxSize = (Number) boxSizeField.get(aggregator);
+            int reversalAmount = reversalAmountField.getInt(aggregator);
+
+            List<Bar> scaledBars = new ArrayList<>(bars.size());
+            for (Bar bar : bars) {
+                scaledBars.add(new BaseBar(
+                        bar.getTimePeriod(),
+                        bar.getBeginTime(),
+                        bar.getEndTime(),
+                        scale(bar.getOpenPrice()),
+                        scale(bar.getHighPrice()),
+                        scale(bar.getLowPrice()),
+                        scale(bar.getClosePrice()),
+                        bar.getVolume(),
+                        scale(bar.getAmount()),
+                        bar.getTrades()));
+            }
+            return new Object[] {
+                    new RenkoBarAggregator(boxSize.doubleValue() * 2.0, reversalAmount),
+                    scaledBars};
+        } catch (ReflectiveOperationException failure) {
+            throw new IllegalStateException("Unable to create scaled Renko input", failure);
+        }
+    }
+
+    private static List<Bar> bars(double[] closes, Double volume, Double amount, long trades) {
+        List<Bar> result = new ArrayList<>(closes.length);
+        for (int index = 0; index < closes.length; index++) {
+            Instant begin = START.plus(PERIOD.multipliedBy(index));
+            Instant end = begin.plus(PERIOD);
+            Num close = num(closes[index]);
+            result.add(new BaseBar(
+                    PERIOD,
+                    begin,
+                    end,
+                    close,
+                    close,
+                    close,
+                    close,
+                    volume == null ? null : num(volume),
+                    amount == null ? null : num(amount),
+                    trades));
+        }
+        return result;
+    }
+
+    private static List<Bar> coherentBars(double[][] ohlc, Double volume, Double amount, long trades) {
+        List<Bar> result = new ArrayList<>(ohlc.length);
+        for (int index = 0; index < ohlc.length; index++) {
+            Instant begin = START.plus(PERIOD.multipliedBy(index));
+            Instant end = begin.plus(PERIOD);
+            result.add(new BaseBar(
+                    PERIOD,
+                    begin,
+                    end,
+                    num(ohlc[index][0]),
+                    num(ohlc[index][1]),
+                    num(ohlc[index][2]),
+                    num(ohlc[index][3]),
+                    volume == null ? null : num(volume),
+                    amount == null ? null : num(amount),
+                    trades));
+        }
+        return result;
+    }
+
+    private static Num scale(Num value) {
+        return value == null ? null : value.multipliedBy(value.getNumFactory().numOf(2.0));
+    }
+
+    private static Num num(double value) {
+        return DecimalNum.valueOf(value);
+    }
+
+    @Test
+    void EMPTY_SOURCE_LIST_defaultConstructor() {
+        exercise(new RenkoBarAggregator(1.0), List.of());
+    }
+
+    @Test
+    void SINGLE_BASELINE_BAR_coherentOhlc() {
+        exercise(new RenkoBarAggregator(1.0, 1), coherentBars(
+                new double[][] {{99.75, 100.25, 99.5, 100.0}},
+                10.0, 1000.0, 3));
+    }
+
+    @Test
+    void INITIAL_UP_BELOW_BOX_nullAmount() {
+        exercise(new RenkoBarAggregator(1.0, 2), bars(new double[] {100.0, 100.5}, 10.0, null, 2));
+    }
+
+    @Test
+    void INITIAL_UP_EXACTLY_ONE_BOX_threeBars() {
+        exercise(new RenkoBarAggregator(1.0, 3), bars(new double[] {100.0, 101.0, 101.0}, null, null, 2));
+    }
+
+    @Test
+    void INITIAL_DOWN_BELOW_BOX_halfBox() {
+        exercise(new RenkoBarAggregator(0.5, 2), bars(new double[] {100.0, 99.75}, 0.0, 0.0, 0));
+    }
+
+    @Test
+    void INITIAL_DOWN_EXACTLY_ONE_BOX_defaultConstructor() {
+        exercise(new RenkoBarAggregator(1.0), bars(new double[] {100.0, 99.0}, 8.0, 800.0, 2));
+    }
+
+    @Test
+    void INITIAL_UP_MULTI_BRICK_threeBoxes() {
+        exercise(new RenkoBarAggregator(1.0, 1), bars(new double[] {100.0, 103.0}, 12.0, 1200.0, 4));
+    }
+
+    @Test
+    void INITIAL_DOWN_MULTI_BRICK_threeBars() {
+        exercise(new RenkoBarAggregator(1.0, 2), bars(new double[] {100.0, 97.0, 97.0}, null, 900.0, 3));
+    }
+
+    @Test
+    void UP_CONTINUATION_UNCHANGED_CLOSE() {
+        exercise(new RenkoBarAggregator(1.0, 3), bars(new double[] {100.0, 101.0, 101.0}, 5.0, 500.0, 1));
+    }
+
+    @Test
+    void UP_CONTINUATION_BELOW_BOX_halfBox() {
+        exercise(new RenkoBarAggregator(0.5, 2), bars(new double[] {100.0, 100.5, 100.75}, null, null, 2));
+    }
+
+    @Test
+    void UP_CONTINUATION_EXACTLY_ONE_BOX_defaultConstructor() {
+        exercise(new RenkoBarAggregator(1.0), bars(new double[] {100.0, 101.0, 102.0}, 0.0, 0.0, 0));
+    }
+
+    @Test
+    void UP_CONTINUATION_MULTI_BRICK() {
+        exercise(new RenkoBarAggregator(1.0, 1), bars(new double[] {100.0, 101.0, 104.0}, 7.0, 700.0, 2));
+    }
+
+    @Test
+    void DOWN_CONTINUATION_UNCHANGED_CLOSE() {
+        exercise(new RenkoBarAggregator(1.0, 2), bars(new double[] {100.0, 99.0, 99.0}, 6.0, 600.0, 2));
+    }
+
+    @Test
+    void DOWN_CONTINUATION_BELOW_BOX() {
+        exercise(new RenkoBarAggregator(1.0, 3), bars(new double[] {100.0, 99.0, 98.5}, null, 400.0, 1));
+    }
+
+    @Test
+    void DOWN_CONTINUATION_EXACTLY_ONE_BOX_halfBox() {
+        exercise(new RenkoBarAggregator(0.5, 2), bars(new double[] {100.0, 99.5, 99.0}, 4.0, null, 2));
+    }
+
+    @Test
+    void DOWN_CONTINUATION_MULTI_BRICK_defaultConstructor() {
+        exercise(new RenkoBarAggregator(1.0), bars(new double[] {100.0, 99.0, 96.0}, null, null, 3));
+    }
+
+    @Test
+    void UP_REVERSAL_ONE_INCREMENT_SHORT() {
+        exercise(new RenkoBarAggregator(1.0, 2), bars(new double[] {100.0, 101.0, 99.5}, 0.0, 0.0, 0));
+    }
+
+    @Test
+    void UP_REVERSAL_EXACT_DISTANCE() {
+        exercise(new RenkoBarAggregator(1.0, 2), bars(new double[] {100.0, 101.0, 99.0}, 9.0, 900.0, 3));
+    }
+
+    @Test
+    void UP_REVERSAL_DEEP_MULTI_BRICK() {
+        exercise(new RenkoBarAggregator(1.0, 2), bars(new double[] {100.0, 101.0, 97.0}, 11.0, 1100.0, 4));
+    }
+
+    @Test
+    void DOWN_REVERSAL_ONE_INCREMENT_SHORT_halfBox() {
+        exercise(new RenkoBarAggregator(0.5, 2), bars(new double[] {100.0, 99.5, 100.25}, null, 300.0, 2));
+    }
+
+    @Test
+    void DOWN_REVERSAL_EXACT_DISTANCE_defaultConstructor() {
+        exercise(new RenkoBarAggregator(1.0), bars(new double[] {100.0, 99.0, 101.0}, 3.0, null, 1));
+    }
+
+    @Test
+    void DOWN_REVERSAL_DEEP_MULTI_BRICK() {
+        exercise(new RenkoBarAggregator(1.0, 1), bars(new double[] {100.0, 99.0, 103.0}, null, null, 2));
+    }
+
+    @Test
+    void REVERSAL_AMOUNT_ONE_oneBoxOppositeMove() {
+        exercise(new RenkoBarAggregator(1.0, 1), bars(new double[] {100.0, 101.0, 100.0}, 0.0, 0.0, 0));
+    }
+
+    @Test
+    void REVERSAL_AMOUNT_THREE_ONE_SHORT() {
+        exercise(new RenkoBarAggregator(1.0, 3), bars(new double[] {100.0, 101.0, 98.5}, 6.0, 600.0, 2));
+    }
+
+    @Test
+    void REVERSAL_AMOUNT_THREE_EXACT() {
+        exercise(new RenkoBarAggregator(1.0, 3), bars(new double[] {100.0, 101.0, 98.0}, 8.0, 800.0, 3));
+    }
+
+    @Test
+    void DEFAULT_TWO_BOX_CONSTRUCTOR_reversal() {
+        exercise(new RenkoBarAggregator(1.0), bars(new double[] {100.0, 101.0, 99.0}, null, 450.0, 2));
+    }
+
+    @Test
+    void HALF_BOX_SIZE_twoExactBricks() {
+        exercise(new RenkoBarAggregator(0.5, 2), bars(new double[] {100.0, 101.0}, 5.0, null, 2));
+    }
+
+    @Test
+    void PENDING_STATISTICS_ACROSS_NON_EMITTING_BARS() {
+        exercise(new RenkoBarAggregator(1.0, 2), bars(new double[] {100.0, 100.5, 101.0}, 3.0, 300.0, 1));
+    }
+
+    @Test
+    void NULL_VOLUME_STATISTICS() {
+        exercise(new RenkoBarAggregator(1.0, 2), bars(new double[] {100.0, 101.0}, null, 250.0, 2));
+    }
+
+    @Test
+    void NULL_AMOUNT_STATISTICS() {
+        exercise(new RenkoBarAggregator(1.0, 2), bars(new double[] {100.0, 101.0}, 2.0, null, 2));
+    }
+
+    @Test
+    void NULL_VOLUME_AND_AMOUNT_STATISTICS() {
+        exercise(new RenkoBarAggregator(1.0), bars(new double[] {100.0, 101.0}, null, null, 2));
+    }
+
+    @Test
+    void EXPLICIT_ZERO_STATISTICS() {
+        exercise(new RenkoBarAggregator(1.0, 1), bars(new double[] {100.0, 102.0}, 0.0, 0.0, 0));
+    }
+
+    @Test
+    void COHERENT_NON_CLOSE_OHLC() {
+        exercise(new RenkoBarAggregator(1.0, 2), coherentBars(
+                new double[][] {
+                        {99.75, 100.25, 99.5, 100.0},
+                        {100.25, 101.5, 100.0, 101.0}},
+                4.0, 400.0, 2));
+    }
+
+    @Test
+    void LATER_INTERVAL_END_TIME_ADVANCEMENT() {
+        exercise(new RenkoBarAggregator(1.0, 3), bars(new double[] {100.0, 100.5, 101.0}, null, null, 2));
+    }
+
+    @Test
+    void MULTI_BRICK_END_TIME_SENTINEL_PATH() {
+        exercise(new RenkoBarAggregator(1.0, 2), bars(new double[] {100.0, 103.0}, 0.0, 0.0, 0));
+    }
+}

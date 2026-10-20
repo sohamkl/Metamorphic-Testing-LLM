@@ -10,7 +10,7 @@ import java.util.Map;
 /**
  * Reads local .env settings used by the prototype.
  *
- * <p>In simple terms, this loads things like OPENAI_API_KEY and the optional JUnit jar path
+ * <p>In simple terms, this loads things like OPENAI_API_KEY_OPENAI and the optional JUnit jar path
  * without requiring the user to export environment variables manually.</p>
  */
 public final class DotEnv {

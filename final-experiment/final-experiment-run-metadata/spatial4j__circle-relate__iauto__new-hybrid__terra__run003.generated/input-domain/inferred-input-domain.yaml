@@ -1,0 +1,288 @@
+InputDomain:
+  summary: Non-geo Cartesian CircleImpl/Rectangle inputs with finite translated coordinates,
+    covering bounding-box shortcuts, phase-2 closest/farthest-corner decisions, tangencies,
+    zero-area shapes, and canonical empty-shape sentinels. Source and follow-up must
+    both remain valid in the circle's SpatialContext after the fixed (+17.5, -9.25)
+    translation.
+  globalConstraints:
+  - 'The circle and rectangle use the same non-geo SpatialContext and the context
+    is Cartesian: circle distance and bounding-box coordinates are translation-invariant
+    in x and y.'
+  - For every non-empty source shape, all center and rectangle coordinates and the
+    radius are finite; radius is greater than or equal to 0; rectangle minX <= maxX
+    and minY <= maxY.
+  - Both the source coordinates and every translated coordinate used by the follow-up
+    (x + 17.5 and y - 9.25) are representable and accepted by the source circle's
+    context.
+  - Empty shapes, when used, are canonical context-produced empty Point/Rectangle
+    values rather than partially-NaN or otherwise malformed coordinate tuples.
+  - Null circle and null rectangle inputs are excluded because generateFollowUp explicitly
+    rejects them with Objects.requireNonNull and therefore cannot produce a follow-up
+    test input.
+  - Negative, infinite, and non-empty NaN radii/coordinates are excluded because CircleImpl's
+    constructor states that parameter validation, including bounding distance validation,
+    is assumed to have already occurred; no target-method behavior for such malformed
+    values is specified.
+  diversity:
+    relationPath:
+    - distinct
+    - measurable
+    - bbox DISJOINT; bbox WITHIN; bbox CONTAINS-and-equal; phase-2 diagonal DISJOINT;
+      phase-2 INTERSECTS; phase-2 CONTAINS; canonical empty sentinels
+    geometryDimension:
+    - distinct
+    - measurable
+    - positive-radius circle; zero-radius circle; area rectangle; point rectangle;
+      line rectangle; canonical empty circle; canonical empty rectangle
+    boundaryCondition:
+    - distinct
+    - measurable
+    - strict separation; circle-edge tangency; diagonal distance exactly radius; enclosing-box
+      equality; rectangle corner inside/outside circle
+  scenarios:
+  - id: BBOX_STRICTLY_WITHIN_LARGE_RECTANGLE
+    category: NORMAL
+    description: A unit circle centered at (0,0) has its complete bounding box strictly
+      inside a larger rectangle.
+    preconditions:
+    - circle center = (0,0) and radius = 1
+    - rectangle = [-2,2] x [-2,2]
+    expectedSourceBehavior:
+    - enclosingBox.relate(rectangle) is WITHIN
+    - relate(rectangle) returns WITHIN via the bounding-box shortcut
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BBOX_EQUALITY_IDENTITY_EDGE_CASE
+    category: BOUNDARY
+    description: The rectangle exactly equals the unit circle's Cartesian enclosing
+      box.
+    preconditions:
+    - circle center = (0,0) and radius = 1
+    - rectangle = [-1,1] x [-1,1]
+    expectedSourceBehavior:
+    - enclosingBox.relate(rectangle) is CONTAINS and enclosingBox.equals(rectangle)
+      is true
+    - relate(rectangle) returns WITHIN through the explicit enclosing-box equality
+      branch
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BBOX_STRICTLY_DISJOINT
+    category: NORMAL
+    description: The rectangle is wholly beyond the circle bounding box.
+    preconditions:
+    - circle center = (0,0) and radius = 1
+    - rectangle = [2,3] x [2,3]
+    expectedSourceBehavior:
+    - enclosingBox.relate(rectangle) is DISJOINT
+    - relate(rectangle) returns DISJOINT without phase-2 distance testing
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DIAGONAL_BBOX_OVERLAP_BUT_CIRCLE_DISJOINT
+    category: EDGE
+    description: The rectangle overlaps the square bounding box near a corner but
+      lies completely outside the circle.
+    preconditions:
+    - circle center = (0,0) and radius = 1
+    - rectangle = [0.8,1.2] x [0.8,1.2]
+    - closest rectangle corner distance from center is sqrt(0.8^2 + 0.8^2), which
+      is greater than 1
+    expectedSourceBehavior:
+    - bounding boxes are not DISJOINT
+    - phase 2 selects closestX = 0.8 and closestY = 0.8
+    - relate(rectangle) returns DISJOINT after the closest-corner containment check
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DIAGONAL_CONTACT_DISTANCE_EXACTLY_RADIUS
+    category: BOUNDARY
+    description: A rectangle reaches the circle at a closest corner exactly one radius
+      away.
+    preconditions:
+    - circle center = (0,0) and radius = 1
+    - rectangle = [0.6,0.7] x [0.8,0.9]
+    - closest corner (0.6,0.8) has distance exactly 1 from the center
+    expectedSourceBehavior:
+    - bounding boxes overlap
+    - the closest-corner test does not classify the rectangle as DISJOINT
+    - relate(rectangle) returns INTERSECTS because the farther corner is outside the
+      circle
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DIAGONAL_OVERLAP_WITH_OUTSIDE_FARTHEST_CORNER
+    category: NORMAL
+    description: A rectangle occupies a circle corner region, has a closest corner
+      inside the circle, and a farthest corner outside it.
+    preconditions:
+    - circle center = (0,0) and radius = 1
+    - rectangle = [0.6,0.8] x [0.6,0.8]
+    - closest corner (0.6,0.6) is inside the circle
+    - farthest corner (0.8,0.8) is outside the circle
+    expectedSourceBehavior:
+    - enclosingBox.relate(rectangle) is CONTAINS
+    - phase 2 passes the closest-corner check and fails the farthest-corner containment
+      check
+    - relate(rectangle) returns INTERSECTS
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: RECTANGLE_STRICTLY_CONTAINED_BY_CIRCLE
+    category: NORMAL
+    description: A positive-area rectangle lies entirely inside the circle.
+    preconditions:
+    - circle center = (0,0) and radius = 1
+    - rectangle = [-0.25,0.75] x [-0.25,0.25]
+    - every rectangle corner has distance less than 1 from the center
+    expectedSourceBehavior:
+    - enclosingBox.relate(rectangle) is CONTAINS
+    - phase 2 selects a farthest rectangle corner that is contained
+    - relate(rectangle) returns CONTAINS
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: HORIZONTAL_EDGE_TANGENCY
+    category: BOUNDARY
+    description: The rectangle touches the circle only at the point (1,0) while extending
+      to the right.
+    preconditions:
+    - circle center = (0,0) and radius = 1
+    - rectangle = [1,2] x [-0.2,0.2]
+    - rectangle includes (1,0) and all its interior points with x > 1 are outside
+      the circle
+    expectedSourceBehavior:
+    - phase 2 has xAxis < rectangle.minX and yAxis within the rectangle y interval
+    - the axis-overlap path prevents a DISJOINT result
+    - relate(rectangle) returns INTERSECTS
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: VERTICAL_EDGE_TANGENCY
+    category: BOUNDARY
+    description: The rectangle touches the circle only at the point (0,1) while extending
+      upward.
+    preconditions:
+    - circle center = (0,0) and radius = 1
+    - rectangle = [-0.2,0.2] x [1,2]
+    - rectangle includes (0,1) and all its interior points with y > 1 are outside
+      the circle
+    expectedSourceBehavior:
+    - phase 2 has yAxis < rectangle.minY and xAxis within the rectangle x interval
+    - the axis-overlap path prevents a DISJOINT result
+    - relate(rectangle) returns INTERSECTS
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: RECTANGLE_SPANS_BOTH_AXES_BUT_CUTS_CIRCLE
+    category: NORMAL
+    description: A thin horizontal rectangle spans both circle axes but cannot contain
+      the full circle.
+    preconditions:
+    - circle center = (0,0) and radius = 1
+    - rectangle = [-2,2] x [-0.2,0.2]
+    expectedSourceBehavior:
+    - the rectangle contains both center-axis coordinates
+    - enclosingBox.relate(rectangle) is INTERSECTS rather than CONTAINS or WITHIN
+    - relate(rectangle) returns INTERSECTS through the bboxSect != CONTAINS path
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POINT_RECTANGLE_INSIDE_CIRCLE
+    category: EDGE
+    description: A zero-area rectangle represented by one point lies strictly inside
+      a positive-radius circle.
+    preconditions:
+    - circle center = (0,0) and radius = 1
+    - rectangle minX = maxX = 0.5
+    - rectangle minY = maxY = 0.5
+    expectedSourceBehavior:
+    - the sole rectangle point is at distance sqrt(0.5) from the center, less than
+      1
+    - enclosingBox.relate(rectangle) is CONTAINS
+    - relate(rectangle) returns CONTAINS
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POINT_RECTANGLE_IN_BBOX_BUT_OUTSIDE_CIRCLE
+    category: EDGE
+    description: A zero-area rectangle lies in the enclosing square corner but outside
+      the circle.
+    preconditions:
+    - circle center = (0,0) and radius = 1
+    - rectangle minX = maxX = 0.9
+    - rectangle minY = maxY = 0.9
+    - the sole rectangle point distance is sqrt(0.9^2 + 0.9^2), greater than 1
+    expectedSourceBehavior:
+    - the bounding boxes are not DISJOINT
+    - phase 2 performs a closest-corner test using the sole point
+    - relate(rectangle) returns DISJOINT
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_RADIUS_EQUAL_POINT_RECTANGLE
+    category: BOUNDARY
+    description: A zero-radius circle and a point rectangle have exactly the same
+      coordinates.
+    preconditions:
+    - circle center = (0,0) and radius = 0
+    - rectangle minX = maxX = 0
+    - rectangle minY = maxY = 0
+    expectedSourceBehavior:
+    - the circle enclosing box equals the rectangle
+    - relate(rectangle) returns WITHIN through the enclosing-box equality branch
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_RADIUS_INSIDE_AREA_RECTANGLE
+    category: EDGE
+    description: A zero-radius circle point lies strictly inside a positive-area rectangle.
+    preconditions:
+    - circle center = (0,0) and radius = 0
+    - rectangle = [-1,1] x [-1,1]
+    expectedSourceBehavior:
+    - the zero-area enclosing box is WITHIN the rectangle
+    - relate(rectangle) returns WITHIN via the bounding-box shortcut
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_RADIUS_SEPARATE_POINT_RECTANGLE
+    category: EDGE
+    description: A zero-radius circle point and a distinct point rectangle are separated.
+    preconditions:
+    - circle center = (0,0) and radius = 0
+    - rectangle minX = maxX = 1
+    - rectangle minY = maxY = 1
+    expectedSourceBehavior:
+    - the zero-area enclosing box and rectangle are DISJOINT
+    - relate(rectangle) returns DISJOINT via the bounding-box shortcut
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EMPTY_CIRCLE_WITH_NONEMPTY_RECTANGLE
+    category: EDGE
+    description: A canonical empty center creates CircleImpl's empty enclosing-box
+      sentinel and is related to a finite rectangle.
+    preconditions:
+    - circle center is a canonical empty Point from the same context
+    - circle construction therefore sets radiusDEG to NaN and enclosingBox to the
+      context's canonical empty rectangle
+    - rectangle = [-1,1] x [-1,1]
+    expectedSourceBehavior:
+    - the direct Rectangle overload evaluates enclosingBox.relate(rectangle); it does
+      not contain the Shape-overload empty-shape guard
+    - the source SpatialRelation is recorded as the empty-sentinel baseline for equality
+      with the translated follow-up
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NONEMPTY_CIRCLE_WITH_EMPTY_RECTANGLE
+    category: EDGE
+    description: A normal circle is related directly to a canonical empty rectangle
+      sentinel.
+    preconditions:
+    - circle center = (0,0) and radius = 1
+    - rectangle is a canonical empty Rectangle from the same context
+    expectedSourceBehavior:
+    - the direct Rectangle overload first evaluates enclosingBox.relate(rectangle)
+    - the source SpatialRelation is recorded as the empty-rectangle sentinel baseline
+      for equality with the translated follow-up
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EMPTY_CIRCLE_WITH_EMPTY_RECTANGLE
+    category: EDGE
+    description: Both operands use their canonical context empty-shape representations.
+    preconditions:
+    - circle center is a canonical empty Point from the same context
+    - rectangle is a canonical empty Rectangle from the same context
+    expectedSourceBehavior:
+    - CircleImpl constructs its canonical empty enclosing-box sentinel
+    - the direct Rectangle overload's source SpatialRelation is retained as the baseline
+      for the translated canonical-empty follow-up
+    targetCases: 1
+    emptyOutputAllowed: false

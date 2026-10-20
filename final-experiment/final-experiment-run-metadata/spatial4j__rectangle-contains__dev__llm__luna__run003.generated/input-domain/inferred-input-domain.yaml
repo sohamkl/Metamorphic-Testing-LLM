@@ -1,0 +1,309 @@
+InputDomain:
+  summary: Finite geographic RectangleImpl and Point pairs in a geographic SpatialContext,
+    emphasizing latitude rejection, inclusive boundaries, ordinary longitude intervals,
+    dateline-wrapping intervals, longitude-shift branches, zero-size rectangles, and
+    follow-up rotations that cross the dateline.
+  globalConstraints:
+  - The receiver and point are non-null, because generateFollowUp explicitly rejects
+    null values with Objects.requireNonNull.
+  - The receiver and the generated follow-up rectangle use the same geographic SpatialContext,
+    so relate(Point) executes its ctx.isGeo() longitude-unwrapping logic.
+  - All supplied coordinates are finite doubles; longitudes are normalized geographic
+    values in [-180.0, 180.0], and latitudes are in [-90.0, 90.0].
+  - Rectangle minY is less than or equal to maxY, matching reset's asserted latitude
+    ordering.
+  - The source rectangle is not a full-world longitude interval with raw width exactly
+    360.0; normalizing both endpoints after the 150-degree rotation can collapse that
+    representation and does not preserve the source representation's world-wrap meaning.
+  - Non-geographic SpatialContexts are excluded because the follow-up always normalizes
+    rotated longitudes, while relate(Point) uses an entirely different non-geographic
+    longitude path when ctx.isGeo() is false; that class is outside the supplied geographic
+    rotation premise.
+  - The expected relation is evaluated by RectangleContainsPointMetamorphicSpec.assertRelation,
+    so the source and follow-up outputs must be the same SpatialRelation instance
+    value.
+  diversity:
+    contextType:
+    - geographic SpatialContext
+    sourceLatitudeRelationship:
+    - below minY
+    - equal minY
+    - strictly between minY and maxY
+    - equal maxY
+    - above maxY
+    longitudeShape:
+    - ordinary minX < maxX
+    - dateline-wrapping minX > maxX
+    - zero-width minX == maxX
+    longitudeDecisionPath:
+    - latitude early DISJOINT
+    - direct inclusive containment
+    - pX < minX then add 360
+    - pX > maxX then subtract 360
+    - shifted longitude remains outside
+    rotationOutcome:
+    - follow-up remains ordinary
+    - follow-up crosses the dateline
+    - source crosses the dateline and follow-up becomes ordinary
+    rectangleArea:
+    - positive height and width
+    - zero height
+    - zero longitude width
+    longitudeBoundary:
+    - ordinary interval endpoint
+    - dateline endpoint
+    - normalized -180/+180 boundary
+  scenarios:
+  - id: LATITUDE_BELOW_EARLY_DISJOINT
+    category: NORMAL
+    description: A point is below the rectangle, so relate(Point) returns before executing
+      any longitude logic.
+    preconditions:
+    - Rectangle is [-100.0, 100.0] longitude by [-20.0, 20.0] latitude.
+    - Point is (0.0, -20.000001), strictly below minY.
+    - After the 150-degree rotation, the point remains below the unchanged latitude
+      range.
+    expectedSourceBehavior:
+    - The source call returns SpatialRelation.DISJOINT from the first latitude comparison.
+    - The follow-up call also returns SpatialRelation.DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LATITUDE_AT_MIN_BOUNDARY
+    category: BOUNDARY
+    description: A point lies exactly on minY and must not take the latitude-disjoint
+      branch.
+    preconditions:
+    - Rectangle is [-100.0, 100.0] by [-20.0, 20.0].
+    - Point is (0.0, -20.0).
+    expectedSourceBehavior:
+    - The latitude comparisons are false because equality is inclusive.
+    - Longitude processing determines the source relation, which is SpatialRelation.CONTAINS
+      for this point.
+    - The follow-up relation remains CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LATITUDE_AT_MAX_BOUNDARY
+    category: BOUNDARY
+    description: A point lies exactly on maxY and must not take the latitude-disjoint
+      branch.
+    preconditions:
+    - Rectangle is [-100.0, 100.0] by [-20.0, 20.0].
+    - Point is (0.0, 20.0).
+    expectedSourceBehavior:
+    - The latitude comparisons are false because equality is inclusive.
+    - The source relation is SpatialRelation.CONTAINS.
+    - The follow-up relation is SpatialRelation.CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LATITUDE_ABOVE_EARLY_DISJOINT
+    category: NORMAL
+    description: A point is above the rectangle, exercising the other latitude early-return
+      comparison.
+    preconditions:
+    - Rectangle is [-100.0, 100.0] by [-20.0, 20.0].
+    - Point is (0.0, 20.000001), strictly above maxY.
+    expectedSourceBehavior:
+    - The source call returns SpatialRelation.DISJOINT before longitude processing.
+    - The follow-up call returns SpatialRelation.DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_DIRECT_INTERIOR
+    category: NORMAL
+    description: A point is strictly inside an ordinary, non-wrapping rectangle and
+      takes the direct longitude containment short-circuit.
+    preconditions:
+    - Rectangle is [-100.0, 100.0] by [-20.0, 20.0].
+    - Point is (25.0, 5.0), with minX < pX < maxX and minY < pY < maxY.
+    expectedSourceBehavior:
+    - The geo longitude code reaches its else branch and returns SpatialRelation.CONTAINS
+      without final comparisons.
+    - The follow-up relation is SpatialRelation.CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_MINX_ENDPOINT
+    category: BOUNDARY
+    description: A point is exactly on minX of an ordinary rectangle.
+    preconditions:
+    - Rectangle is [-100.0, 100.0] by [-20.0, 20.0].
+    - Point is (-100.0, 0.0).
+    expectedSourceBehavior:
+    - The inclusive direct longitude test returns SpatialRelation.CONTAINS.
+    - The follow-up relation remains SpatialRelation.CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_MAXX_ENDPOINT
+    category: BOUNDARY
+    description: A point is exactly on maxX of an ordinary rectangle.
+    preconditions:
+    - Rectangle is [-100.0, 100.0] by [-20.0, 20.0].
+    - Point is (100.0, 0.0).
+    expectedSourceBehavior:
+    - The inclusive direct longitude test returns SpatialRelation.CONTAINS.
+    - The follow-up relation remains SpatialRelation.CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_LEFT_SHIFT_TO_CONTAIN
+    category: EDGE
+    description: A normalized point is numerically left of minX, but adding 360 places
+      it inside the same geographic interval.
+    preconditions:
+    - Rectangle is [100.0, 180.0] by [-20.0, 20.0].
+    - Point is (-180.0, 0.0), so pX < minX and pX + 360.0 equals maxX.
+    expectedSourceBehavior:
+    - The source executes the pX < minX branch, shifts pX to 180.0, and returns SpatialRelation.CONTAINS.
+    - The follow-up relation is SpatialRelation.CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_RIGHT_SHIFT_TO_CONTAIN
+    category: EDGE
+    description: A normalized point is numerically right of maxX, but subtracting
+      360 places it inside the same geographic interval.
+    preconditions:
+    - Rectangle is [-180.0, -100.0] by [-20.0, 20.0].
+    - Point is (180.0, 0.0), so pX > maxX and pX - 360.0 equals minX.
+    expectedSourceBehavior:
+    - The source executes the pX > maxX branch, shifts pX to -180.0, and returns SpatialRelation.CONTAINS.
+    - The follow-up relation is SpatialRelation.CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_LEFT_SHIFT_REMAINS_OUTSIDE
+    category: NORMAL
+    description: A point takes the pX < minX shift branch, but remains outside after
+      the shift.
+    preconditions:
+    - Rectangle is [-100.0, 100.0] by [-20.0, 20.0].
+    - Point is (-150.0, 0.0), so shifted pX is 210.0, still greater than maxX.
+    expectedSourceBehavior:
+    - The source returns SpatialRelation.DISJOINT after the shifted longitude fails
+      the final range test.
+    - The follow-up relation is SpatialRelation.DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_RIGHT_SHIFT_REMAINS_OUTSIDE
+    category: NORMAL
+    description: A point takes the pX > maxX shift branch, but remains outside after
+      the shift.
+    preconditions:
+    - Rectangle is [-100.0, 100.0] by [-20.0, 20.0].
+    - Point is (150.0, 0.0), so shifted pX is -210.0, still less than minX.
+    expectedSourceBehavior:
+    - The source returns SpatialRelation.DISJOINT after the shifted longitude fails
+      the final range test.
+    - The follow-up relation is SpatialRelation.DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WRAPPING_DIRECT_INTERIOR
+    category: EDGE
+    description: A point lies in the direct numeric interval after the wrapping rectangle
+      is unwrapped.
+    preconditions:
+    - Rectangle is [170.0, -170.0] by [-20.0, 20.0], so rawWidth is negative.
+    - Point is (175.0, 0.0), which lies between 170.0 and the unwrapped maxX of 190.0.
+    expectedSourceBehavior:
+    - The source unwraps maxX to 190.0 and takes the direct CONTAINS short-circuit.
+    - The follow-up relation is SpatialRelation.CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WRAPPING_NEGATIVE_SIDE_SHIFT_TO_CONTAIN
+    category: EDGE
+    description: A point on the negative side of the dateline is shifted by 360 into
+      a wrapping rectangle.
+    preconditions:
+    - Rectangle is [170.0, -170.0] by [-20.0, 20.0].
+    - Point is (-175.0, 0.0), so pX < minX and the shifted value 185.0 lies within
+      the unwrapped interval.
+    expectedSourceBehavior:
+    - The source executes the pX < minX shift branch after dateline unwrapping and
+      returns SpatialRelation.CONTAINS.
+    - The follow-up relation is SpatialRelation.CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WRAPPING_GAP_DISJOINT
+    category: EDGE
+    description: A point lies in the longitude gap of a dateline-wrapping rectangle.
+    preconditions:
+    - Rectangle is [170.0, -170.0] by [-20.0, 20.0].
+    - Point is (0.0, 0.0), which shifts to 360.0 and remains outside the unwrapped
+      [170.0, 190.0] interval.
+    expectedSourceBehavior:
+    - The source returns SpatialRelation.DISJOINT after dateline unwrapping and shifting.
+    - The follow-up relation is SpatialRelation.DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WRAPPING_ENDPOINTS
+    category: BOUNDARY
+    description: Both dateline-side endpoints of a wrapping interval are tested for
+      inclusive containment.
+    preconditions:
+    - Rectangle is [170.0, -170.0] by [-20.0, 20.0].
+    - 'Use two source cases: point (170.0, 0.0) and point (-170.0, 0.0).'
+    - Both points have latitude within the rectangle.
+    expectedSourceBehavior:
+    - The source returns SpatialRelation.CONTAINS for each endpoint because longitude
+      comparisons are inclusive.
+    - Each follow-up relation equals its corresponding source relation.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ROTATION_CREATES_DATELINE_WRAP
+    category: EDGE
+    description: A non-wrapping source rectangle becomes dateline-wrapping after the
+      specified 150-degree eastward rotation.
+    preconditions:
+    - Rectangle is [0.0, 100.0] by [-20.0, 20.0], and point is (50.0, 0.0).
+    - The follow-up rectangle longitudes normalize to [150.0, -110.0], so minX > maxX.
+    - The follow-up point longitude normalizes to -160.0.
+    expectedSourceBehavior:
+    - The source relation is SpatialRelation.CONTAINS.
+    - The follow-up exercises the dateline-unwrapping path and returns SpatialRelation.CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_REMOVES_DATELINE_WRAP
+    category: EDGE
+    description: A wrapping source rectangle becomes ordinary after the specified
+      rotation.
+    preconditions:
+    - Rectangle is [170.0, -170.0] by [-20.0, 20.0], and point is (-175.0, 0.0).
+    - The follow-up rectangle longitudes normalize to [-40.0, -20.0], so minX < maxX.
+    - The follow-up point longitude normalizes to -25.0.
+    expectedSourceBehavior:
+    - The source relation is SpatialRelation.CONTAINS through the wrapping shift path.
+    - The follow-up relation is SpatialRelation.CONTAINS through the ordinary direct-containment
+      path.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_WIDTH_LONGITUDE_CONTAINMENT
+    category: BOUNDARY
+    description: A point lies exactly on a zero-width longitude rectangle, exercising
+      equality of minX and maxX.
+    preconditions:
+    - Rectangle is [30.0, 30.0] by [-20.0, 20.0].
+    - Point is (30.0, 0.0).
+    expectedSourceBehavior:
+    - The source direct longitude comparison returns SpatialRelation.CONTAINS.
+    - The follow-up rectangle remains zero-width at normalized longitude -180.0 and
+      the follow-up point is -180.0, so the follow-up relation is also CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_HEIGHT_LATITUDE_CONTAINMENT
+    category: BOUNDARY
+    description: A point lies exactly on the only latitude of a zero-height rectangle.
+    preconditions:
+    - Rectangle is [-100.0, 100.0] by [0.0, 0.0].
+    - Point is (0.0, 0.0).
+    expectedSourceBehavior:
+    - Neither latitude comparison rejects equality, and the source returns SpatialRelation.CONTAINS.
+    - The follow-up retains latitude 0.0 and returns SpatialRelation.CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NORMALIZED_DATELINE_BOUNDARY
+    category: BOUNDARY
+    description: A rectangle and point use the geographic -180/+180 boundary representation
+      while the metamorphic rotation normalizes the follow-up values.
+    preconditions:
+    - Rectangle is [-180.0, -100.0] by [-20.0, 20.0].
+    - Point is (180.0, 0.0), the equivalent positive dateline representation.
+    expectedSourceBehavior:
+    - The source uses the pX > maxX branch, shifts 180.0 to -180.0, and returns SpatialRelation.CONTAINS.
+    - The follow-up relation remains SpatialRelation.CONTAINS after normalization.
+    targetCases: 1
+    emptyOutputAllowed: false

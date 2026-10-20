@@ -1,0 +1,185 @@
+/*
+ * SPDX-License-Identifier: MIT
+ */
+package ta4jexamples.bots;
+
+import java.time.Duration;
+import java.time.Instant;
+
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.ta4j.core.Bar;
+import org.ta4j.core.BarSeries;
+import org.ta4j.core.BaseStrategy;
+import org.ta4j.core.BaseTradingRecord;
+import org.ta4j.core.Strategy;
+import org.ta4j.core.Trade;
+import org.ta4j.core.TradingRecord;
+import org.ta4j.core.bars.TimeBarBuilder;
+import org.ta4j.core.indicators.averages.SMAIndicator;
+import org.ta4j.core.indicators.helpers.ClosePriceIndicator;
+import org.ta4j.core.num.DecimalNum;
+import org.ta4j.core.num.DecimalNumFactory;
+import org.ta4j.core.num.Num;
+import org.ta4j.core.rules.OverIndicatorRule;
+import org.ta4j.core.rules.UnderIndicatorRule;
+
+import ta4jexamples.datasources.BitStampCsvTradesFileBarSeriesDataSource;
+
+/**
+ * Example of a trading bot running on a live, moving {@link BarSeries}.
+ *
+ * This example simulates a real-time trading environment:
+ * <ul>
+ * <li>A strategy is evaluated on the latest bar on each tick/iteration.</li>
+ * <li>The bot maintains a {@link BaseTradingRecord} and updates it using
+ * {@link Trade.TradeType} entry/exit signals.</li>
+ * <li>The series is continuously fed with new simulated ticks, mimicking a live
+ * feed.</li>
+ * </ul>
+ */
+public class TradingBotOnMovingBarSeries {
+
+    private static final Logger LOG = LogManager.getLogger(TradingBotOnMovingBarSeries.class);
+
+    /**
+     * Close price of the last bar
+     */
+    private static Num LAST_BAR_CLOSE_PRICE;
+
+    /**
+     * Builds a moving bar series (i.e. keeping only the maxBarCount last bars)
+     *
+     * @param maxBarCount the number of bars to keep in the bar series (at maximum)
+     * @return a moving bar series
+     */
+    private static BarSeries initMovingBarSeries(int maxBarCount) {
+        BarSeries series = BitStampCsvTradesFileBarSeriesDataSource.loadBitstampSeries();
+        // Limitating the number of bars to maxBarCount
+        series.setMaximumBarCount(maxBarCount);
+        LAST_BAR_CLOSE_PRICE = series.getBar(series.getEndIndex()).getClosePrice();
+        LOG.debug("Initial bar count: {} (limited to {}), close price = {}", series.getBarCount(), maxBarCount,
+                LAST_BAR_CLOSE_PRICE);
+        return series;
+    }
+
+    /**
+     * @param series a bar series
+     * @return a dummy strategy
+     */
+    private static Strategy buildStrategy(BarSeries series) {
+        if (series == null) {
+            throw new IllegalArgumentException("Series cannot be null");
+        }
+
+        ClosePriceIndicator closePrice = new ClosePriceIndicator(series);
+        SMAIndicator sma = new SMAIndicator(closePrice, 12);
+
+        // Signals
+        // Buy when SMA goes over close price
+        // Sell when close price goes over SMA
+        Strategy buySellSignals = new BaseStrategy(new OverIndicatorRule(sma, closePrice),
+                new UnderIndicatorRule(sma, closePrice));
+        return buySellSignals;
+    }
+
+    /**
+     * Generates a random decimal number between min and max.
+     *
+     * @param min the minimum bound
+     * @param max the maximum bound
+     * @return a random decimal number between min and max
+     */
+    private static Num randDecimal(Num min, Num max) {
+        Num randomDecimal = null;
+        if (min != null && max != null && min.isLessThan(max)) {
+            Num range = max.minus(min);
+            Num position = range.multipliedBy(DecimalNum.valueOf(Math.random()));
+            randomDecimal = min.plus(position);
+        }
+        return randomDecimal;
+    }
+
+    /**
+     * Generates a random bar.
+     *
+     * @return a random bar
+     */
+    private static Bar generateRandomBar() {
+        final Num maxRange = DecimalNum.valueOf("0.03"); // 3.0%
+        Num openPrice = LAST_BAR_CLOSE_PRICE;
+        Num lowPrice = openPrice.minus(maxRange.multipliedBy(DecimalNum.valueOf(Math.random())));
+        Num highPrice = openPrice.plus(maxRange.multipliedBy(DecimalNum.valueOf(Math.random())));
+        Num closePrice = randDecimal(lowPrice, highPrice);
+        LAST_BAR_CLOSE_PRICE = closePrice;
+        return new TimeBarBuilder(DecimalNumFactory.getInstance()).amount(1)
+                .volume(1)
+                .timePeriod(Duration.ofDays(1))
+                .endTime(Instant.now())
+                .openPrice(openPrice)
+                .highPrice(highPrice)
+                .lowPrice(lowPrice)
+                .closePrice(closePrice)
+                .build();
+    }
+
+    public static void main(String[] args) throws InterruptedException {
+        runSimulation(50, Duration.ofMillis(30));
+    }
+
+    static void runSimulation(int iterationCount, Duration tickDelay) throws InterruptedException {
+        if (iterationCount < 0) {
+            throw new IllegalArgumentException("Iteration count cannot be negative");
+        }
+        if (tickDelay == null || tickDelay.isNegative()) {
+            throw new IllegalArgumentException("Tick delay cannot be null or negative");
+        }
+
+        LOG.debug("********************** Initialization **********************");
+        // Getting the bar series
+        BarSeries series = initMovingBarSeries(20);
+
+        // Building the trading strategy
+        Strategy strategy = buildStrategy(series);
+
+        // Initializing the trading history
+        TradingRecord tradingRecord = new BaseTradingRecord();
+        LOG.debug("************************************************************");
+
+        /*
+         * We run the strategy for the configured next bars.
+         */
+        for (int i = 0; i < iterationCount; i++) {
+
+            // New bar
+            if (!tickDelay.isZero()) {
+                Thread.sleep(tickDelay.toMillis());
+            }
+            Bar newBar = generateRandomBar();
+            LOG.debug("------------------------------------------------------\nBar {} added, close price = {}", i,
+                    newBar.getClosePrice().doubleValue());
+            series.addBar(newBar);
+
+            int endIndex = series.getEndIndex();
+            if (strategy.shouldEnter(endIndex)) {
+                // Our strategy should enter
+                LOG.debug("Strategy should ENTER on {}", endIndex);
+                boolean entered = tradingRecord.enter(endIndex, newBar.getClosePrice(), DecimalNum.valueOf(10));
+                if (entered) {
+                    Trade entry = tradingRecord.getLastEntry();
+                    LOG.debug("Entered on {} (price={}, amount={})", entry.getIndex(),
+                            entry.getNetPrice().doubleValue(), entry.getAmount().doubleValue());
+                }
+            } else if (strategy.shouldExit(endIndex)) {
+                // Our strategy should exit
+                LOG.debug("Strategy should EXIT on {}", endIndex);
+                boolean exited = tradingRecord.exit(endIndex, newBar.getClosePrice(), DecimalNum.valueOf(10));
+                if (exited) {
+                    Trade exit = tradingRecord.getLastExit();
+                    LOG.debug("Exited on {} (price={}, amount={})", exit.getIndex(), exit.getNetPrice().doubleValue(),
+                            exit.getAmount().doubleValue());
+                }
+            }
+        }
+    }
+}

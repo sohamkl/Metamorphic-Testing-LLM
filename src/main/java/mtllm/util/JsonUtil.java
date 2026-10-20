@@ -46,6 +46,51 @@ public final class JsonUtil {
         return out.toString();
     }
 
+    /**
+     * Reads one integer field out of the usage object of an OpenAI chat completion response,
+     * or 0 when it is absent.
+     *
+     * <p>Every non-streaming completion carries a usage object, so this needs no extra request.
+     * Streaming responses omit it unless stream_options.include_usage is set.</p>
+     */
+    public static int extractUsageField(String json, String field) {
+        if (json == null || field == null) {
+            return 0;
+        }
+        int usageIdx = json.indexOf("\"usage\"");
+        if (usageIdx < 0) {
+            return 0;
+        }
+        String quotedField = "\"" + field + "\"";
+        int keyIdx = json.indexOf(quotedField, usageIdx);
+        if (keyIdx < 0) {
+            return 0;
+        }
+        int i = keyIdx + quotedField.length();
+        while (i < json.length() && Character.isWhitespace(json.charAt(i))) {
+            i++;
+        }
+        if (i >= json.length() || json.charAt(i) != ':') {
+            return 0;
+        }
+        i++;
+        while (i < json.length() && Character.isWhitespace(json.charAt(i))) {
+            i++;
+        }
+        int start = i;
+        while (i < json.length() && Character.isDigit(json.charAt(i))) {
+            i++;
+        }
+        if (i == start) {
+            return 0;
+        }
+        try {
+            return Integer.parseInt(json.substring(start, i));
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
     public static String extractOpenAiContent(String json) {
         int messageIdx = json.indexOf("\"message\"");
         if (messageIdx < 0) {

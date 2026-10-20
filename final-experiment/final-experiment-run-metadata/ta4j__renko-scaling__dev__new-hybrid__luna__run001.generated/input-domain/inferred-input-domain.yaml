@@ -1,0 +1,510 @@
+InputDomain:
+  summary: Non-null chronological Bar sequences, paired with a valid positive boxSize
+    and reversalAmount, covering empty, no-emission, threshold, multi-brick, continuation,
+    reversal, metadata, timing, numeric-scale, and explicitly rejected null-input
+    paths.
+  globalConstraints:
+  - For NORMAL, BOUNDARY, and EDGE cases, the receiver is constructed with a finite
+    positive boxSize and an integer reversalAmount greater than zero; the follow-up
+    therefore uses the same reversalAmount and twice the positive boxSize.
+  - For NORMAL, BOUNDARY, and EDGE cases, bars is non-null, every element is non-null,
+    and every bar has a non-null close price.
+  - For NORMAL, BOUNDARY, and EDGE cases, bars are in chronological order, source
+    intervals are positive, evenly spaced, and contiguous; this keeps the input within
+    aggregate's documented source-interval precondition.
+  - Each source bar has a stable time period, begin time, end time, OHLC values, volume,
+    amount, and trade count; volume and amount may be null because aggregate explicitly
+    skips null values when accumulating them.
+  - The follow-up is generated only by multiplying every non-null OHLC and amount
+    value by 2.0, retaining timestamps, volume, and trades, and multiplying the receiver
+    boxSize by 2.0 without changing reversalAmount.
+  - Price movements are measured relative to the first bar close because aggregate
+    initializes lastBrickClose from bars.getFirst().getClosePrice().
+  - For scenarios describing an exact threshold, arithmetic is chosen so the relevant
+    comparison is equality with lastBrickClose plus or minus resolvedBoxSize or reversalDistance.
+  - INVALID cases are limited to null inputs explicitly rejected by the supplied metamorphic
+    generator or aggregate method; no unsupported invalid-input behavior is assumed.
+  diversity:
+    boxSize:
+    - '0.5'
+    - '1.0'
+    - '2.0'
+    - '2.5'
+    - '10.0'
+    reversalAmount:
+    - '1'
+    - '2'
+    - '3'
+    sourceLength:
+    - '0'
+    - '1'
+    - '2'
+    - '3'
+    - '4'
+    closeMovementClass:
+    - no movement
+    - less than one box
+    - exactly one box
+    - multiple boxes
+    - continuation
+    - sub-threshold reversal
+    - exact reversal
+    - multi-box reversal
+    sourceMetadata:
+    - non-null volume and amount
+    - null volume
+    - null amount
+    - both volume and amount null
+    - zero trades
+    - positive trades
+    emissionTiming:
+    - no emitted brick
+    - source end equal to next brick end
+    - source end later than next brick end
+    - multiple bricks from one source bar
+    direction:
+    - NONE
+    - UP
+    - DOWN
+    numericRepresentation:
+    - integer-valued Num values
+    - fractional Num values
+    - scaled fractional values
+  scenarios:
+  - id: EMPTY_SOURCE_LIST
+    category: NORMAL
+    description: The source list is empty.
+    preconditions:
+    - bars.size() == 0.
+    - The receiver has a valid finite positive boxSize and reversalAmount > 0.
+    expectedSourceBehavior:
+    - aggregate returns a non-null empty List without resolving a NumFactory or inspecting
+      bar intervals.
+    - The follow-up list is also empty, so the metamorphic assertion compares two
+      empty outputs.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: SINGLE_BAR_INITIAL_BASELINE
+    category: NORMAL
+    description: A single valid bar establishes the initial close baseline without
+      price movement relative to itself.
+    preconditions:
+    - bars.size() == 1 and the bar close is non-null.
+    - No later bar exists to move closePrice away from lastBrickClose.
+    expectedSourceBehavior:
+    - aggregate returns zero bricks.
+    - The follow-up also returns zero bricks.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: EQUAL_CLOSE_SEQUENCE
+    category: BOUNDARY
+    description: Several contiguous bars have the same close as the first bar.
+    preconditions:
+    - bars.size() >= 2.
+    - Every closePrice equals bars.getFirst().getClosePrice().
+    expectedSourceBehavior:
+    - Neither greater-than-or-equal nor less-than-or-equal box thresholds are reached.
+    - aggregate returns an empty output despite accumulating pending metadata internally.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: INITIAL_EXACT_UP_BOX
+    category: BOUNDARY
+    description: The second bar close is exactly one box above the first close.
+    preconditions:
+    - bars.size() == 2.
+    - secondClose == firstClose + boxSize.
+    expectedSourceBehavior:
+    - The Direction.NONE upward loop emits exactly one upward brick.
+    - The brick opens at the first close and closes at the second close.
+    - The follow-up emits one brick with identical times, volume, and trades and prices
+      and amount scaled by 2.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: INITIAL_EXACT_DOWN_BOX
+    category: BOUNDARY
+    description: The second bar close is exactly one box below the first close.
+    preconditions:
+    - bars.size() == 2.
+    - secondClose == firstClose - boxSize.
+    expectedSourceBehavior:
+    - The Direction.NONE downward loop emits exactly one downward brick.
+    - The brick opens at the first close and closes at the second close.
+    - The follow-up preserves the downward direction and brick count.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: INITIAL_SUB_BOX_UP
+    category: BOUNDARY
+    description: The close rises, but by less than one box.
+    preconditions:
+    - bars.size() == 2.
+    - firstClose < secondClose < firstClose + boxSize.
+    expectedSourceBehavior:
+    - No upward brick is emitted because the upward threshold is not reached.
+    - aggregate and its follow-up both return an empty list.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: INITIAL_SUB_BOX_DOWN
+    category: BOUNDARY
+    description: The close falls, but by less than one box.
+    preconditions:
+    - bars.size() == 2.
+    - firstClose - boxSize < secondClose < firstClose.
+    expectedSourceBehavior:
+    - No downward brick is emitted.
+    - Both source and follow-up outputs are empty.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: SINGLE_SOURCE_BAR_MULTIPLE_UP_BRICKS
+    category: EDGE
+    description: One source close moves upward by at least two boxes.
+    preconditions:
+    - bars.size() == 2.
+    - secondClose >= firstClose + 2 * boxSize.
+    expectedSourceBehavior:
+    - The upward while-loop emits at least two bricks from the same source bar.
+    - The first emitted brick receives the pending volume, amount, and trades; additional
+      bricks from that source bar receive zero volume, zero amount, and zero trades.
+    - The follow-up emits the same number of bricks and preserves this metadata placement.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SINGLE_SOURCE_BAR_MULTIPLE_DOWN_BRICKS
+    category: EDGE
+    description: One source close moves downward by at least two boxes.
+    preconditions:
+    - bars.size() == 2.
+    - secondClose <= firstClose - 2 * boxSize.
+    expectedSourceBehavior:
+    - The initial downward while-loop emits multiple downward bricks.
+    - Only the first brick emitted from the current source bar carries that bar's
+      pending metadata.
+    - The follow-up preserves brick count and direction while scaling price and amount.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PENDING_METADATA_THEN_UP_EMISSION
+    category: NORMAL
+    description: One or more bars move less than one box before a later bar reaches
+      an upward threshold.
+    preconditions:
+    - At least one bar after the baseline has a close below firstClose + boxSize,
+      and a later close is at least firstClose + boxSize.
+    - Volumes, amounts, and trades are nonzero on at least one pre-emission bar.
+    expectedSourceBehavior:
+    - Metadata from non-emitting bars is accumulated in pendingVolume, pendingAmount,
+      and pendingTrades.
+    - The first later upward brick carries the accumulated metadata.
+    - The follow-up preserves volume and trades and scales the accumulated amount.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PENDING_METADATA_THEN_DOWN_EMISSION
+    category: NORMAL
+    description: One or more bars move less than one box before a later bar reaches
+      a downward threshold.
+    preconditions:
+    - At least one bar after the baseline has a close above firstClose - boxSize,
+      and a later close is at most firstClose - boxSize.
+    - At least two source bars contribute nonzero trades before emission.
+    expectedSourceBehavior:
+    - Pending metadata is summed before the first downward brick is emitted.
+    - The first downward brick carries the pending totals.
+    - The follow-up has the same metadata totals and scaled amount.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UP_CONTINUATION_ONE_BOX
+    category: NORMAL
+    description: An upward brick has already established UP direction and a later
+      close advances exactly one additional box.
+    preconditions:
+    - A prior bar emitted at least one upward brick.
+    - A later close equals the current lastBrickClose + boxSize.
+    expectedSourceBehavior:
+    - The UP-direction continuation loop emits one additional upward brick without
+      applying reversal logic.
+    - The output direction remains upward.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DOWN_CONTINUATION_ONE_BOX
+    category: NORMAL
+    description: A downward brick has already established DOWN direction and a later
+      close advances exactly one additional box downward.
+    preconditions:
+    - A prior bar emitted at least one downward brick.
+    - A later close equals the current lastBrickClose - boxSize.
+    expectedSourceBehavior:
+    - The DOWN-direction continuation loop emits one additional downward brick.
+    - The output direction remains downward.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UP_SUB_THRESHOLD_REVERSAL
+    category: BOUNDARY
+    description: After an upward brick, price declines but does not reach the configured
+      reversal distance.
+    preconditions:
+    - The current direction is UP.
+    - lastBrickClose - reversalDistance < closePrice < lastBrickClose.
+    expectedSourceBehavior:
+    - No reversal brick is emitted.
+    - The output contains only the previously emitted upward bricks.
+    - The follow-up has the same output size.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UP_EXACT_REVERSAL_THRESHOLD
+    category: BOUNDARY
+    description: After an upward brick, the close is exactly reversalAmount boxes
+      below lastBrickClose.
+    preconditions:
+    - The current direction is UP.
+    - closePrice == lastBrickClose - reversalAmount * boxSize.
+    expectedSourceBehavior:
+    - The UP reversal condition is true at equality.
+    - The downward loop emits the required downward bricks beginning from lastBrickClose.
+    - The follow-up preserves the reversal and direction sequence.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UP_MULTI_BOX_REVERSAL
+    category: EDGE
+    description: After an upward brick, the close reverses by more than the configured
+      reversal distance and reaches multiple downward box levels.
+    preconditions:
+    - The current direction is UP.
+    - closePrice <= lastBrickClose - (reversalAmount + 1) * boxSize.
+    expectedSourceBehavior:
+    - The reversal branch emits multiple downward bricks from one source bar.
+    - Only the first reversal brick from that source bar receives its pending metadata.
+    - The follow-up preserves all brick directions and the zero metadata on additional
+      bricks.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DOWN_SUB_THRESHOLD_REVERSAL
+    category: BOUNDARY
+    description: After a downward brick, price rises but does not reach the configured
+      reversal distance.
+    preconditions:
+    - The current direction is DOWN.
+    - lastBrickClose < closePrice < lastBrickClose + reversalAmount * boxSize.
+    expectedSourceBehavior:
+    - The DOWN reversal condition is false.
+    - No upward reversal brick is emitted.
+    - The follow-up output has the same size and direction sequence.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DOWN_EXACT_REVERSAL_THRESHOLD
+    category: BOUNDARY
+    description: After a downward brick, the close is exactly reversalAmount boxes
+      above lastBrickClose.
+    preconditions:
+    - The current direction is DOWN.
+    - closePrice == lastBrickClose + reversalAmount * boxSize.
+    expectedSourceBehavior:
+    - The DOWN reversal condition is true at equality.
+    - The upward reversal loop emits bricks.
+    - The follow-up preserves the exact reversal threshold behavior.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DOWN_MULTI_BOX_REVERSAL
+    category: EDGE
+    description: After a downward brick, the close reverses by more than the configured
+      reversal distance and reaches multiple upward box levels.
+    preconditions:
+    - The current direction is DOWN.
+    - closePrice >= lastBrickClose + (reversalAmount + 1) * boxSize.
+    expectedSourceBehavior:
+    - The DOWN reversal branch emits multiple upward bricks.
+    - The first emitted brick carries pending metadata and later bricks from that
+      source bar carry zero metadata.
+    - The follow-up has the same count and direction sequence.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: REVERSAL_AMOUNT_ONE
+    category: BOUNDARY
+    description: The receiver uses reversalAmount == 1, making the reversal distance
+      equal to one box.
+    preconditions:
+    - reversalAmount == 1.
+    - The input contains an established UP or DOWN direction followed by an exact
+      one-box move in the opposite direction.
+    expectedSourceBehavior:
+    - The corresponding reversal comparison uses one box and emits at equality.
+    - The follow-up retains reversalAmount == 1 and has the same brick count.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: REVERSAL_AMOUNT_THREE
+    category: EDGE
+    description: The receiver uses reversalAmount == 3, separating ordinary opposite
+      movement from reversal movement.
+    preconditions:
+    - reversalAmount == 3.
+    - The input contains an established direction, a two-box opposite move, and a
+      distinct later three-box-or-more opposite move.
+    expectedSourceBehavior:
+    - The two-box opposite move does not satisfy the reversal threshold.
+    - The later three-box-or-more move satisfies the reversal threshold and emits
+      the opposite-direction bricks.
+    - The follow-up uses the same reversalAmount and preserves both outcomes.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SOURCE_END_EQUALS_NEXT_BRICK_END
+    category: BOUNDARY
+    description: A brick is emitted when sourceBar.endTime equals nextBrickEndTime.
+    preconditions:
+    - The source interval is contiguous and evenly spaced.
+    - For at least one emitted brick, sourceBar.getEndTime().equals(nextBrickEndTime).
+    expectedSourceBehavior:
+    - resolveBrickEndTime selects nextBrickEndTime because sourceBarEndTime is not
+      after it.
+    - The brick end time equals the source end time in this case.
+    - The follow-up preserves the brick end time exactly.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SOURCE_END_AFTER_NEXT_BRICK_END
+    category: BOUNDARY
+    description: A delayed source bar emits a brick after nextBrickEndTime.
+    preconditions:
+    - For at least one emitted brick, sourceBar.getEndTime().isAfter(nextBrickEndTime).
+    - All source intervals remain evenly spaced and contiguous.
+    expectedSourceBehavior:
+    - resolveBrickEndTime selects sourceBar.getEndTime().
+    - The follow-up preserves the selected end time.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MULTIPLE_BRICKS_ADVANCE_SYNTHETIC_END_TIMES
+    category: EDGE
+    description: A single source bar emits at least three bricks, forcing nextBrickEndTime
+      to advance by sourcePeriod between bricks.
+    preconditions:
+    - A close movement reaches at least three successive box levels in one source
+      bar.
+    - The source bar end time is not after every advanced nextBrickEndTime.
+    expectedSourceBehavior:
+    - Successive brick end times are resolved using sourceBar.endTime and the advanced
+      nextBrickEndTime.
+    - The follow-up has equal time periods, begin times, and end times at every index.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NULL_VOLUME_METADATA
+    category: EDGE
+    description: At least one source bar that contributes to an emitted brick has
+      null volume.
+    preconditions:
+    - All close prices are non-null and intervals are valid.
+    - At least one emitting path encounters sourceBar.getVolume() == null.
+    expectedSourceBehavior:
+    - aggregate does not add null volume to pendingVolume.
+    - The output volume reflects only non-null volume contributions.
+    - The follow-up retains the same volume values because the metamorphic transformation
+      does not scale volume.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NULL_AMOUNT_METADATA
+    category: EDGE
+    description: At least one source bar that contributes to an emitted brick has
+      null amount.
+    preconditions:
+    - All close prices are non-null and intervals are valid.
+    - At least one emitting path encounters sourceBar.getAmount() == null.
+    expectedSourceBehavior:
+    - aggregate does not add null amount to pendingAmount.
+    - The follow-up retains matching null-or-zero amount behavior where no non-null
+      amount was accumulated.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NULL_VOLUME_AND_AMOUNT_METADATA
+    category: EDGE
+    description: An emitting source bar has both volume and amount null while carrying
+      a nonzero trade count.
+    preconditions:
+    - At least one emitted brick is triggered by a bar with volume == null, amount
+      == null, and trades != 0.
+    expectedSourceBehavior:
+    - The price movement still emits bricks because emission depends on closePrice.
+    - Null volume and amount do not cause arithmetic accumulation failures.
+    - The first brick from that source bar receives the current pending zero values
+      and its trade count.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: TRADE_COUNT_ACCUMULATION_AND_ZEROING
+    category: EDGE
+    description: Several non-emitting bars accumulate trades, followed by a bar emitting
+      multiple bricks.
+    preconditions:
+    - At least two bars before emission have positive trades.
+    - The emitting bar reaches at least two box levels.
+    expectedSourceBehavior:
+    - The first emitted brick carries the accumulated trade count.
+    - Additional bricks from the same source bar have trade count zero.
+    - The follow-up preserves trade counts by identity rather than scaling them.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_TRADE_SOURCE_BARS
+    category: NORMAL
+    description: Bars that emit bricks have trades == 0.
+    preconditions:
+    - At least one brick is emitted.
+    - Every contributing source bar has trades == 0.
+    expectedSourceBehavior:
+    - All output bricks have trade count zero.
+    - The follow-up also has zero trade counts.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FRACTIONAL_BOX_AND_PRICE_VALUES
+    category: NORMAL
+    description: The receiver and bars use fractional numeric values rather than integer-valued
+      prices.
+    preconditions:
+    - boxSize is a finite positive fractional Number such as 0.5 or 2.5.
+    - At least one close threshold is reached using fractional Num values.
+    expectedSourceBehavior:
+    - Threshold comparisons use the bars' NumFactory and resolved fractional boxSize.
+    - The follow-up doubles the fractional prices and boxSize and preserves brick
+      count and direction.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: INTEGER_BOX_WITH_DECIMAL_METADATA
+    category: NORMAL
+    description: Prices use integer-valued thresholds while amount contains a non-integer
+      Num value.
+    preconditions:
+    - boxSize is a positive integer-valued Number.
+    - At least one emitted brick has a non-integer amount.
+    expectedSourceBehavior:
+    - Price threshold behavior is unchanged by the metadata representation.
+    - The follow-up leaves volume unchanged and doubles the non-null amount exactly
+      according to Num multiplication.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NULL_SOURCE_LIST
+    category: INVALID
+    description: The source list reference is null.
+    preconditions:
+    - bars == null.
+    - The receiver itself is non-null and valid.
+    expectedSourceBehavior:
+    - aggregate rejects the input with NullPointerException at Objects.requireNonNull(bars,
+      "bars").
+    - generateFollowUp also rejects the same source input with NullPointerException
+      before producing a follow-up.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NULL_SOURCE_BAR_ELEMENT
+    category: INVALID
+    description: The source list contains a null Bar element.
+    preconditions:
+    - bars is non-null and contains at least one null element.
+    expectedSourceBehavior:
+    - generateFollowUp rejects the element with NullPointerException from Objects.requireNonNull(bar,
+      "source bars must not contain null").
+    - No relation assertion is attempted because no follow-up pair is produced.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NULL_CLOSE_PRICE
+    category: INVALID
+    description: A non-null source Bar has a null close price.
+    preconditions:
+    - bars is non-null, intervals are otherwise valid, and at least one bar has getClosePrice()
+      == null.
+    expectedSourceBehavior:
+    - aggregate rejects the input with IllegalArgumentException identifying the missing
+      close-price index.
+    - The follow-up retains the null close price through scaleBar, and aggregate likewise
+      rejects it rather than producing bricks.
+    targetCases: 1
+    emptyOutputAllowed: false

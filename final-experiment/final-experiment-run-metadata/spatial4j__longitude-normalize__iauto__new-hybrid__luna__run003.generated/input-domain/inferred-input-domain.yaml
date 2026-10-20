@@ -1,0 +1,272 @@
+InputDomain:
+  summary: Domain of IEEE-754 double longitude inputs, including in-range values,
+    exact and near wrap boundaries, positive and negative modulo branches, large finite
+    magnitudes, and non-finite sentinel values; each follow-up is the source input
+    plus 360.0.
+  globalConstraints:
+  - Each source case supplies exactly one Java double to DistanceUtils.normLonDEG(double).
+  - The follow-up input is computed exactly as longitudeDeg + 360.0, as specified
+    by the metamorphic transformation.
+  - Finite source outputs are expected to lie in the inclusive interval [-180.0, 180.0].
+  - The metamorphic assertion permits source and follow-up outputs to differ only
+    within 1e-9, except that any pair whose outputs are both within 1e-9 of either
+    antimeridian representation -180.0 or 180.0 is accepted.
+  - Non-finite IEEE-754 values are retained as source cases because the supplied method
+    accepts double directly and contains no validation or exception path for them.
+  diversity:
+    inputRangePosition:
+    - below -180
+    - exactly -180
+    - strictly between -180 and 0
+    - signed zero
+    - strictly between 0 and 180
+    - exactly 180
+    - above 180
+    moduloBranch:
+    - in-range early return
+    - off < 0
+    - off == 0 with positive input
+    - off == 0 with non-positive input
+    - off > 0
+    wrapMagnitude:
+    - less than one revolution outside the range
+    - one revolution
+    - multiple revolutions
+    - fractional multiple of a revolution
+    - large finite magnitude
+    - maximum finite magnitude
+    numericRepresentation:
+    - ordinary finite double
+    - negative zero
+    - subnormal finite double
+    - positive infinity
+    - negative infinity
+    - NaN
+    followUpRelationOutcome:
+    - same normalized value
+    - same antimeridian represented with opposite signs
+    - same value after large-magnitude rounding
+    - NaN comparison accepted by supplied assertion
+  scenarios:
+  - id: IN_RANGE_ZERO_AND_SIGNED_ZERO
+    category: NORMAL
+    description: Zero values take the common in-range return path, including preservation
+      of negative zero as a double value.
+    preconditions:
+    - longitudeDeg is exactly +0.0 or -0.0
+    - longitudeDeg >= -180.0 and longitudeDeg <= 180.0
+    expectedSourceBehavior:
+    - The method returns longitudeDeg without applying the modulo expression.
+    - The follow-up longitudeDeg + 360.0 normalizes back to zero, so the relation
+      compares equal numeric values within tolerance.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: IN_RANGE_INTERIOR_POSITIVE_AND_NEGATIVE
+    category: NORMAL
+    description: Ordinary longitudes strictly inside the permitted interval exercise
+      the common-case early return.
+    preconditions:
+    - longitudeDeg is finite
+    - -180.0 < longitudeDeg < 180.0
+    - longitudeDeg is not zero
+    expectedSourceBehavior:
+    - The source output is exactly the input value because the first conditional is
+      true.
+    - The follow-up output normalizes to the same longitude.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ANTIMEDERIDIAN_ENDPOINTS
+    category: BOUNDARY
+    description: Both documented endpoint representations are returned unchanged even
+      though -180.0 and +180.0 denote the same meridian.
+    preconditions:
+    - longitudeDeg is exactly -180.0 or exactly 180.0
+    expectedSourceBehavior:
+    - The source output is exactly the endpoint input.
+    - The follow-up output may use the opposite antimeridian representation, which
+      the supplied relation explicitly accepts.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: IMMEDIATE_INTERIOR_BOUNDARIES
+    category: BOUNDARY
+    description: Values immediately inside both ends of the inclusive interval remain
+      unchanged while remaining distinguishable from the endpoint cases.
+    preconditions:
+    - longitudeDeg is one of -179.999999, -179.9999999999, 179.999999, or 179.9999999999
+    - -180.0 < longitudeDeg < 180.0
+    expectedSourceBehavior:
+    - The in-range early return preserves the supplied finite value.
+    - Adding 360.0 and normalizing returns the same meridian without invoking the
+      antimeridian exception.
+    targetCases: 4
+    emptyOutputAllowed: false
+  - id: IMMEDIATE_EXTERIOR_BOUNDARIES
+    category: BOUNDARY
+    description: Values just outside each endpoint enter the modulo normalization
+      path rather than the common-case return.
+    preconditions:
+    - longitudeDeg is one of -180.0000000001 or 180.0000000001
+    - abs(longitudeDeg) > 180.0
+    expectedSourceBehavior:
+    - The source output is within [-180.0, 180.0] and is close to the corresponding
+      endpoint from the opposite side.
+    - The follow-up output normalizes to the same finite longitude within 1e-9.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: POSITIVE_NONZERO_REMAINDER
+    category: NORMAL
+    description: Positive out-of-range inputs whose shifted remainder is positive
+      exercise the final else branch.
+    preconditions:
+    - longitudeDeg is finite and greater than 180.0
+    - (longitudeDeg + 180.0) % 360.0 is strictly greater than 0.0
+    expectedSourceBehavior:
+    - The method returns -180.0 + off, where off is the positive Java remainder.
+    - Representative cases include 181.0 -> -179.0 and 359.5 -> -0.5.
+    - The follow-up normalizes to the same meridian.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: NEGATIVE_REMAINDER_BRANCH
+    category: NORMAL
+    description: Negative out-of-range inputs with a negative Java remainder exercise
+      the off < 0 branch.
+    preconditions:
+    - longitudeDeg is finite and less than -180.0
+    - (longitudeDeg + 180.0) % 360.0 is strictly less than 0.0
+    expectedSourceBehavior:
+    - The method returns 180.0 + off, producing a value in the upper portion of the
+      normalized interval.
+    - Representative cases include -181.0 -> 179.0 and -359.5 -> 0.5.
+    - The follow-up normalizes to the same meridian.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: POSITIVE_EXACT_REMAINDER_ZERO
+    category: BOUNDARY
+    description: Positive values congruent to 180 modulo 360 exercise the off == 0
+      and lon_deg > 0 sentinel branch.
+    preconditions:
+    - longitudeDeg is positive and greater than 180.0
+    - (longitudeDeg + 180.0) % 360.0 == 0.0
+    expectedSourceBehavior:
+    - The method returns exactly 180.0 rather than -180.0.
+    - The follow-up remains represented as 180.0, satisfying the relation without
+      relying on tolerance.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: NONPOSITIVE_EXACT_REMAINDER_ZERO
+    category: BOUNDARY
+    description: Negative values congruent to -180 modulo 360 exercise the final else
+      behavior when the remainder compares equal to zero but the input is not positive.
+    preconditions:
+    - longitudeDeg is negative and less than -180.0
+    - (longitudeDeg + 180.0) % 360.0 == 0.0
+    expectedSourceBehavior:
+    - The method returns exactly -180.0 through -180.0 + off.
+    - The follow-up is also normalized to an antimeridian representation accepted
+      by the supplied relation.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: FULL_REVOLUTION_ZERO_REMAINDER_TRANSITIONS
+    category: EDGE
+    description: Inputs at positive and negative full-revolution multiples exercise
+      distinct modulo signs and normalized zero or antimeridian outcomes.
+    preconditions:
+    - longitudeDeg is one of 360.0, -360.0, 720.0, or -720.0
+    - abs(longitudeDeg) is an integer multiple of 360.0
+    expectedSourceBehavior:
+    - The modulo expression is used rather than the in-range early return.
+    - Positive 360-degree multiples normalize to the zero or positive-antimeridian
+      result dictated by the supplied branches; negative multiples exercise the negative-remainder
+      behavior.
+    - The follow-up remains on the same normalized meridian.
+    targetCases: 4
+    emptyOutputAllowed: false
+  - id: MULTIPLE_REVOLUTIONS_FRACTIONAL
+    category: NORMAL
+    description: Fractional longitudes several revolutions from the normal interval
+      test repeated wrapping without relying on an exact zero remainder.
+    preconditions:
+    - longitudeDeg is finite
+    - abs(longitudeDeg) > 720.0
+    - (longitudeDeg + 180.0) % 360.0 != 0.0
+    - longitudeDeg is one of 1080.25, -1080.25, or 1440.75
+    expectedSourceBehavior:
+    - The result is computed from the Java remainder and lies in [-180.0, 180.0].
+    - Adding one revolution before normalization preserves the resulting meridian
+      within the supplied tolerance.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: VALUES_ADJACENT_TO_WRAP_LATTICE
+    category: EDGE
+    description: Values immediately above and below positive and negative 360-degree
+      lattice points distinguish exact modulo-zero handling from neighboring nonzero
+      remainders.
+    preconditions:
+    - longitudeDeg is finite
+    - longitudeDeg is one of 359.9999999999, 360.0000000001, -359.9999999999, or -360.0000000001
+    expectedSourceBehavior:
+    - Inputs on opposite sides of a full-revolution boundary take the appropriate
+      positive- or negative-remainder branch.
+    - The normalized outputs remain near zero rather than being confused with the
+      exact multiple cases.
+    - The follow-up output represents the same normalized longitude within 1e-9.
+    targetCases: 4
+    emptyOutputAllowed: false
+  - id: LARGE_FINITE_VALUES
+    category: EDGE
+    description: Large finite values test repeated modulo reduction and the precision-sensitive
+      addition of 360.0 in the follow-up.
+    preconditions:
+    - longitudeDeg is finite
+    - abs(longitudeDeg) >= 1.0e12
+    - longitudeDeg is one of 1.0e12, -1.0e12, or 1.0e15
+    expectedSourceBehavior:
+    - The source executes the modulo path and returns a finite normalized result unless
+      floating-point arithmetic produces a non-finite intermediate.
+    - The source and follow-up outputs should be compared using the supplied 1e-9
+      tolerance, accounting for double rounding from the shift.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: NEAR_MAXIMUM_FINITE_MAGNITUDE
+    category: EDGE
+    description: Maximum-scale finite doubles exercise modulo arithmetic when adding
+      180.0 or 360.0 may be indistinguishable at the input's precision.
+    preconditions:
+    - longitudeDeg is finite
+    - abs(longitudeDeg) >= 1.0e308
+    - longitudeDeg is one of Double.MAX_VALUE or -Double.MAX_VALUE
+    expectedSourceBehavior:
+    - The method takes the modulo path because the input is outside [-180.0, 180.0].
+    - The follow-up is formed by Java double addition and may equal the source input
+      due to representational rounding; the relation compares the resulting normalized
+      outputs.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: SUBNORMAL_FINITE_INPUTS
+    category: EDGE
+    description: Smallest-magnitude finite values exercise the in-range early return
+      while covering subnormal double representations.
+    preconditions:
+    - longitudeDeg is finite
+    - abs(longitudeDeg) > 0.0
+    - abs(longitudeDeg) < Double.MIN_NORMAL
+    - longitudeDeg is one of Double.MIN_VALUE or -Double.MIN_VALUE
+    expectedSourceBehavior:
+    - The input is within [-180.0, 180.0] and is returned unchanged.
+    - The follow-up adds 360.0 and normalizes back to the same numeric longitude.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: NONFINITE_SENTINEL_INPUTS
+    category: EDGE
+    description: NaN and infinities cover the non-finite arithmetic sentinel path
+      present in the supplied implementation.
+    preconditions:
+    - longitudeDeg is NaN, positive infinity, or negative infinity
+    expectedSourceBehavior:
+    - The range check is false and the modulo expression produces NaN for the non-finite
+      input.
+    - The source output is NaN.
+    - The follow-up remains non-finite, and the supplied assertion does not throw
+      because Math.abs(NaN) > 1e-9 evaluates to false.
+    targetCases: 3
+    emptyOutputAllowed: false

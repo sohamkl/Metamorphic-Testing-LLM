@@ -1,0 +1,456 @@
+InputDomain:
+  summary: Non-null, constructible BarSeries inputs evaluated with a successfully
+    constructed SlopeChangeSwingDetector and non-null ElliottDegree. Source and follow-up
+    preserve all bar metadata and numeric implementation; follow-up translates every
+    OHLC price by exactly 100.0 and monetary amount by 100.0 times volume. Cases vary
+    effective evaluation horizon, candidate-loop reachability, slope direction and
+    magnitude, persistence, extreme selection, ATR filtering, pivot replacement, and
+    result degree.
+  globalConstraints:
+  - The receiver must be successfully constructed through a documented SlopeChangeSwingDetector
+    constructor, and its effective config values window w, confirmationBars q, minSlopeChange
+    m, atrPeriod, and minAtrReversal r are obtained from getConfig().
+  - series and degree are non-null. Empty series are included only as the documented
+    series.isEmpty() path; all non-empty series expose finite beginIndex and endIndex
+    with beginIndex <= endIndex.
+  - Every source bar and its translated follow-up bar must be constructible by the
+    selected BarSeries implementation. The follow-up retains the source bar duration,
+    begin timestamp, end timestamp, volume, trade count, order, and Num implementation.
+  - For every finite source OHLC Num x used in a translated case, x.plus(numOf(100.0))
+    must be representable by the same Num implementation and finite when the source
+    value is finite. The translated monetary amount is sourceAmount plus numOf(100.0).multipliedBy(sourceVolume),
+    where that operation is representable.
+  - The source and follow-up use the same detector configuration, evaluation index,
+    and ElliottDegree. Comparisons of translated Num prices use a tolerance appropriate
+    to the preserved Num implementation.
+  - For scenarios mentioning non-finite OHLC values, include them only when the chosen
+    documented bar and Num implementation accepts that value and preserves it through
+    retrieval; otherwise that scenario is unavailable rather than replaced by an invented
+    invalid-input expectation.
+  - For non-empty series, all referenced candidate and window indices are within [series.beginIndex,
+    effectiveEnd], where effectiveEnd is max(beginIndex, min(evaluationIndex, endIndex)).
+  diversity:
+    effectiveEvaluationIndex:
+    - empty-series index
+    - below beginIndex
+    - exactly beginIndex
+    - interior index
+    - exactly endIndex
+    - above endIndex
+    candidateLoopReachability:
+    - no candidate because effectiveEnd is before beginIndex + 2*w + q - 2
+    - exactly one candidate at effectiveEnd = beginIndex + 2*w + q - 2
+    - multiple candidates with overlapping rolling windows
+    rollingSlopeOutcome:
+    - zero slope
+    - equal finite slopes
+    - finite change below m
+    - positive to negative
+    - negative to positive
+    - same-sign slopes
+    - non-finite slope caused by a non-finite close
+    persistenceOutcome:
+    - q consecutive post-window slopes in required direction
+    - first persistence slope has wrong sign
+    - later persistence slope has wrong sign
+    - q equals zero when supported by the supplied config
+    pivotSelection:
+    - first accepted HIGH
+    - first accepted LOW
+    - unique high extreme
+    - unique low extreme
+    - tied high extreme selecting earliest index
+    - tied low extreme selecting earliest index
+    magnitudeFiltering:
+    - first pivot bypasses ATR filter
+    - minAtrReversal equals zero
+    - finite ATR with reversal below ATR times r
+    - finite ATR with reversal equal to ATR times r
+    - finite ATR with reversal above ATR times r
+    - non-finite ATR
+    pivotSequence:
+    - alternating accepted HIGH and LOW pivots
+    - consecutive accepted HIGH candidates replacing prior HIGH
+    - consecutive accepted LOW candidates replacing prior LOW
+    - same-type non-more-extreme candidate retained without replacement
+    seriesIndexing:
+    - beginIndex equals zero
+    - beginIndex greater than zero
+    degree:
+    - one non-null selectable ElliottDegree
+    - distinct non-null selectable ElliottDegree values when available
+  scenarios:
+  - id: EMPTY_SERIES
+    category: EDGE
+    description: A non-null empty series is evaluated at an arbitrary integer index.
+    preconditions:
+    - series.isEmpty() is true.
+    - degree is non-null.
+    expectedSourceBehavior:
+    - The result contains zero pivots and zero swings.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: EVALUATION_BEFORE_FIRST_CANDIDATE
+    category: BOUNDARY
+    description: A non-empty series whose effective evaluation end is too early for
+      any candidate.
+    preconditions:
+    - series is non-empty.
+    - effectiveEnd < beginIndex + 2*w + q - 2.
+    expectedSourceBehavior:
+    - The candidate loop executes zero iterations.
+    - The result contains zero pivots and zero swings.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: EXACTLY_ONE_CANDIDATE_HORIZON
+    category: BOUNDARY
+    description: The evaluation horizon reaches exactly the first possible candidate
+      and no later candidate.
+    preconditions:
+    - effectiveEnd = beginIndex + 2*w + q - 2.
+    - All close values needed by that candidate's before, after, and persistence windows
+      are finite.
+    expectedSourceBehavior:
+    - Exactly one candidate index is considered.
+    - Any non-empty pivot result can contain at most one pivot and no swings.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: INDEX_ABOVE_END_CLAMPS_TO_END
+    category: BOUNDARY
+    description: Evaluation uses an index greater than series.endIndex, exercising
+      upper clamping.
+    preconditions:
+    - series is non-empty.
+    - evaluationIndex > series.endIndex.
+    - series.endIndex >= beginIndex + 2*w + q - 2.
+    expectedSourceBehavior:
+    - Results equal those obtained from the same source series evaluated at endIndex.
+    - Any returned pivot index is at most endIndex.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: INDEX_BELOW_BEGIN_CLAMPS_TO_BEGIN
+    category: EDGE
+    description: Evaluation uses an index below series.beginIndex, exercising lower
+      clamping.
+    preconditions:
+    - series is non-empty.
+    - evaluationIndex < series.beginIndex.
+    expectedSourceBehavior:
+    - The effective end is beginIndex.
+    - The result contains zero pivots and zero swings because no full candidate horizon
+      can end at beginIndex for positive window and confirmation requirements.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: INTERIOR_EVALUATION_PREFIX_ONLY
+    category: NORMAL
+    description: A longer series is evaluated at an interior index so bars after that
+      index must not affect the source result.
+    preconditions:
+    - beginIndex + 2*w + q - 2 < evaluationIndex < endIndex.
+    - At least one accepted pivot is produced using bars at or before evaluationIndex.
+    expectedSourceBehavior:
+    - Every returned pivot index is at most evaluationIndex.
+    - At least one pivot is present, making translated pivot-price assertions non-vacuous.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WINDOW_ONE_ZERO_DENOMINATOR
+    category: EDGE
+    description: A supported configuration with one-bar regression windows exercises
+      the zero least-squares denominator path.
+    preconditions:
+    - config.window() = 1.
+    - The detector configuration is successfully constructible.
+    - series is long enough that at least one candidate is visited.
+    - All relevant close values are finite.
+    expectedSourceBehavior:
+    - Each one-point slope is zero.
+    - No candidate can satisfy positive-to-negative or negative-to-positive direction.
+    - The result contains zero pivots and zero swings.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: FLAT_CLOSES
+    category: NORMAL
+    description: All closes in every candidate-relevant regression window are equal
+      finite values.
+    preconditions:
+    - series has at least one candidate.
+    - Every candidate-relevant close is the same finite Num value.
+    expectedSourceBehavior:
+    - Before and after slopes are zero.
+    - The result contains zero pivots and zero swings.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: EQUAL_NONZERO_SLOPES
+    category: NORMAL
+    description: Closes follow a finite linear trend across the relevant horizon so
+      adjacent rolling regression slopes are equal and nonzero.
+    preconditions:
+    - series has at least one candidate.
+    - For each considered candidate, before slope equals after slope and both are
+      finite.
+    expectedSourceBehavior:
+    - The slope-change magnitude test rejects every candidate.
+    - The result contains zero pivots and zero swings.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: SUBTHRESHOLD_SLOPE_CHANGE
+    category: BOUNDARY
+    description: A finite direction-changing slope pair has absolute slope difference
+      strictly below config.minSlopeChange().
+    preconditions:
+    - At least one candidate has finite before and after slopes.
+    - before is positive and after is negative, or before is negative and after is
+      positive.
+    - abs(before.minus(after)) < numOf(m).
+    expectedSourceBehavior:
+    - That candidate is rejected before pivot type and persistence processing.
+    - No pivot is contributed by that candidate.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: SAME_SIGN_SLOPE_CHANGE
+    category: NORMAL
+    description: A candidate has sufficient finite slope change but both slopes retain
+      the same sign.
+    preconditions:
+    - At least one candidate has finite before and after slopes.
+    - abs(before.minus(after)) >= numOf(m).
+    - Both slopes are positive, or both slopes are negative.
+    expectedSourceBehavior:
+    - The candidate passes magnitude comparison but is rejected because it has no
+      HIGH or LOW direction reversal.
+    - No pivot is contributed by that candidate.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: HIGH_PERSISTENCE_FAILURE
+    category: NORMAL
+    description: A positive-to-negative candidate fails confirmation because a required
+      post-window slope is zero or positive.
+    preconditions:
+    - A candidate has before positive, after negative, and abs(before.minus(after))
+      >= numOf(m).
+    - At least one persistence-window slope is finite and not negative.
+    expectedSourceBehavior:
+    - The candidate is classified as HIGH before persistence checking.
+    - persists returns false and no pivot is contributed by that candidate.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: LOW_PERSISTENCE_FAILURE
+    category: NORMAL
+    description: A negative-to-positive candidate fails confirmation because a required
+      post-window slope is zero or negative.
+    preconditions:
+    - A candidate has before negative, after positive, and abs(before.minus(after))
+      >= numOf(m).
+    - At least one persistence-window slope is finite and not positive.
+    expectedSourceBehavior:
+    - The candidate is classified as LOW before persistence checking.
+    - persists returns false and no pivot is contributed by that candidate.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: FIRST_CONFIRMED_HIGH
+    category: NORMAL
+    description: The first accepted candidate is a sustained positive-to-negative
+      reversal with a finite extreme high.
+    preconditions:
+    - A candidate has before positive, after negative, and slope change at least m.
+    - Every required persistence slope is negative.
+    - Every high in [candidate, candidate + w - 1] is finite.
+    - No earlier candidate adds a pivot.
+    expectedSourceBehavior:
+    - The result contains a first pivot of type HIGH.
+    - The first pivot price equals the greatest high in the candidate extreme interval.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: FIRST_CONFIRMED_LOW
+    category: NORMAL
+    description: The first accepted candidate is a sustained negative-to-positive
+      reversal with a finite extreme low.
+    preconditions:
+    - A candidate has before negative, after positive, and slope change at least m.
+    - Every required persistence slope is positive.
+    - Every low in [candidate, candidate + w - 1] is finite.
+    - No earlier candidate adds a pivot.
+    expectedSourceBehavior:
+    - The result contains a first pivot of type LOW.
+    - The first pivot price equals the least low in the candidate extreme interval.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: HIGH_EXTREME_EARLIEST_TIE
+    category: BOUNDARY
+    description: A confirmed HIGH extreme interval contains the same greatest finite
+      high at two or more indices.
+    preconditions:
+    - A HIGH candidate passes slope and persistence checks.
+    - The maximum high in [candidate, candidate + w - 1] occurs at least twice.
+    - The candidate is accepted by the magnitude filter.
+    expectedSourceBehavior:
+    - The HIGH pivot index is the earliest index holding the tied maximum high.
+    - The pivot price equals that tied maximum high.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LOW_EXTREME_EARLIEST_TIE
+    category: BOUNDARY
+    description: A confirmed LOW extreme interval contains the same least finite low
+      at two or more indices.
+    preconditions:
+    - A LOW candidate passes slope and persistence checks.
+    - The minimum low in [candidate, candidate + w - 1] occurs at least twice.
+    - The candidate is accepted by the magnitude filter.
+    expectedSourceBehavior:
+    - The LOW pivot index is the earliest index holding the tied minimum low.
+    - The pivot price equals that tied minimum low.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ZERO_ATR_MULTIPLIER
+    category: EDGE
+    description: A supported configuration has minAtrReversal equal to zero and accepts
+      a later opposite-type pivot regardless of ATR finiteness.
+    preconditions:
+    - config.minAtrReversal() = 0.
+    - A first finite pivot exists.
+    - A later opposite-type candidate passes slope, persistence, and extreme checks.
+    expectedSourceBehavior:
+    - The later candidate passes passesMagnitudeFilter without requiring finite ATR.
+    - At least two opposite-type pivots are present and at least one swing is produced.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ATR_REVERSAL_BELOW_THRESHOLD
+    category: NORMAL
+    description: A later candidate has finite ATR but its price distance from the
+      preceding accepted pivot is strictly smaller than ATR times minAtrReversal.
+    preconditions:
+    - A first pivot is already accepted.
+    - The later candidate passes slope, persistence, and finite-extreme checks.
+    - config.minAtrReversal() is nonzero.
+    - ATR at the later pivot index is finite.
+    - abs(candidatePrice.minus(previousPrice)) < ATR.multipliedBy(numOf(r)).
+    expectedSourceBehavior:
+    - The later candidate is rejected by passesMagnitudeFilter.
+    - The previously accepted pivot remains the final pivot at that point.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ATR_REVERSAL_EQUAL_THRESHOLD
+    category: BOUNDARY
+    description: A later candidate's reversal distance is exactly the finite ATR-filter
+      threshold.
+    preconditions:
+    - A first pivot is already accepted.
+    - The later candidate passes slope, persistence, and finite-extreme checks.
+    - config.minAtrReversal() is nonzero.
+    - ATR at the later pivot index is finite.
+    - abs(candidatePrice.minus(previousPrice)) = ATR.multipliedBy(numOf(r)).
+    expectedSourceBehavior:
+    - The later candidate passes the greater-than-or-equal magnitude comparison.
+    - If its type differs from the prior pivot, it is appended and creates a swing.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NONFINITE_ATR_REJECTS_LATER_PIVOT
+    category: EDGE
+    description: A later otherwise valid candidate is evaluated with non-finite ATR
+      while the ATR multiplier is nonzero.
+    preconditions:
+    - config.minAtrReversal() is nonzero.
+    - A first pivot is already accepted.
+    - A later candidate passes slope, persistence, and finite-extreme checks.
+    - ATR at the later pivot index is non-finite.
+    expectedSourceBehavior:
+    - The later candidate is rejected by passesMagnitudeFilter.
+    - No additional pivot or swing is added for that candidate.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ALTERNATING_HIGH_LOW_SWINGS
+    category: NORMAL
+    description: Multiple accepted candidates alternate HIGH then LOW then HIGH, each
+      satisfying the configured magnitude filter.
+    preconditions:
+    - At least three accepted pivots occur in chronological candidate order.
+    - Adjacent accepted pivot types alternate HIGH, LOW, HIGH.
+    - Each later accepted pivot has finite ATR when r is nonzero and meets its ATR
+      threshold.
+    expectedSourceBehavior:
+    - Pivot order is chronological in detection order with alternating types.
+    - The result contains one fewer swings than pivots.
+    - Each swing joins consecutive returned pivots and has the supplied degree.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: REPLACE_PRIOR_HIGH_WITH_HIGHER_HIGH
+    category: NORMAL
+    description: Two accepted HIGH candidates occur without an accepted intervening
+      LOW, and the latter high price is greater.
+    preconditions:
+    - An accepted HIGH pivot exists.
+    - A later HIGH candidate passes slope, persistence, extreme, and magnitude checks.
+    - No accepted LOW is added between the two HIGH candidates.
+    - laterHighPrice > previousHighPrice.
+    expectedSourceBehavior:
+    - The later HIGH replaces the prior HIGH rather than increasing pivot count.
+    - The retained HIGH has the later candidate's extreme index and higher price.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: REPLACE_PRIOR_LOW_WITH_LOWER_LOW
+    category: NORMAL
+    description: Two accepted LOW candidates occur without an accepted intervening
+      HIGH, and the latter low price is smaller.
+    preconditions:
+    - An accepted LOW pivot exists.
+    - A later LOW candidate passes slope, persistence, extreme, and magnitude checks.
+    - No accepted HIGH is added between the two LOW candidates.
+    - laterLowPrice < previousLowPrice.
+    expectedSourceBehavior:
+    - The later LOW replaces the prior LOW rather than increasing pivot count.
+    - The retained LOW has the later candidate's extreme index and lower price.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: RETAIN_SAME_TYPE_NON_EXTREME_PIVOT
+    category: BOUNDARY
+    description: A later accepted same-type candidate is not more extreme than the
+      currently retained pivot.
+    preconditions:
+    - A prior accepted HIGH exists and a later accepted HIGH has price <= prior price,
+      or a prior accepted LOW exists and a later accepted LOW has price >= prior price.
+    - No accepted opposite-type pivot occurs between them.
+    expectedSourceBehavior:
+    - The prior pivot remains unchanged.
+    - Pivot count does not increase for the later same-type candidate.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NONFINITE_CLOSE_SKIPS_CANDIDATE
+    category: EDGE
+    description: A candidate's before or after regression window contains a non-finite
+      close.
+    preconditions:
+    - The selected series and Num implementation accept a non-finite close value.
+    - At least one considered candidate regression window contains that non-finite
+      close.
+    expectedSourceBehavior:
+    - slope returns non-finite for the affected window.
+    - The affected candidate is skipped before direction and pivot processing.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: NONZERO_BEGIN_INDEX
+    category: EDGE
+    description: A non-empty series has beginIndex greater than zero and enough retained
+      bars for at least one accepted pivot.
+    preconditions:
+    - series.beginIndex > 0.
+    - effectiveEnd >= beginIndex + 2*w + q - 2.
+    - At least one candidate is accepted.
+    expectedSourceBehavior:
+    - Every pivot index is an original series index, not a zero-based retained-bar
+      offset.
+    - The translated result retains identical pivot indices and ordering.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DISTINCT_ELLIOTT_DEGREES
+    category: NORMAL
+    description: The same non-vacuous price pattern is exercised with distinct selectable
+      non-null ElliottDegree values.
+    preconditions:
+    - At least two distinct non-null ElliottDegree values are available.
+    - The series produces at least two accepted pivots and one swing.
+    - Each case uses one degree unchanged for its translated follow-up.
+    expectedSourceBehavior:
+    - Pivot detection indices, types, and prices are independent of the selected degree.
+    - Every returned swing carries the degree supplied to that invocation.
+    targetCases: 2
+    emptyOutputAllowed: false

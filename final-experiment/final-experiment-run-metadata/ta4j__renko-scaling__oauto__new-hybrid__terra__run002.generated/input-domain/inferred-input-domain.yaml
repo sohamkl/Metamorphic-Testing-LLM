@@ -1,0 +1,497 @@
+InputDomain:
+  summary: Generate a valid RenkoBarAggregator receiver with finite positive boxSize
+    and positive reversalAmount, and a chronological list of contiguous, evenly spaced
+    Bar instances. Unless a scenario states otherwise, use boxSize=1, reversalAmount=2,
+    source-bar interval [t_i,t_i+Δ] with Δ>0 and close-price vector c. All non-null
+    Num values should use the first bar's NumFactory. Use non-null OHLC prices with
+    low <= open/close <= high; aggregation decisions are driven only by close prices.
+    Default per-bar metadata is volume=1, amount=2, trades=3.
+  globalConstraints:
+  - Use only finite positive boxSize values and reversalAmount > 0, because both receiver
+    constructors require them.
+  - bars must be non-null; each non-empty list must contain non-null Bar instances.
+  - 'For every non-empty source list, all bars must be chronological, contiguous,
+    and evenly spaced: bar i begins at t_i, ends at t_i+Δ, and Δ is identical and
+    positive.'
+  - Every source bar must have a non-null close price; invalid null-close, null-list,
+    uneven-interval, and non-contiguous inputs are excluded because the supplied MR
+    is a positive scaling relation rather than an exception relation.
+  - Use one compatible NumFactory for all non-null source numeric values so box-size
+    conversion, comparisons, additions, and the scaled follow-up use compatible Num
+    values.
+  - 'For every source case, construct the follow-up exactly as specified: multiply
+    boxSize and every non-null OHLC/amount Num by 2.0, while retaining time fields,
+    volume, and trades.'
+  diversity:
+    sourceLength:
+    - '0'
+    - '1'
+    - '2'
+    - '3'
+    - '4'
+    - multiple bars with deferred emission
+    boxSize:
+    - '0.5'
+    - '1'
+    - '2.5'
+    - finite positive decimal values
+    reversalAmount:
+    - '1'
+    - '2'
+    - '3'
+    - '4'
+    closeMovement:
+    - flat
+    - sub-box
+    - exact box
+    - multiple boxes
+    - up continuation
+    - down continuation
+    - exact reversal
+    - insufficient reversal
+    - overshooting reversal
+    metadata:
+    - default non-zero
+    - accumulated before emission
+    - multiple bricks from one source bar
+    - zero
+    - null volume
+    - null amount
+    - both nullable fields null
+    timing:
+    - first emitted brick
+    - delayed first emission
+    - source end after scheduled end
+    - source end equal to scheduled end
+    - additional same-source brick scheduled into the future
+    priceLevel:
+    - positive
+    - zero
+    - negative
+  scenarios:
+  - id: EMPTY_SOURCE
+    category: BOUNDARY
+    description: Empty source list.
+    preconditions:
+    - bars.size() = 0.
+    expectedSourceBehavior:
+    - Returns an empty Renko-brick list.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: SINGLE_SOURCE_BAR
+    category: BOUNDARY
+    description: One valid bar cannot move relative to an earlier close.
+    preconditions:
+    - bars.size() = 1 and c = [10].
+    expectedSourceBehavior:
+    - Returns no bricks.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: MULTI_BAR_FLAT_CLOSE
+    category: NORMAL
+    description: Several bars have unchanged close prices.
+    preconditions:
+    - c = [10, 10, 10, 10].
+    expectedSourceBehavior:
+    - Returns no bricks and retains Direction.NONE throughout.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: SUB_BOX_UPWARD_MOVE
+    category: BOUNDARY
+    description: A positive movement smaller than one box.
+    preconditions:
+    - c = [10, 10.999].
+    expectedSourceBehavior:
+    - Returns no bricks because close is below lastBrickClose + boxSize.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: SUB_BOX_DOWNWARD_MOVE
+    category: BOUNDARY
+    description: A negative movement smaller than one box.
+    preconditions:
+    - c = [10, 9.001].
+    expectedSourceBehavior:
+    - Returns no bricks because close is above lastBrickClose - boxSize.
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: INITIAL_UP_EXACTLY_ONE_BOX
+    category: BOUNDARY
+    description: First upward brick at the inclusive box threshold.
+    preconditions:
+    - c = [10, 11].
+    expectedSourceBehavior:
+    - Emits exactly one UP brick from 10 to 11.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: INITIAL_UP_MULTIPLE_BOXES
+    category: NORMAL
+    description: One source close crosses several upward boxes.
+    preconditions:
+    - c = [10, 13].
+    expectedSourceBehavior:
+    - Emits three UP bricks with closes 11, 12, and 13.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: INITIAL_DOWN_EXACTLY_ONE_BOX
+    category: BOUNDARY
+    description: First downward brick at the inclusive box threshold.
+    preconditions:
+    - c = [10, 9].
+    expectedSourceBehavior:
+    - Emits exactly one DOWN brick from 10 to 9.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: INITIAL_DOWN_MULTIPLE_BOXES
+    category: NORMAL
+    description: One source close crosses several downward boxes.
+    preconditions:
+    - c = [10, 7].
+    expectedSourceBehavior:
+    - Emits three DOWN bricks with closes 9, 8, and 7.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DEFERRED_UPWARD_THRESHOLD
+    category: NORMAL
+    description: Pending metadata spans sub-box bars before an upward threshold is
+      reached.
+    preconditions:
+    - c = [10, 10.4, 10.8, 11].
+    expectedSourceBehavior:
+    - Emits one UP brick whose volume, amount, and trades equal the totals of all
+      four source bars.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DEFERRED_DOWNWARD_THRESHOLD
+    category: NORMAL
+    description: Pending metadata spans sub-box bars before a downward threshold is
+      reached.
+    preconditions:
+    - c = [10, 9.6, 9.2, 9].
+    expectedSourceBehavior:
+    - Emits one DOWN brick whose volume, amount, and trades equal the totals of all
+      four source bars.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UP_CONTINUATION_EXACT_BOX
+    category: NORMAL
+    description: An established UP direction continues by exactly one box.
+    preconditions:
+    - c = [10, 11, 12].
+    expectedSourceBehavior:
+    - Emits two UP bricks; the second continues from 11 to 12.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UP_CONTINUATION_MULTIPLE_BOXES
+    category: NORMAL
+    description: An established UP direction continues by multiple boxes in one bar.
+    preconditions:
+    - c = [10, 11, 14].
+    expectedSourceBehavior:
+    - Emits four UP bricks total, including three from the final source bar.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UP_PULLBACK_WITHIN_ONE_BOX
+    category: BOUNDARY
+    description: A pullback after an UP brick does not reach the reversal distance.
+    preconditions:
+    - c = [10, 11, 10.001].
+    expectedSourceBehavior:
+    - Emits only the initial UP brick; the final bar emits no reversal brick.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UP_REVERSAL_JUST_SHORT_OF_TWO_BOXES
+    category: BOUNDARY
+    description: A default two-box reversal misses the inclusive threshold.
+    preconditions:
+    - c = [10, 11, 9.001].
+    expectedSourceBehavior:
+    - Emits only the initial UP brick because the final close is greater than 9.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UP_REVERSAL_EXACTLY_TWO_BOXES
+    category: BOUNDARY
+    description: A default two-box reversal reaches the threshold exactly.
+    preconditions:
+    - c = [10, 11, 9].
+    expectedSourceBehavior:
+    - Emits one UP brick followed by two DOWN bricks ending at 9.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UP_REVERSAL_OVERSHOOTS_THRESHOLD
+    category: NORMAL
+    description: A downward reversal from UP crosses more than the required two boxes.
+    preconditions:
+    - c = [10, 11, 8].
+    expectedSourceBehavior:
+    - Emits one UP brick followed by three DOWN bricks ending at 8.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DOWN_CONTINUATION_EXACT_BOX
+    category: NORMAL
+    description: An established DOWN direction continues by exactly one box.
+    preconditions:
+    - c = [10, 9, 8].
+    expectedSourceBehavior:
+    - Emits two DOWN bricks; the second continues from 9 to 8.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DOWN_CONTINUATION_MULTIPLE_BOXES
+    category: NORMAL
+    description: An established DOWN direction continues by multiple boxes in one
+      bar.
+    preconditions:
+    - c = [10, 9, 6].
+    expectedSourceBehavior:
+    - Emits four DOWN bricks total, including three from the final source bar.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DOWN_BOUNCE_WITHIN_ONE_BOX
+    category: BOUNDARY
+    description: A bounce after a DOWN brick does not reach reversal distance.
+    preconditions:
+    - c = [10, 9, 9.999].
+    expectedSourceBehavior:
+    - Emits only the initial DOWN brick; the final bar emits no reversal brick.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DOWN_REVERSAL_JUST_SHORT_OF_TWO_BOXES
+    category: BOUNDARY
+    description: A default two-box upward reversal misses the threshold.
+    preconditions:
+    - c = [10, 9, 10.999].
+    expectedSourceBehavior:
+    - Emits only the initial DOWN brick because the final close is less than 11.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DOWN_REVERSAL_EXACTLY_TWO_BOXES
+    category: BOUNDARY
+    description: A default two-box upward reversal reaches the threshold exactly.
+    preconditions:
+    - c = [10, 9, 11].
+    expectedSourceBehavior:
+    - Emits one DOWN brick followed by two UP bricks ending at 11.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DOWN_REVERSAL_OVERSHOOTS_THRESHOLD
+    category: NORMAL
+    description: An upward reversal from DOWN crosses more than the required two boxes.
+    preconditions:
+    - c = [10, 9, 12].
+    expectedSourceBehavior:
+    - Emits one DOWN brick followed by three UP bricks ending at 12.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ONE_BOX_REVERSAL_FROM_UP
+    category: EDGE
+    description: Custom reversalAmount=1 allows an immediate one-box reversal from
+      UP.
+    preconditions:
+    - boxSize = 1, reversalAmount = 1, and c = [10, 11, 10].
+    expectedSourceBehavior:
+    - Emits one UP brick followed by one DOWN brick.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ONE_BOX_REVERSAL_FROM_DOWN
+    category: EDGE
+    description: Custom reversalAmount=1 allows an immediate one-box reversal from
+      DOWN.
+    preconditions:
+    - boxSize = 1, reversalAmount = 1, and c = [10, 9, 10].
+    expectedSourceBehavior:
+    - Emits one DOWN brick followed by one UP brick.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: THREE_BOX_REVERSAL_JUST_SHORT
+    category: BOUNDARY
+    description: Custom reversalAmount=3 rejects a move just short of three boxes.
+    preconditions:
+    - boxSize = 1, reversalAmount = 3, and c = [10, 11, 8.001].
+    expectedSourceBehavior:
+    - Emits only the initial UP brick.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: THREE_BOX_REVERSAL_EXACT
+    category: BOUNDARY
+    description: Custom reversalAmount=3 accepts exactly three boxes.
+    preconditions:
+    - boxSize = 1, reversalAmount = 3, and c = [10, 11, 8].
+    expectedSourceBehavior:
+    - Emits one UP brick followed by three DOWN bricks.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FOUR_BOX_REVERSAL_EXACT
+    category: EDGE
+    description: Larger custom reversal distance is reached exactly.
+    preconditions:
+    - boxSize = 1, reversalAmount = 4, and c = [10, 11, 7].
+    expectedSourceBehavior:
+    - Emits one UP brick followed by four DOWN bricks.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DECIMAL_BOX_EXACT_UPWARD
+    category: BOUNDARY
+    description: A non-integral positive box size is crossed exactly.
+    preconditions:
+    - boxSize = 2.5, reversalAmount = 2, and c = [10, 12.5].
+    expectedSourceBehavior:
+    - Emits exactly one UP brick from 10 to 12.5.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: HALF_BOX_MULTIPLE_UPWARD
+    category: EDGE
+    description: A small decimal box size produces multiple bricks.
+    preconditions:
+    - boxSize = 0.5, reversalAmount = 2, and c = [10, 11.5].
+    expectedSourceBehavior:
+    - Emits three UP bricks with 0.5 price increments.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FIRST_OF_MULTIPLE_BRICKS_GETS_METADATA
+    category: NORMAL
+    description: One source bar emits several bricks and only its first emitted brick
+      receives its metadata.
+    preconditions:
+    - c = [10, 13] and source bar 1 has volume=7, amount=11, trades=13.
+    expectedSourceBehavior:
+    - Produces three UP bricks; only the first carries accumulated metadata, and the
+      other two have zero volume, zero amount, and zero trades.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ACCUMULATED_METADATA_ON_DELAYED_FIRST_BRICK
+    category: NORMAL
+    description: Metadata from every preceding non-emitting bar is attached to the
+      first eventual brick.
+    preconditions:
+    - c = [10, 10.25, 10.75, 11] and metadata differs by source-bar index.
+    expectedSourceBehavior:
+    - Produces one UP brick carrying the sums of all source volumes, amounts, and
+      trades.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PENDING_METADATA_RESTARTS_AFTER_EMISSION
+    category: NORMAL
+    description: Metadata after one brick is accumulated independently for a later
+      brick.
+    preconditions:
+    - c = [10, 11, 11.5, 12] and metadata differs by source-bar index.
+    expectedSourceBehavior:
+    - Produces two UP bricks; the first contains metadata from bars 0-1 and the second
+      contains metadata from bars 2-3.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NULL_VOLUME_IS_IGNORED
+    category: EDGE
+    description: A valid source bar has null volume while other metadata remains present.
+    preconditions:
+    - c = [10, 11], source bar 0 volume is null, and source bar 1 volume=7.
+    expectedSourceBehavior:
+    - Produces one UP brick with volume 7; null volume contributes nothing.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NULL_AMOUNT_IS_IGNORED
+    category: EDGE
+    description: A valid source bar has null amount while other metadata remains present.
+    preconditions:
+    - c = [10, 11], source bar 0 amount is null, and source bar 1 amount=7.
+    expectedSourceBehavior:
+    - Produces one UP brick with amount 7; null amount contributes nothing.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NULL_VOLUME_AND_AMOUNT
+    category: EDGE
+    description: Both nullable accumulation fields are absent on all source bars.
+    preconditions:
+    - c = [10, 11] and every source bar has volume=null and amount=null.
+    expectedSourceBehavior:
+    - Produces one UP brick with zero volume and zero amount while preserving summed
+      trades.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_METADATA
+    category: EDGE
+    description: Explicit zero metadata follows the normal accumulation path.
+    preconditions:
+    - c = [10, 11] and every source bar has volume=0, amount=0, trades=0.
+    expectedSourceBehavior:
+    - Produces one UP brick with zero volume, zero amount, and zero trades.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MIXED_NULL_AND_NON_NULL_METADATA_BEFORE_EMISSION
+    category: EDGE
+    description: Nullable volume and amount are mixed across deferred source bars.
+    preconditions:
+    - c = [10, 10.5, 11]; bar 0 has volume=2 amount=null, bar 1 has volume=null amount=5,
+      and bar 2 has volume=7 amount=11.
+    expectedSourceBehavior:
+    - Produces one UP brick with volume 9 and amount 16, plus the sum of all trades.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FIRST_BRICK_ENDS_AT_LATER_SOURCE_END
+    category: NORMAL
+    description: The first emission occurs after the initial source bar.
+    preconditions:
+    - c = [10, 11].
+    expectedSourceBehavior:
+    - The emitted brick end time equals source bar 1 end time, which is after the
+      initial nextBrickEndTime.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DELAYED_FIRST_BRICK_TIME
+    category: EDGE
+    description: Several non-emitting bars delay the first brick beyond the initial
+      scheduled time.
+    preconditions:
+    - c = [10, 10.25, 11].
+    expectedSourceBehavior:
+    - The sole brick end time equals source bar 2 end time.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EQUAL_SCHEDULED_AND_SOURCE_END_TIME
+    category: NORMAL
+    description: A later source bar emits when its end equals the next scheduled brick
+      end.
+    preconditions:
+    - c = [10, 11, 12].
+    expectedSourceBehavior:
+    - Produces two UP bricks ending at source bar 1 end time and source bar 2 end
+      time respectively.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SAME_SOURCE_SECOND_BRICK_USES_FUTURE_SCHEDULED_TIME
+    category: EDGE
+    description: Multiple bricks from one source bar require the second brick to use
+      nextBrickEndTime after that source end.
+    preconditions:
+    - c = [10, 12].
+    expectedSourceBehavior:
+    - Produces two UP bricks; the first ends at source bar 1 end time and the second
+      ends one source period later.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_PRICE_LEVEL
+    category: EDGE
+    description: Close prices cross a box starting from zero.
+    preconditions:
+    - c = [0, 1].
+    expectedSourceBehavior:
+    - Produces one UP brick from 0 to 1.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_PRICE_LEVEL
+    category: EDGE
+    description: Close prices cross a box entirely below zero.
+    preconditions:
+    - c = [-2, -1].
+    expectedSourceBehavior:
+    - Produces one UP brick from -2 to -1.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_TO_POSITIVE_MULTIBRICK_MOVE
+    category: EDGE
+    description: A single close movement crosses zero and several box boundaries.
+    preconditions:
+    - c = [-1, 2].
+    expectedSourceBehavior:
+    - Produces three UP bricks with closes 0, 1, and 2.
+    targetCases: 1
+    emptyOutputAllowed: false

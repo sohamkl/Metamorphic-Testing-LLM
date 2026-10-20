@@ -1,0 +1,206 @@
+InputDomain:
+  summary: Valid, non-null LocalDateRange receivers whose stored exclusive end can
+    be advanced by 23 days and reconstructed by LocalDateRange.of(start, extendedEnd).
+    The domain covers finite lengths, empty ranges, constructor-specific representations,
+    lower and upper date limits, length saturation at Integer.MAX_VALUE, and transformable
+    unbounded-start ranges.
+  globalConstraints:
+  - 'Every source receiver must be successfully created by one of the discovered LocalDateRange
+    construction paths and must satisfy the class invariant: start <= end, start is
+    neither LocalDate.MAX nor LocalDate.MAX.minusDays(1), and end is neither LocalDate.MIN
+    nor LocalDate.MIN.plusDays(1).'
+  - The receiver must be non-null, because generateFollowUp explicitly requires a
+    non-null LocalDateRange.
+  - The stored exclusive end must be at most LocalDate.MAX.minusDays(23), so that
+    range.getEnd().plusDays(23) does not overflow and the follow-up LocalDateRange.of(range.getStart(),
+    extendedEnd) is constructible.
+  - Valid ranges whose stored end is after LocalDate.MAX.minusDays(23), including
+    all unbounded-end ranges and LocalDateRange.ofUnbounded(), are excluded only because
+    the supplied follow-up transformation cannot advance LocalDate.MAX or any of its
+    final 22 predecessor dates by 23 days.
+  - Invalid constructor arguments, null construction arguments, and malformed parse
+    text are excluded because the metamorphic relation requests a valid LocalDateRange
+    receiver and does not specify an invalid-input relation.
+  diversity:
+    constructionPath:
+    - distinct
+    - measurable
+    - of(start,end), ofClosed(start,end), of(start,Period), ofEmpty(date), parse(text),
+      from(Temporal), ofUnboundedStart(end)
+    rangeShape:
+    - distinct
+    - measurable
+    - empty, finite non-empty, bounded length at or above Integer.MAX_VALUE, unbounded
+      start
+    endpointPosition:
+    - distinct
+    - measurable
+    - near LocalDate.MIN, ordinary calendar dates, leap-day/month boundaries, LocalDate.MAX.minusDays(24),
+      LocalDate.MAX.minusDays(23)
+    lengthBranch:
+    - distinct
+    - measurable
+    - 0 days, ordinary int length, Integer.MAX_VALUE-24, Integer.MAX_VALUE-23, Integer.MAX_VALUE-22,
+      Integer.MAX_VALUE, greater than Integer.MAX_VALUE
+    followUpOutcome:
+    - distinct
+    - measurable
+    - finite follow-up with source length + 23, follow-up length saturation, follow-up
+      unbounded-end sentinel, source sentinel
+  scenarios:
+  - id: EMPTY_FINITE_INTERIOR
+    category: NORMAL
+    description: Empty ranges made with ofEmpty at transformable, non-sentinel locations.
+    preconditions:
+    - Construct with ofEmpty(date) where date is one of LocalDate.MIN.plusDays(2),
+      LocalDate.of(2000, 1, 1), or LocalDate.MAX.minusDays(24).
+    - The stored end equals the stored start and is at most LocalDate.MAX.minusDays(24).
+    expectedSourceBehavior:
+    - lengthInDays() returns 0.
+    - The follow-up is finite and lengthInDays() returns 23.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: HALF_OPEN_ORDINARY_CALENDAR_LENGTHS
+    category: NORMAL
+    description: Finite non-empty half-open ranges created directly with of(startInclusive,
+      endExclusive), spanning ordinary days and calendar discontinuities.
+    preconditions:
+    - Use valid ordered endpoint pairs including 2019-02-28/2019-03-01, 2020-02-28/2020-03-01,
+      2020-12-31/2021-01-01, 2021-01-01/2021-01-24, and 2021-01-01/2021-02-01.
+    - Each end is at most LocalDate.MAX.minusDays(24).
+    expectedSourceBehavior:
+    - lengthInDays() equals the epoch-day difference end minus start.
+    - The finite follow-up output is exactly 23 greater than the source output.
+    targetCases: 5
+    emptyOutputAllowed: false
+  - id: CLOSED_RANGE_CONVERSION
+    category: NORMAL
+    description: Ranges created with ofClosed, exercising inclusive-end conversion
+      to the stored exclusive end before lengthInDays() is invoked.
+    preconditions:
+    - Use ofClosed for 2021-06-15/2021-06-15, 2020-02-28/2020-02-29, and 2021-12-30/2022-01-01.
+    - Each resulting stored exclusive end is at most LocalDate.MAX.minusDays(24).
+    expectedSourceBehavior:
+    - A same-date closed range has source length 1 rather than 0.
+    - Each source length includes both supplied closed endpoints.
+    - Each finite follow-up output is exactly 23 greater than its source output.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: PERIOD_CONSTRUCTION
+    category: NORMAL
+    description: Ranges created with of(startInclusive, Period), including zero and
+      calendar-based periods whose day count depends on the calendar.
+    preconditions:
+    - 'Use non-negative periods in valid constructions: LocalDate.of(2021, 1, 1) with
+      Period.ZERO, LocalDate.of(2021, 1, 1) with Period.ofDays(1), LocalDate.of(2020,
+      1, 31) with Period.ofMonths(1), and LocalDate.of(2019, 3, 1) with Period.ofYears(1).'
+    - The calculated end is at most LocalDate.MAX.minusDays(24).
+    expectedSourceBehavior:
+    - Period.ZERO produces source length 0.
+    - Other outputs equal the whole-day distance between the calculated start and
+      end dates.
+    - Each finite follow-up output is exactly 23 greater than its source output.
+    targetCases: 4
+    emptyOutputAllowed: false
+  - id: PARSED_DATE_AND_PERIOD_FORMS
+    category: NORMAL
+    description: 'Valid parse inputs covering all three documented text forms: date/date,
+      date/period, and period/date.'
+    preconditions:
+    - Parse the valid texts 2021-01-01/2021-01-02, 2020-02-28/2020-03-01, 2021-01-01/P23D,
+      2020-01-31/P1M, and P1M/2020-03-31.
+    - Every parsed receiver has stored end at most LocalDate.MAX.minusDays(24).
+    expectedSourceBehavior:
+    - date/date parsing uses the supplied second date as the exclusive end.
+    - date/period parsing calculates end as start plus the parsed Period.
+    - period/date parsing calculates start as end minus the parsed Period.
+    - Each finite follow-up output is exactly 23 greater than its source output.
+    targetCases: 5
+    emptyOutputAllowed: false
+  - id: TEMPORAL_FROM_SUPPORTED_TYPES
+    category: NORMAL
+    description: Ranges obtained through from(Temporal), exercising the local-date
+      query path and the explicit Year, YearMonth, YearHalf, YearQuarter, and YearWeek
+      branches.
+    preconditions:
+    - 'Use transformable temporal values representing: LocalDate.of(2021, 6, 15),
+      LocalDateTime.of(2021, 6, 15, 12, 0), Year.of(2021), Year.of(2020), YearMonth.of(2020,
+      2), a 2020 first-half YearHalf, a 2021 first-quarter YearQuarter, and a 2021
+      YearWeek.'
+    - Each resulting LocalDateRange has stored end at most LocalDate.MAX.minusDays(24).
+    expectedSourceBehavior:
+    - LocalDate and LocalDateTime inputs produce one-day closed-date ranges.
+    - Year, YearMonth, YearHalf, YearQuarter, and YearWeek inputs produce their documented
+      complete date spans.
+    - The leap-year Year and February YearMonth cases expose calendar-dependent day
+      counts.
+    - Each finite follow-up output is exactly 23 greater than its source output.
+    targetCases: 8
+    emptyOutputAllowed: false
+  - id: LOWER_ENDPOINT_VALIDITY_BOUNDARY
+    category: BOUNDARY
+    description: The earliest bounded ranges permitted by the constructor rules without
+      using LocalDate.MIN as an unbounded start.
+    preconditions:
+    - Construct of(LocalDate.MIN.plusDays(1), LocalDate.MIN.plusDays(2)) and of(LocalDate.MIN.plusDays(1),
+      LocalDate.MIN.plusDays(24)).
+    - The end is not LocalDate.MIN or LocalDate.MIN.plusDays(1).
+    expectedSourceBehavior:
+    - lengthInDays() returns respectively 1 and 23.
+    - Both follow-ups remain finite and increase the output by exactly 23.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: UPPER_TRANSFORMABLE_ENDPOINTS
+    category: BOUNDARY
+    description: Finite source ranges at the latest ends that the supplied plusDays(23)
+      transformation can handle.
+    preconditions:
+    - Construct of(LocalDate.MAX.minusDays(25), LocalDate.MAX.minusDays(24)), of(LocalDate.MAX.minusDays(24),
+      LocalDate.MAX.minusDays(23)), and ofEmpty(LocalDate.MAX.minusDays(23)).
+    - The stored source end is either LocalDate.MAX.minusDays(24) or LocalDate.MAX.minusDays(23).
+    expectedSourceBehavior:
+    - A source ending at LocalDate.MAX.minusDays(24) has a finite follow-up ending
+      at LocalDate.MAX.minusDays(1), so its output increases by 23.
+    - A source ending at LocalDate.MAX.minusDays(23) has a follow-up ending at LocalDate.MAX;
+      the follow-up length is Integer.MAX_VALUE and the supplied assertion skips the
+      arithmetic check.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: INTEGER_MAX_LENGTH_THRESHOLDS
+    category: EDGE
+    description: Bounded ranges whose epoch-day distances target the exact lengthInDays()
+      saturation thresholds.
+    preconditions:
+    - 'Use bounded ranges with start LocalDate.MIN.plusDays(1) and end equal to start
+      plus each of: Integer.MAX_VALUE - 24, Integer.MAX_VALUE - 23, Integer.MAX_VALUE
+      - 22, Integer.MAX_VALUE - 1, Integer.MAX_VALUE, and Integer.MAX_VALUE + 1 days.'
+    - Each computed end is at most LocalDate.MAX.minusDays(23).
+    expectedSourceBehavior:
+    - For distances through Integer.MAX_VALUE, lengthInDays() returns the exact distance,
+      including Integer.MAX_VALUE itself.
+    - For distance Integer.MAX_VALUE + 1, lengthInDays() returns Integer.MAX_VALUE
+      because the bounded day count exceeds the int maximum.
+    - The Integer.MAX_VALUE - 24 case has a finite non-sentinel follow-up and increases
+      by 23.
+    - The Integer.MAX_VALUE - 23 and Integer.MAX_VALUE - 22 cases produce a follow-up
+      output of Integer.MAX_VALUE, so the supplied assertion skips.
+    - Source outputs equal to Integer.MAX_VALUE are skipped by the supplied assertion
+      regardless of the follow-up output.
+    targetCases: 6
+    emptyOutputAllowed: false
+  - id: UNBOUNDED_START_WITH_TRANSFORMABLE_END
+    category: EDGE
+    description: Ranges constructed with ofUnboundedStart whose end can still be advanced
+      by 23 days.
+    preconditions:
+    - Use ofUnboundedStart with end LocalDate.MIN.plusDays(2), LocalDate.of(2021,
+      1, 1), and LocalDate.MAX.minusDays(23).
+    - The stored start is LocalDate.MIN.
+    - The stored end is at most LocalDate.MAX.minusDays(23).
+    expectedSourceBehavior:
+    - lengthInDays() returns Integer.MAX_VALUE because isUnboundedStart() is true.
+    - The supplied relation assertion skips because the source output is Integer.MAX_VALUE.
+    - For end LocalDate.MAX.minusDays(23), the follow-up end becomes LocalDate.MAX
+      and is also unbounded at the end.
+    targetCases: 3
+    emptyOutputAllowed: false

@@ -1,0 +1,392 @@
+/*
+ * SPDX-License-Identifier: MIT
+ */
+package org.ta4j.core;
+
+import org.ta4j.core.Trade.TradeType;
+import org.ta4j.core.named.NamedAssetRegistry;
+import org.ta4j.core.serialization.ComponentDescriptor;
+import org.ta4j.core.serialization.StrategySerialization;
+
+/**
+ * A {@code Strategy} (also called "trading strategy") is a pair of
+ * complementary (entry and exit) {@link Rule rules}. It may recommend to enter
+ * or to exit. Recommendations are based respectively on the entry rule or on
+ * the exit rule.
+ *
+ * <p>
+ * In ta4j, a strategy is evaluated bar by bar during a backtest (via
+ * {@code BarSeriesManager} or {@code BacktestExecutor}) or in real-time. It
+ * signals {@code shouldEnter} or {@code shouldExit} based on the current index
+ * and trading record. Strategies can be composed using logical operators like
+ * {@link #and(Strategy)} or {@link #or(Strategy)}.
+ * </p>
+ *
+ * <p>
+ * Live-evaluation reminder: ta4j evaluates whatever bar state you provide at
+ * {@code index}. If your integration replaces the last bar as new ticks arrive,
+ * strategy decisions are evaluated against that still-forming bar (live
+ * candle). If your integration evaluates only after appending a finished bar,
+ * decisions are based on closed candles.
+ * </p>
+ */
+public interface Strategy {
+
+    /**
+     * @return the name of the strategy
+     */
+    String getName();
+
+    /**
+     * @return the entry rule
+     */
+    Rule getEntryRule();
+
+    /**
+     * Returns the starting trade type for this strategy.
+     *
+     * <p>
+     * Defaults to {@link TradeType#BUY} (long-only). Override when the strategy is
+     * meant to run in short-only mode.
+     * </p>
+     *
+     * @return starting trade type
+     * @since 0.22.2
+     */
+    default TradeType getStartingType() {
+        return TradeType.BUY;
+    }
+
+    /**
+     * @return the exit rule
+     */
+    Rule getExitRule();
+
+    /**
+     * @param strategy the other strategy
+     * @return the AND combination of two {@link Strategy strategies}
+     */
+    Strategy and(Strategy strategy);
+
+    /**
+     * @param strategy the other strategy
+     * @return the OR combination of two {@link Strategy strategies}
+     */
+    Strategy or(Strategy strategy);
+
+    /**
+     * @param name         the name of the strategy
+     * @param strategy     the other strategy
+     * @param unstableBars the number of first bars in a bar series that this
+     *                     strategy ignores
+     * @return the AND combination of two {@link Strategy strategies}
+     */
+    Strategy and(String name, Strategy strategy, int unstableBars);
+
+    /**
+     * @param name         the name of the strategy
+     * @param strategy     the other strategy
+     * @param unstableBars the number of first bars in a bar series that this
+     *                     strategy ignores
+     * @return the OR combination of two {@link Strategy strategies}
+     */
+    Strategy or(String name, Strategy strategy, int unstableBars);
+
+    /**
+     * @return the opposite of the {@link Strategy strategy}
+     */
+    Strategy opposite();
+
+    /**
+     * @param unstableBars the number of first bars in a bar series that this
+     *                     strategy ignores
+     */
+    void setUnstableBars(int unstableBars);
+
+    /**
+     * @return unstableBars the number of first bars in a bar series that this
+     *         strategy ignores
+     */
+    int getUnstableBars();
+
+    /**
+     * @param index a bar index
+     * @return true if this strategy is unstable at the provided index, false
+     *         otherwise (stable)
+     */
+    boolean isUnstableAt(int index);
+
+    /**
+     * @param index         the bar index
+     * @param tradingRecord the potentially needed trading history
+     * @return true to recommend a trade, false otherwise (no recommendation)
+     */
+    default boolean shouldOperate(int index, TradingRecord tradingRecord) {
+        Position position = tradingRecord.getCurrentPosition();
+        if (position.isNew()) {
+            return shouldEnter(index, tradingRecord);
+        } else if (position.isOpened()) {
+            return shouldExit(index, tradingRecord);
+        }
+        return false;
+    }
+
+    /**
+     * <p>
+     * <b>Implementation note:</b> This overload ignores trading state. In live
+     * execution, prefer {@link #shouldEnter(int, TradingRecord)} so rules can see
+     * open positions and avoid repeated entry signals while a position is already
+     * open.
+     * </p>
+     *
+     * @param index the bar index
+     * @return true to recommend to enter, false otherwise
+     */
+    default boolean shouldEnter(int index) {
+        return shouldEnter(index, (TradingRecord) null);
+    }
+
+    /**
+     * <p>
+     * <b>Implementation note:</b> Use this overload for live systems so entry
+     * decisions include the current position state. After broker-confirmed fills,
+     * keep {@code tradingRecord} synchronized with executed fills.
+     * </p>
+     *
+     * @param index         the bar index
+     * @param tradingRecord the potentially needed trading history
+     * @return true to recommend to enter, false otherwise
+     */
+    default boolean shouldEnter(int index, TradingRecord tradingRecord) {
+        return !isUnstableAt(index) && getEntryRule().isSatisfied(index, tradingRecord);
+    }
+
+    /**
+     * Evaluates the entry rule once with the supplied trace detail. Implementations
+     * that do not support scoped tracing may ignore {@code traceMode} and delegate
+     * to {@link #shouldEnter(int, TradingRecord)}.
+     *
+     * @param index     the bar index
+     * @param traceMode trace detail for this evaluation only; {@code null} uses
+     *                  {@link Rule.TraceMode#VERBOSE}
+     * @return true to recommend to enter, false otherwise
+     * @since 0.22.7
+     */
+    default boolean shouldEnterWithTraceMode(int index, Rule.TraceMode traceMode) {
+        return shouldEnterWithTraceMode(index, null, traceMode);
+    }
+
+    /**
+     * Evaluates the entry rule once with the supplied trace detail. Implementations
+     * that do not support scoped tracing may ignore {@code traceMode} and delegate
+     * to {@link #shouldEnter(int, TradingRecord)}.
+     *
+     * @param index         the bar index
+     * @param tradingRecord the potentially needed trading history
+     * @param traceMode     trace detail for this evaluation only; {@code null} uses
+     *                      {@link Rule.TraceMode#VERBOSE}
+     * @return true to recommend to enter, false otherwise
+     * @since 0.22.7
+     */
+    default boolean shouldEnterWithTraceMode(int index, TradingRecord tradingRecord, Rule.TraceMode traceMode) {
+        return shouldEnter(index, tradingRecord);
+    }
+
+    /**
+     * @param index the bar index
+     * @return true to recommend to exit, false otherwise
+     */
+    default boolean shouldExit(int index) {
+        return shouldExit(index, (TradingRecord) null);
+    }
+
+    /**
+     * @param index         the bar index
+     * @param tradingRecord the potentially needed trading history
+     * @return true to recommend to exit, false otherwise
+     */
+    default boolean shouldExit(int index, TradingRecord tradingRecord) {
+        return !isUnstableAt(index) && getExitRule().isSatisfied(index, tradingRecord);
+    }
+
+    /**
+     * Evaluates the exit rule once with the supplied trace detail. Implementations
+     * that do not support scoped tracing may ignore {@code traceMode} and delegate
+     * to {@link #shouldExit(int, TradingRecord)}.
+     *
+     * @param index     the bar index
+     * @param traceMode trace detail for this evaluation only; {@code null} uses
+     *                  {@link Rule.TraceMode#VERBOSE}
+     * @return true to recommend to exit, false otherwise
+     * @since 0.22.7
+     */
+    default boolean shouldExitWithTraceMode(int index, Rule.TraceMode traceMode) {
+        return shouldExitWithTraceMode(index, null, traceMode);
+    }
+
+    /**
+     * Evaluates the exit rule once with the supplied trace detail. Implementations
+     * that do not support scoped tracing may ignore {@code traceMode} and delegate
+     * to {@link #shouldExit(int, TradingRecord)}.
+     *
+     * @param index         the bar index
+     * @param tradingRecord the potentially needed trading history
+     * @param traceMode     trace detail for this evaluation only; {@code null} uses
+     *                      {@link Rule.TraceMode#VERBOSE}
+     * @return true to recommend to exit, false otherwise
+     * @since 0.22.7
+     */
+    default boolean shouldExitWithTraceMode(int index, TradingRecord tradingRecord, Rule.TraceMode traceMode) {
+        return shouldExit(index, tradingRecord);
+    }
+
+    /**
+     * Serializes {@code this} strategy into a JSON payload that captures its
+     * metadata and rule descriptors.
+     *
+     * @return JSON description of the strategy
+     * @throws NullPointerException  if the strategy or any of its components are
+     *                               {@code null}
+     * @throws IllegalStateException if serialization fails due to an internal error
+     *                               during JSON generation
+     * @throws RuntimeException      if serialization fails due to an I/O error or
+     *                               other runtime exception during JSON processing
+     * @since 0.19
+     */
+    default String toJson() {
+        return StrategySerialization.toJson(this);
+    }
+
+    /**
+     * Serializes {@code this} strategy into the compact opt-in strategy JSON v2
+     * authoring form using ta4j's default named asset registry.
+     *
+     * @return compact JSON v2 payload
+     * @since 0.23.1
+     */
+    default String toCompactJson() {
+        return StrategySerialization.toCompactJson(this);
+    }
+
+    /**
+     * Serializes {@code this} strategy into the compact opt-in strategy JSON v2
+     * authoring form using the supplied named asset registry.
+     *
+     * @param registry named asset registry
+     * @return compact JSON v2 payload
+     * @since 0.23.1
+     */
+    default String toCompactJson(NamedAssetRegistry registry) {
+        return StrategySerialization.toCompactJson(this, registry);
+    }
+
+    /**
+     * Renders {@code this} strategy as a compact named shorthand expression using
+     * ta4j's default named asset registry.
+     *
+     * @return compact strategy shorthand expression
+     * @throws IllegalArgumentException if no registered shorthand can represent the
+     *                                  strategy
+     * @since 0.23.1
+     */
+    default String toExpression() {
+        return StrategySerialization.toExpression(this);
+    }
+
+    /**
+     * Renders {@code this} strategy as a compact named shorthand expression using
+     * the supplied named asset registry.
+     *
+     * @param registry named asset registry
+     * @return compact strategy shorthand expression
+     * @throws IllegalArgumentException if no registered shorthand can represent the
+     *                                  strategy
+     * @since 0.23.1
+     */
+    default String toExpression(NamedAssetRegistry registry) {
+        return StrategySerialization.toExpression(this, registry);
+    }
+
+    /**
+     * Converts {@code this} strategy into a structured descriptor that can be
+     * embedded inside other component metadata.
+     *
+     * @return component descriptor for the strategy
+     * @throws NullPointerException     if the strategy or any of its rules are
+     *                                  {@code null}
+     * @throws IllegalArgumentException if rule serialization fails due to
+     *                                  unsupported constructor signatures or
+     *                                  invalid rule configurations
+     * @since 0.19
+     */
+    default ComponentDescriptor toDescriptor() {
+        return StrategySerialization.describe(this);
+    }
+
+    /**
+     * Reconstructs a strategy instance from its serialized representation.
+     *
+     * @param series backing series to attach to the reconstructed strategy; must
+     *               not be {@code null}
+     * @param json   serialized strategy payload generated by {@link #toJson()} or
+     *               an opt-in {@code version: 2} authoring envelope; must not be
+     *               {@code null} and must be valid strategy JSON
+     * @return reconstructed strategy instance with entry and exit rules restored
+     *         from the canonical descriptor form
+     * @throws NullPointerException     if {@code series} or {@code json} is
+     *                                  {@code null}
+     * @throws IllegalArgumentException if the JSON payload is malformed, missing
+     *                                  required component descriptors (entry/exit
+     *                                  rules), contains incompatible component
+     *                                  types, or fails validation during
+     *                                  deserialization
+     * @throws IllegalStateException    if strategy construction fails due to
+     *                                  missing constructors, instantiation errors,
+     *                                  or unresolved component dependencies
+     * @since 0.19
+     */
+    static Strategy fromJson(BarSeries series, String json) {
+        return StrategySerialization.fromJson(series, json);
+    }
+
+    /**
+     * Reconstructs a strategy from canonical JSON or the opt-in strategy JSON v2
+     * authoring form using the supplied named asset registry.
+     *
+     * @param series   backing series to attach to the reconstructed strategy
+     * @param json     canonical or v2 JSON payload
+     * @param registry named asset registry
+     * @return reconstructed strategy
+     * @since 0.23.1
+     */
+    static Strategy fromJson(BarSeries series, String json, NamedAssetRegistry registry) {
+        return StrategySerialization.fromJson(series, json, registry);
+    }
+
+    /**
+     * Reconstructs a strategy from a compact named strategy expression using ta4j's
+     * default named asset registry.
+     *
+     * @param series     backing series to attach to the reconstructed strategy
+     * @param expression shorthand expression
+     * @return reconstructed strategy
+     * @since 0.23.1
+     */
+    static Strategy fromExpression(BarSeries series, String expression) {
+        return StrategySerialization.fromExpression(series, expression);
+    }
+
+    /**
+     * Reconstructs a strategy from a compact named strategy expression using the
+     * supplied named asset registry.
+     *
+     * @param series     backing series to attach to the reconstructed strategy
+     * @param expression shorthand expression
+     * @param registry   named asset registry
+     * @return reconstructed strategy
+     * @since 0.23.1
+     */
+    static Strategy fromExpression(BarSeries series, String expression, NamedAssetRegistry registry) {
+        return StrategySerialization.fromExpression(series, expression, registry);
+    }
+}

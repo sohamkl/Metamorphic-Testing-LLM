@@ -1,8 +1,8 @@
 package mtllm.generation;
 
 import mtllm.config.PromptConfig;
+import mtllm.sut.JavaSourceNames;
 
-import java.nio.file.Path;
 import java.util.regex.Pattern;
 
 /**
@@ -45,7 +45,7 @@ public final class GeneratedJUnitCallQualifier {
             return MethodCall.fromQualifiedName(methodReference);
         }
 
-        return new MethodCall(classNameFromPath(config.sutClassFile()), methodReference);
+        return new MethodCall(JavaSourceNames.qualifiedName(config.sutClassFile()), methodReference);
     }
 
     private static String qualifyCall(String javaCode, MethodCall call) {
@@ -63,17 +63,6 @@ public final class GeneratedJUnitCallQualifier {
                 + Pattern.quote(call.className() + "." + call.methodName())
                 + "\\s*;\\s*\\R?";
         return javaCode.replaceAll(importPattern, "");
-    }
-
-    private static String classNameFromPath(Path path) {
-        if (path == null) {
-            return "";
-        }
-        String fileName = path.getFileName().toString();
-        if (fileName.endsWith(".java")) {
-            return fileName.substring(0, fileName.length() - ".java".length());
-        }
-        return fileName;
     }
 
     private record MethodCall(String className, String methodName) {

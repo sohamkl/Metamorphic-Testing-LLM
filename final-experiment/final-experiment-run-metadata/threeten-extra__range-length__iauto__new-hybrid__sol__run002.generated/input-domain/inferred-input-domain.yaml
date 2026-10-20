@@ -1,0 +1,317 @@
+InputDomain:
+  summary: Non-null valid LocalDateRange receivers whose end can be moved 23 days
+    later; includes bounded empty and non-empty ranges, calendar boundaries, representable-length
+    boundaries, and transformable unbounded-start sentinel cases.
+  globalConstraints:
+  - The source receiver must be non-null because generateFollowUp applies Objects.requireNonNull(range,
+    "range").
+  - 'The source must be a successfully constructed LocalDateRange: start <= end; start
+    is neither LocalDate.MAX nor LocalDate.MAX.minusDays(1); end is neither LocalDate.MIN
+    nor LocalDate.MIN.plusDays(1); and an empty range is not located at LocalDate.MIN
+    or LocalDate.MAX.'
+  - The source end must be on or before LocalDate.MAX.minusDays(23), so range.getEnd().plusDays(23)
+    is defined. This excludes every unbounded-end range, including the fully unbounded
+    range, because its end is LocalDate.MAX and the supplied transformation would
+    throw before the relation could skip it.
+  - For a bounded-start source, end.toEpochDay() - start.toEpochDay() must be between
+    0 and Integer.MAX_VALUE - 23 inclusive. Larger valid bounded ranges are excluded
+    because an exact 23-day increase is not representable as two ordinary nonnegative
+    int lengths under the supplied arithmetic relation.
+  - 'A source whose bounded length is Integer.MAX_VALUE - 23 is retained as a sentinel-collision
+    boundary: its follow-up has a mathematical length of Integer.MAX_VALUE, so the
+    supplied assertion skips it.'
+  - A source ending at LocalDate.MAX.minusDays(23) is retained even though its follow-up
+    ends at LocalDate.MAX and is therefore unbounded at the end; the supplied assertion
+    explicitly skips a follow-up output of Integer.MAX_VALUE.
+  - Unbounded-start sources are permitted when their bounded end satisfies the transformation
+    constraint; lengthInDays() returns Integer.MAX_VALUE and the supplied assertion
+    skips them.
+  diversity:
+    boundedness:
+    - bounded-at-both-ends
+    - unbounded-start-with-bounded-end
+    - bounded-source-whose-follow-up-becomes-unbounded
+    sourceLengthClass:
+    - zero
+    - one
+    - less-than-23
+    - exactly-23
+    - greater-than-23
+    - near-Integer-MAX
+    - Integer-MAX-sentinel
+    calendarTransition:
+    - ordinary-day
+    - week-boundary
+    - month-boundary
+    - year-boundary
+    - leap-day
+    - proleptic-year-zero
+    endpointRegion:
+    - near-LocalDate-MIN
+    - ordinary-era
+    - near-LocalDate-MAX
+    followUpDisposition:
+    - ordinary-non-sentinel
+    - bounded-sentinel-value
+    - unbounded-end-sentinel
+    - source-unbounded-skip
+  scenarios:
+  - id: EMPTY_BOUNDED_RANGE
+    category: EDGE
+    description: A legal bounded empty range at an interior date.
+    preconditions:
+    - start == end.
+    - start is at least LocalDate.MIN.plusDays(2) and at most LocalDate.MAX.minusDays(23).
+    expectedSourceBehavior:
+    - lengthInDays() returns 0.
+    - The follow-up is a bounded 23-day range unless the source date is LocalDate.MAX.minusDays(23).
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: SINGLE_DAY_BOUNDED_RANGE
+    category: BOUNDARY
+    description: The smallest non-empty bounded half-open range.
+    preconditions:
+    - end.toEpochDay() - start.toEpochDay() == 1.
+    - end <= LocalDate.MAX.minusDays(24).
+    expectedSourceBehavior:
+    - lengthInDays() returns 1.
+    - The follow-up length is 24 and the asserted increase is 23.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LENGTH_JUST_BELOW_EXTRA_DAYS
+    category: BOUNDARY
+    description: A bounded range one day shorter than the 23-day extension.
+    preconditions:
+    - end.toEpochDay() - start.toEpochDay() == 22.
+    expectedSourceBehavior:
+    - lengthInDays() returns 22.
+    - The follow-up length is 45.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LENGTH_EQUAL_TO_EXTRA_DAYS
+    category: BOUNDARY
+    description: A bounded range whose source length equals the transformation's 23-day
+      extension.
+    preconditions:
+    - end.toEpochDay() - start.toEpochDay() == 23.
+    expectedSourceBehavior:
+    - lengthInDays() returns 23.
+    - The follow-up length is 46.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LENGTH_JUST_ABOVE_EXTRA_DAYS
+    category: BOUNDARY
+    description: A bounded range one day longer than the 23-day extension.
+    preconditions:
+    - end.toEpochDay() - start.toEpochDay() == 24.
+    expectedSourceBehavior:
+    - lengthInDays() returns 24.
+    - The follow-up length is 47.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MONTH_BOUNDARY_RANGES
+    category: NORMAL
+    description: Bounded ranges crossing month ends with different month lengths.
+    preconditions:
+    - The interval crosses exactly one month boundary.
+    - Select distinct cases involving a 28-day February, a 29-day February, a 30-day
+      month, and a 31-day month.
+    - The exact source length is no greater than Integer.MAX_VALUE - 23.
+    expectedSourceBehavior:
+    - lengthInDays() equals end.toEpochDay() - start.toEpochDay(), independent of
+      the month lengths crossed.
+    - Each ordinary follow-up reports exactly 23 more days.
+    targetCases: 4
+    emptyOutputAllowed: false
+  - id: YEAR_BOUNDARY_RANGES
+    category: NORMAL
+    description: Bounded ranges crossing December 31 to January 1.
+    preconditions:
+    - start is in December and end is in the immediately following January.
+    - Use distinct one-day, 23-day, and multi-week spans across the year boundary.
+    expectedSourceBehavior:
+    - lengthInDays() equals the whole-day difference between the endpoints.
+    - The ordinary follow-up increases that result by 23.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: LEAP_DAY_RELATIONSHIPS
+    category: EDGE
+    description: Bounded ranges positioned before, on, and after February 29 in a
+      leap year.
+    preconditions:
+    - Use a leap year supported by LocalDate.
+    - Cover a range ending on February 29, starting on February 29, enclosing February
+      29, and the one-day range February 29 to March 1.
+    expectedSourceBehavior:
+    - lengthInDays() counts February 29 as one ordinary whole day when it lies in
+      the half-open interval.
+    - The follow-up increase is 23 regardless of whether its endpoint crosses into
+      March.
+    targetCases: 4
+    emptyOutputAllowed: false
+  - id: NON_LEAP_FEBRUARY_BOUNDARY
+    category: EDGE
+    description: Bounded ranges crossing February 28 to March 1 in non-leap years.
+    preconditions:
+    - Use one ordinary non-leap year and one century year that is not divisible by
+      400.
+    - Each range crosses from February into March.
+    expectedSourceBehavior:
+    - lengthInDays() uses the actual whole-day endpoint difference without inserting
+      February 29.
+    - Each ordinary follow-up increases the result by 23.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LEAP_YEAR_RULE_VARIANTS
+    category: EDGE
+    description: Ranges covering February under the divisible-by-4, century, and divisible-by-400
+      leap-year rules.
+    preconditions:
+    - Use one year divisible by 4 but not 100, one divisible by 100 but not 400, and
+      one divisible by 400.
+    - Each interval begins no later than February 28 and ends no earlier than March
+      1.
+    expectedSourceBehavior:
+    - The source lengths differ according to whether February 29 exists.
+    - For every case, extending the exclusive end by 23 days increases the reported
+      ordinary length by 23.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: PROLEPTIC_YEAR_ZERO_TRANSITIONS
+    category: EDGE
+    description: Bounded ranges using LocalDate's proleptic years around year zero.
+    preconditions:
+    - Use one range crossing from year -1 into year 0 and one crossing from year 0
+      into year 1.
+    - Both endpoints satisfy all LocalDateRange validity and follow-up constraints.
+    expectedSourceBehavior:
+    - lengthInDays() equals the whole-day endpoint difference across the proleptic
+      year transition.
+    - The follow-up increases the ordinary result by 23.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: MULTI_YEAR_BOUNDED_RANGES
+    category: NORMAL
+    description: Non-empty bounded ranges spanning multiple complete years.
+    preconditions:
+    - Use distinct intervals spanning two years, a decade, and a longer interval containing
+      multiple leap years.
+    - Each exact source length is at most Integer.MAX_VALUE - 24 so both outputs remain
+      below the sentinel.
+    expectedSourceBehavior:
+    - lengthInDays() equals end.toEpochDay() - start.toEpochDay().
+    - The follow-up output is non-sentinel and exactly 23 greater.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: WEEK_BOUNDARY_RANGES
+    category: NORMAL
+    description: Bounded intervals whose exclusive end extension crosses one or more
+      seven-day boundaries.
+    preconditions:
+    - Use source lengths of 6, 7, and 8 days.
+    - All endpoints are ordinary interior dates.
+    expectedSourceBehavior:
+    - lengthInDays() returns 6, 7, and 8 respectively.
+    - The corresponding follow-up outputs are 29, 30, and 31.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: EARLIEST_BOUNDED_ONE_DAY_RANGE
+    category: BOUNDARY
+    description: The earliest valid bounded-start one-day range.
+    preconditions:
+    - start == LocalDate.MIN.plusDays(1).
+    - end == LocalDate.MIN.plusDays(2).
+    expectedSourceBehavior:
+    - The source is bounded because only an exact start of LocalDate.MIN denotes an
+      unbounded start.
+    - lengthInDays() returns 1 and the follow-up returns 24.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EARLIEST_LEGAL_EMPTY_RANGE
+    category: BOUNDARY
+    description: An empty range at the earliest date accepted for an empty LocalDateRange.
+    preconditions:
+    - start == end == LocalDate.MIN.plusDays(2).
+    expectedSourceBehavior:
+    - lengthInDays() returns 0.
+    - The transformed range is valid and has length 23.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LATEST_ORDINARY_BOUNDED_FOLLOW_UP
+    category: BOUNDARY
+    description: A source whose transformed end is the latest non-unbounded exclusive
+      end.
+    preconditions:
+    - end == LocalDate.MAX.minusDays(24).
+    - start == end.minusDays(1).
+    expectedSourceBehavior:
+    - lengthInDays() returns 1.
+    - The follow-up ends at LocalDate.MAX.minusDays(1), remains bounded, and returns
+      24.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FOLLOW_UP_BECOMES_UNBOUNDED_END
+    category: EDGE
+    description: A bounded source at the last transformable end whose follow-up end
+      becomes LocalDate.MAX.
+    preconditions:
+    - end == LocalDate.MAX.minusDays(23).
+    - start == end.minusDays(1).
+    expectedSourceBehavior:
+    - The bounded source lengthInDays() returns 1.
+    - The follow-up is valid, is unbounded at the end, and returns Integer.MAX_VALUE.
+    - The supplied relation assertion takes its sentinel skip path.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MAXIMUM_NON_SENTINEL_FOLLOW_UP_LENGTH
+    category: BOUNDARY
+    description: The largest bounded source length for which the follow-up output
+      remains below Integer.MAX_VALUE.
+    preconditions:
+    - end.toEpochDay() - start.toEpochDay() == Integer.MAX_VALUE - 24.
+    - end <= LocalDate.MAX.minusDays(23).
+    expectedSourceBehavior:
+    - lengthInDays() returns 2147483623.
+    - The bounded follow-up returns 2147483646, producing an observable increase of
+      23 without taking the skip path.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BOUNDED_SENTINEL_VALUE_COLLISION
+    category: EDGE
+    description: A bounded source whose extension produces the numeric sentinel value
+      without an unbounded source.
+    preconditions:
+    - end.toEpochDay() - start.toEpochDay() == Integer.MAX_VALUE - 23.
+    - end <= LocalDate.MAX.minusDays(23).
+    expectedSourceBehavior:
+    - lengthInDays() returns 2147483624.
+    - The follow-up's whole-day length is Integer.MAX_VALUE.
+    - The supplied assertion skips because followUpOutput equals Integer.MAX_VALUE.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EARLIEST_UNBOUNDED_START_RANGE
+    category: BOUNDARY
+    description: An unbounded-start source with the earliest permitted exclusive end.
+    preconditions:
+    - start == LocalDate.MIN.
+    - end == LocalDate.MIN.plusDays(2).
+    expectedSourceBehavior:
+    - lengthInDays() returns Integer.MAX_VALUE as the unbounded-range flag.
+    - The follow-up can be constructed, and the assertion skips because the source
+      output is the sentinel.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ORDINARY_UNBOUNDED_START_RANGES
+    category: EDGE
+    description: Unbounded-start ranges ending at ordinary interior dates.
+    preconditions:
+    - start == LocalDate.MIN.
+    - end is an ordinary interior date no later than LocalDate.MAX.minusDays(23).
+    - Use distinct ends before year zero, at a modern-era date, and after a leap-day
+      boundary.
+    expectedSourceBehavior:
+    - lengthInDays() returns Integer.MAX_VALUE for every source.
+    - Each follow-up remains constructible and unbounded at the start.
+    - The assertion takes its source-sentinel skip path.
+    targetCases: 3
+    emptyOutputAllowed: false

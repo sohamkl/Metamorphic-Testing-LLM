@@ -2,6 +2,7 @@ package mtllm.generation;
 
 import mtllm.config.PromptConfig;
 import mtllm.runner.DataGeneratorRunner;
+import mtllm.sut.JavaSourceNames;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -35,7 +36,7 @@ public final class DataBackedJUnitWriter {
     private static String render(
             PromptConfig config,
             String dataClassName,
-            DataGeneratorRunner.ExecutedDataSummary dataSummary) {
+            DataGeneratorRunner.ExecutedDataSummary dataSummary) throws IOException {
         StringBuilder out = new StringBuilder();
         out.append("import org.junit.jupiter.api.Test;\n\n");
         out.append("public class ").append(config.generatedClassName()).append(" {\n");
@@ -52,7 +53,7 @@ public final class DataBackedJUnitWriter {
             StringBuilder out,
             PromptConfig config,
             String dataClassName,
-            int sourceIndex) {
+            int sourceIndex) throws IOException {
         out.append("\n    @Test\n");
         out.append("    public void testGeneratedCase")
                 .append(String.format("%03d", sourceIndex + 1))
@@ -91,7 +92,7 @@ public final class DataBackedJUnitWriter {
         return dataClassName + ".assertMetamorphicRelation";
     }
 
-    private static String targetMethodCallName(PromptConfig config) {
+    private static String targetMethodCallName(PromptConfig config) throws IOException {
         String targetFunction = config.targetFunction().trim();
         if (targetFunction.isBlank()) {
             return "/* missing target method */";
@@ -109,21 +110,11 @@ public final class DataBackedJUnitWriter {
             return methodReference;
         }
 
-        String className = classNameFromPath(config.sutClassFile());
+        String className = JavaSourceNames.qualifiedName(config.sutClassFile());
         if (className.isBlank()) {
             return methodReference;
         }
         return className + "." + methodReference;
     }
 
-    private static String classNameFromPath(Path path) {
-        if (path == null) {
-            return "";
-        }
-        String fileName = path.getFileName().toString();
-        if (fileName.endsWith(".java")) {
-            return fileName.substring(0, fileName.length() - ".java".length());
-        }
-        return fileName;
-    }
 }

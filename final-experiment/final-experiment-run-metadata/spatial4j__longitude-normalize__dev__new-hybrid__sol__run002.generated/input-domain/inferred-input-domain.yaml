@@ -1,0 +1,336 @@
+InputDomain:
+  summary: Finite Java double longitudes for which the generated follow-up represents
+    a 360-degree shift within the MR tolerance, spanning the direct-return interval,
+    all normalization branches, antimeridian sentinels, signed zero, precision boundaries,
+    and large multi-revolution values.
+  globalConstraints:
+  - The source input longitudeDeg must satisfy Double.isFinite(longitudeDeg).
+  - The generated follow-up longitudeDeg + 360.0 must satisfy Double.isFinite(longitudeDeg
+    + 360.0).
+  - The represented shift must satisfy Math.abs(((longitudeDeg + 360.0) - longitudeDeg)
+    - 360.0) <= 1e-9; larger-magnitude doubles that cannot represent the developer-requested
+    revolution within its tolerance are excluded because failures would describe floating-point
+    transformation error rather than longitude normalization.
+  - NaN and positive or negative infinity are excluded because normLonDEG can produce
+    NaN and the supplied assertion treats a NaN difference as non-failing, making
+    the MR vacuous.
+  diversity:
+    sourceRegion:
+    - longitudeDeg < -180.0
+    - -180.0 <= longitudeDeg <= 180.0
+    - longitudeDeg > 180.0
+    sourceBranch:
+    - direct return
+    - off < 0
+    - off == 0 and longitudeDeg > 0
+    - final else including negative-zero off
+    boundaryRelation:
+    - exactly -180
+    - exactly +180
+    - immediately inside
+    - immediately outside
+    - within antimeridian tolerance
+    - just beyond antimeridian tolerance
+    revolutionClass:
+    - negative full-revolution multiple
+    - positive full-revolution multiple
+    - negative antimeridian lattice
+    - positive antimeridian lattice
+    - non-lattice fractional longitude
+    precisionScale:
+    - signed zero
+    - subnormal or minimum-normal magnitude
+    - ordinary magnitude
+    - many revolutions
+    - large exactly shiftable double
+  scenarios:
+  - id: SIGNED_ZERO_DIRECT_RETURN
+    category: EDGE
+    description: Exercise both IEEE-754 zero encodings in the direct-return branch.
+    preconditions:
+    - Double.doubleToRawLongBits(longitudeDeg) equals the raw bits of either +0.0
+      or -0.0.
+    expectedSourceBehavior:
+    - normLonDEG returns longitudeDeg directly because it is in [-180.0, 180.0].
+    - The returned raw zero sign is unchanged, even though the MR's numeric difference
+      treats the two zero encodings as equal.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ORDINARY_NEGATIVE_INTERIOR
+    category: NORMAL
+    description: Sample distinct ordinary negative longitudes comfortably inside the
+      direct-return interval.
+    preconditions:
+    - -179.0 <= longitudeDeg && longitudeDeg <= -1.0.
+    - Use distinct integral and fractional values.
+    expectedSourceBehavior:
+    - normLonDEG returns exactly the source double without modulo arithmetic.
+    - The source output is finite and strictly between -180.0 and 0.0.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: ORDINARY_POSITIVE_INTERIOR
+    category: NORMAL
+    description: Sample distinct ordinary positive longitudes comfortably inside the
+      direct-return interval.
+    preconditions:
+    - 1.0 <= longitudeDeg && longitudeDeg <= 179.0.
+    - Use distinct integral and fractional values.
+    expectedSourceBehavior:
+    - normLonDEG returns exactly the source double without modulo arithmetic.
+    - The source output is finite and strictly between 0.0 and 180.0.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: TINY_NONZERO_DIRECT_RETURN
+    category: EDGE
+    description: Cover nonzero values whose magnitude is subnormal or no greater than
+      Double.MIN_NORMAL.
+    preconditions:
+    - 0.0 < Math.abs(longitudeDeg) && Math.abs(longitudeDeg) <= Double.MIN_NORMAL.
+    - Select one negative and one positive source.
+    expectedSourceBehavior:
+    - normLonDEG returns the tiny source double exactly through the direct-return
+      branch.
+    - The output remains nonzero and preserves the source sign.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: EXACT_NEGATIVE_ANTIMERIDIAN
+    category: BOUNDARY
+    description: Exercise the inclusive lower boundary of the direct-return interval.
+    preconditions:
+    - longitudeDeg == -180.0.
+    expectedSourceBehavior:
+    - normLonDEG returns exactly -180.0 without modulo arithmetic.
+    - The source and follow-up outputs are accepted by the MR as antimeridian representations.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EXACT_POSITIVE_ANTIMERIDIAN
+    category: BOUNDARY
+    description: Exercise the inclusive upper boundary of the direct-return interval.
+    preconditions:
+    - longitudeDeg == 180.0.
+    expectedSourceBehavior:
+    - normLonDEG returns exactly 180.0 without modulo arithmetic.
+    - The positive-antimeridian representation is retained rather than merged with
+      -180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: IMMEDIATELY_INSIDE_LOWER_BOUND
+    category: BOUNDARY
+    description: Use the representable longitude immediately above -180.0.
+    preconditions:
+    - longitudeDeg == Math.nextUp(-180.0).
+    expectedSourceBehavior:
+    - normLonDEG returns longitudeDeg exactly through the direct-return branch.
+    - The output is greater than -180.0 and less than 180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: IMMEDIATELY_INSIDE_UPPER_BOUND
+    category: BOUNDARY
+    description: Use the representable longitude immediately below 180.0.
+    preconditions:
+    - longitudeDeg == Math.nextDown(180.0).
+    expectedSourceBehavior:
+    - normLonDEG returns longitudeDeg exactly through the direct-return branch.
+    - The output is less than 180.0 and greater than -180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: IMMEDIATELY_OUTSIDE_LOWER_BOUND
+    category: BOUNDARY
+    description: Cross the lower normalization boundary by one representable step.
+    preconditions:
+    - longitudeDeg == Math.nextDown(-180.0).
+    expectedSourceBehavior:
+    - The direct-return condition is false and (longitudeDeg + 180.0) % 360.0 is negative.
+    - normLonDEG returns 180.0 + ((longitudeDeg + 180.0) % 360.0), producing a value
+      near positive 180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: IMMEDIATELY_OUTSIDE_UPPER_BOUND
+    category: BOUNDARY
+    description: Cross the upper normalization boundary by one representable step.
+    preconditions:
+    - longitudeDeg == Math.nextUp(180.0).
+    expectedSourceBehavior:
+    - The direct-return condition is false and the positive nonzero off path is taken.
+    - normLonDEG returns -180.0 + ((longitudeDeg + 180.0) % 360.0), producing a value
+      near negative 180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WITHIN_ANTIMERIDIAN_TOLERANCE
+    category: EDGE
+    description: Exercise all four sides of the antimeridian within the supplied assertion's
+      1e-9 tolerance.
+    preconditions:
+    - 10.0 * Math.ulp(180.0) <= Math.abs(Math.abs(longitudeDeg) - 180.0).
+    - Math.abs(Math.abs(longitudeDeg) - 180.0) <= 1e-9.
+    - Select one source immediately inside and one outside each of -180.0 and 180.0.
+    expectedSourceBehavior:
+    - Inside sources are returned directly; outside sources use the corresponding
+      modulo branch.
+    - Math.abs(Math.abs(normLonDEG(longitudeDeg)) - 180.0) <= 1e-9, activating the
+      MR's antimeridian recognition.
+    targetCases: 4
+    emptyOutputAllowed: false
+  - id: JUST_BEYOND_ANTIMERIDIAN_TOLERANCE
+    category: EDGE
+    description: Exercise all four sides of the antimeridian just beyond the assertion's
+      sentinel tolerance.
+    preconditions:
+    - 1e-9 < Math.abs(Math.abs(longitudeDeg) - 180.0).
+    - Math.abs(Math.abs(longitudeDeg) - 180.0) <= 2e-9.
+    - Select one source inside and one outside each of -180.0 and 180.0.
+    expectedSourceBehavior:
+    - The normalized result remains in [-180.0, 180.0].
+    - Math.abs(Math.abs(normLonDEG(longitudeDeg)) - 180.0) > 1e-9, so the MR must
+      use its numeric-difference path rather than the antimeridian early return.
+    targetCases: 4
+    emptyOutputAllowed: false
+  - id: NEGATIVE_FIRST_OUTER_BAND
+    category: NORMAL
+    description: Normalize non-lattice negative values whose follow-ups enter the
+      direct-return interval.
+    preconditions:
+    - -540.0 < longitudeDeg && longitudeDeg < -180.0.
+    - longitudeDeg % 360.0 != 0.0.
+    - Use values at distinct positions near the two ends and middle of the band.
+    expectedSourceBehavior:
+    - (longitudeDeg + 180.0) % 360.0 is negative.
+    - normLonDEG returns 180.0 + ((longitudeDeg + 180.0) % 360.0), within [-180.0,
+      180.0].
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: NEGATIVE_ZERO_REMAINDER_SENTINEL
+    category: EDGE
+    description: Exercise the exact -540.0 case where Java remainder produces negative
+      zero and the final else branch preserves -180.0.
+    preconditions:
+    - longitudeDeg == -540.0.
+    expectedSourceBehavior:
+    - (longitudeDeg + 180.0) % 360.0 compares equal to 0.0 but off < 0 is false and
+      longitudeDeg > 0 is false.
+    - normLonDEG returns exactly -180.0 through the final else branch.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEGATIVE_MULTI_REVOLUTION_NON_LATTICE
+    category: NORMAL
+    description: Normalize fractional or non-lattice negative values more than one
+      outer band below the normal range.
+    preconditions:
+    - -1.0e9 < longitudeDeg && longitudeDeg < -540.0.
+    - (longitudeDeg + 180.0) % 360.0 < 0.0.
+    - longitudeDeg % 360.0 != 0.0.
+    expectedSourceBehavior:
+    - The off < 0 branch is taken.
+    - normLonDEG returns 180.0 + ((longitudeDeg + 180.0) % 360.0), a finite value
+      in [-180.0, 180.0].
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: NEGATIVE_ANTIMERIDIAN_LATTICE
+    category: EDGE
+    description: Exercise exact negative antimeridian representations after multiple
+      full revolutions.
+    preconditions:
+    - longitudeDeg == -180.0 - 360.0 * k for an integer k with 2 <= k && k <= 1000000.
+    expectedSourceBehavior:
+    - (longitudeDeg + 180.0) % 360.0 compares equal to zero.
+    - Because longitudeDeg is negative, the positive off-zero sentinel is skipped
+      and normLonDEG returns exactly -180.0.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: NEGATIVE_FULL_REVOLUTION_LATTICE
+    category: EDGE
+    description: Exercise exact negative multiples of one full revolution.
+    preconditions:
+    - longitudeDeg == -360.0 * k for an integer k with 1 <= k && k <= 1000000.
+    expectedSourceBehavior:
+    - (longitudeDeg + 180.0) % 360.0 equals -180.0.
+    - The off < 0 branch returns exactly 0.0.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: POSITIVE_FIRST_OUTER_BAND
+    category: NORMAL
+    description: Normalize non-lattice positive values in the first band above 180.0.
+    preconditions:
+    - 180.0 < longitudeDeg && longitudeDeg < 540.0.
+    - longitudeDeg % 360.0 != 0.0.
+    - Use values at distinct positions near the two ends and middle of the band.
+    expectedSourceBehavior:
+    - (longitudeDeg + 180.0) % 360.0 is positive and nonzero.
+    - normLonDEG returns -180.0 + ((longitudeDeg + 180.0) % 360.0), within [-180.0,
+      180.0].
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: POSITIVE_OFF_ZERO_SENTINEL
+    category: EDGE
+    description: Exercise the first out-of-range positive antimeridian where the dedicated
+      off == 0 branch applies.
+    preconditions:
+    - longitudeDeg == 540.0.
+    expectedSourceBehavior:
+    - (longitudeDeg + 180.0) % 360.0 == 0.0 and longitudeDeg > 0.0.
+    - normLonDEG returns exactly 180.0 through the positive off-zero sentinel branch.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POSITIVE_ANTIMERIDIAN_LATTICE
+    category: EDGE
+    description: Exercise positive antimeridian representations after several full
+      revolutions.
+    preconditions:
+    - longitudeDeg == 180.0 + 360.0 * k for an integer k with 2 <= k && k <= 1000000.
+    expectedSourceBehavior:
+    - (longitudeDeg + 180.0) % 360.0 == 0.0.
+    - The off == 0 and longitudeDeg > 0 branch returns exactly 180.0.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: POSITIVE_FULL_REVOLUTION_LATTICE
+    category: EDGE
+    description: Exercise exact positive multiples of one full revolution.
+    preconditions:
+    - longitudeDeg == 360.0 * k for an integer k with 1 <= k && k <= 1000000.
+    expectedSourceBehavior:
+    - (longitudeDeg + 180.0) % 360.0 == 180.0.
+    - The final else branch returns exactly 0.0.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: POSITIVE_MULTI_REVOLUTION_NON_LATTICE
+    category: NORMAL
+    description: Normalize non-lattice positive values after multiple complete revolutions.
+    preconditions:
+    - 540.0 < longitudeDeg && longitudeDeg < 1.0e9.
+    - (longitudeDeg + 180.0) % 360.0 > 0.0.
+    - longitudeDeg % 360.0 != 0.0.
+    expectedSourceBehavior:
+    - The positive nonzero off path reaches the final else branch.
+    - normLonDEG returns -180.0 + ((longitudeDeg + 180.0) % 360.0), a finite value
+      in [-180.0, 180.0].
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: LARGE_EXACTLY_SHIFTABLE_MAGNITUDES
+    category: EDGE
+    description: Stress modulo normalization with large positive and negative quotients
+      while the follow-up still represents a 360-degree shift accurately.
+    preconditions:
+    - 1.0e12 <= Math.abs(longitudeDeg) && Math.abs(longitudeDeg) <= 1.0e15.
+    - Math.abs(((longitudeDeg + 360.0) - longitudeDeg) - 360.0) <= 1e-9.
+    - Select one positive and one negative non-lattice value.
+    expectedSourceBehavior:
+    - The direct-return branch is not taken.
+    - The source result is finite and lies in the documented inclusive range [-180.0,
+      180.0].
+    - Positive and negative sources exercise their respective remainder-sign paths.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: HIGH_MAGNITUDE_SHIFT_FIDELITY_LIMIT
+    category: EDGE
+    description: Exercise very large doubles near the practical precision limit imposed
+      by the MR's represented 360-degree shift.
+    preconditions:
+    - longitudeDeg is either Math.scalb(1.0, 55) or -Math.scalb(1.0, 55).
+    - Math.abs(((longitudeDeg + 360.0) - longitudeDeg) - 360.0) <= 1e-9.
+    expectedSourceBehavior:
+    - normLonDEG performs modulo normalization rather than direct return.
+    - The result is finite and lies in [-180.0, 180.0] despite the large source magnitude.
+    - Both remainder-sign directions are covered without admitting a source whose
+      generated follow-up ceases to represent the requested revolution.
+    targetCases: 2
+    emptyOutputAllowed: false

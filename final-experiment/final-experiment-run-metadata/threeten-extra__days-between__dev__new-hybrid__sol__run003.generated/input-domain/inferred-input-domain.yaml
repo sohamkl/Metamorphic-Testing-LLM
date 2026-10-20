@@ -1,0 +1,367 @@
+InputDomain:
+  summary: Non-null, day-capable Temporal endpoint pairs whose source and 37-day-shifted
+    gaps are representable as int-valued Days, covering signed, calendar, time-of-day,
+    chronology, offset, zone-transition, singleton, and numeric-boundary behavior.
+  globalConstraints:
+  - Both source endpoints are non-null, because generateFollowUp applies Objects.requireNonNull
+    to each endpoint.
+  - Each source endpoint must successfully support plus(37, ChronoUnit.DAYS), as required
+    by generateFollowUp; Temporal implementations or endpoint values that cannot perform
+    that operation are excluded.
+  - ChronoUnit.DAYS.between(startDateInclusive, endDateExclusive) must complete successfully
+    for the source pair and for the pair produced by adding 37 days to both endpoints.
+  - The source and follow-up ChronoUnit.DAYS.between results must each lie in the
+    inclusive range Integer.MIN_VALUE through Integer.MAX_VALUE, because Days.between
+    applies Math.toIntExact before constructing Days.
+  - Endpoint runtime types, chronologies, offsets, and zones must be mutually compatible
+    for both DAYS.between invocations; combinations rejected by the Temporal implementations
+    are excluded because the relation requires two Days outputs.
+  - Endpoints must be at least 37 supported days below their implementation-specific
+    maximum so that the mandated positive shift is representable.
+  - Nulls, unsupported DAYS arithmetic, incompatible Temporal pairs, endpoint overflow
+    during the shift, and day gaps outside the int range are excluded because they
+    prevent generateFollowUp, Days.between, or assertRelation from receiving the required
+    successful outputs; the MR does not request invalid-input behavior.
+  diversity:
+    temporalRepresentation:
+    - LocalDate
+    - LocalDateTime
+    - Instant
+    - OffsetDateTime
+    - ZonedDateTime
+    - non_ISO_ChronoLocalDate
+    sourceGapSign:
+    - negative
+    - zero
+    - positive
+    sourceGapMagnitude:
+    - zero
+    - one
+    - less_than_week
+    - whole_week
+    - multi_month_or_year
+    - near_int_limit
+    - exact_int_limit
+    calendarPosition:
+    - ordinary_day
+    - month_boundary
+    - year_boundary
+    - leap_day
+    - non_leap_February
+    subDayRemainder:
+    - none
+    - positive_less_than_one_day
+    - negative_less_than_one_day
+    - more_than_one_day_with_remainder
+    offsetRelationship:
+    - not_applicable
+    - same_offset
+    - different_offsets_same_instant_relationship
+    zoneCondition:
+    - fixed_or_unzoned
+    - ordinary_zoned_interval
+    - daylight_saving_gap
+    - daylight_saving_overlap
+    chronologyRelationship:
+    - same_ISO_chronology
+    - same_non_ISO_chronology
+    - compatible_mixed_chronology
+  scenarios:
+  - id: EQUAL_ENDPOINTS_ZERO_SENTINEL
+    category: EDGE
+    description: Both endpoints denote the same temporal value, exercising the zero
+      result and Days.of(0) sentinel path.
+    preconditions:
+    - startDateInclusive.equals(endDateExclusive) is true for a day-capable compatible
+      Temporal type.
+    - Use three distinct representations among LocalDate, LocalDateTime, and Instant.
+    expectedSourceBehavior:
+    - Days.between returns normally and getAmount() is 0.
+    - The result is equal to Days.ZERO.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: EXACTLY_ONE_DAY_FORWARD
+    category: BOUNDARY
+    description: The exclusive endpoint is exactly one supported day after the inclusive
+      endpoint, exercising Days.of(1).
+    preconditions:
+    - endDateExclusive equals startDateInclusive.plus(1, ChronoUnit.DAYS).
+    - Use two representations with no sub-day remainder.
+    expectedSourceBehavior:
+    - The returned Days has getAmount() equal to 1.
+    - The result is equal to Days.ONE.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: EXACTLY_ONE_DAY_REVERSE
+    category: BOUNDARY
+    description: The end precedes the start by exactly one supported day.
+    preconditions:
+    - endDateExclusive equals startDateInclusive.plus(-1, ChronoUnit.DAYS).
+    - Use two compatible date-capable representations.
+    expectedSourceBehavior:
+    - The returned Days has getAmount() equal to -1.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: SHORT_POSITIVE_NON_SINGLETON_GAP
+    category: NORMAL
+    description: A forward gap of several whole days exercises the ordinary non-sentinel
+      Days construction path.
+    preconditions:
+    - endDateExclusive equals startDateInclusive.plus(d, ChronoUnit.DAYS), where d
+      is selected from 2 and 6.
+    expectedSourceBehavior:
+    - The returned getAmount() equals the selected positive d.
+    - The result is neither equal to Days.ZERO nor Days.ONE.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: SHORT_NEGATIVE_NON_SINGLETON_GAP
+    category: NORMAL
+    description: A reverse gap of several whole days exercises ordinary negative output.
+    preconditions:
+    - endDateExclusive equals startDateInclusive.plus(d, ChronoUnit.DAYS), where d
+      is selected from -2 and -6.
+    expectedSourceBehavior:
+    - The returned getAmount() equals the selected negative d.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: WHOLE_WEEK_MAGNITUDES
+    category: NORMAL
+    description: Endpoint pairs are separated by exact multiples of seven days.
+    preconditions:
+    - endDateExclusive equals startDateInclusive.plus(d, ChronoUnit.DAYS), with d
+      selected from 7 and -14.
+    expectedSourceBehavior:
+    - The returned getAmount() equals 7 or -14 as selected.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: MONTH_BOUNDARY_CROSSING
+    category: NORMAL
+    description: The interval crosses a change of calendar month without relying on
+      equal month lengths.
+    preconditions:
+    - Use LocalDate endpoints spanning a month boundary.
+    - Use one forward three-day interval and its reverse ordering.
+    expectedSourceBehavior:
+    - The forward result has getAmount() equal to 3.
+    - The reverse result has getAmount() equal to -3.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: YEAR_BOUNDARY_CROSSING
+    category: NORMAL
+    description: The interval crosses December to January in forward and reverse directions.
+    preconditions:
+    - Use LocalDate endpoints separated by three days across a calendar-year boundary.
+    - Exercise both endpoint orderings.
+    expectedSourceBehavior:
+    - The returned getAmount() is 3 for forward ordering and -3 for reverse ordering.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LEAP_DAY_INTERVAL
+    category: EDGE
+    description: A LocalDate interval includes February 29 in a leap year.
+    preconditions:
+    - Use a leap year and endpoints separated by three days across February 29.
+    - Exercise forward and reverse endpoint orderings.
+    expectedSourceBehavior:
+    - The returned getAmount() is 3 for forward ordering and -3 for reverse ordering.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: NON_LEAP_FEBRUARY_BOUNDARY
+    category: EDGE
+    description: A LocalDate interval crosses directly from February 28 to March 1
+      in a non-leap year.
+    preconditions:
+    - The selected year has no February 29.
+    - Exercise February 28 to March 1 and the reverse ordering.
+    expectedSourceBehavior:
+    - The returned getAmount() is 1 for forward ordering and -1 for reverse ordering.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_TIME_POSITIVE_PARTIAL_DAY
+    category: EDGE
+    description: LocalDateTime endpoints have a positive elapsed interval containing
+      a sub-day remainder.
+    preconditions:
+    - Use one interval of 23 hours and one interval of 49 hours.
+    - The endpoints and their 37-day shifts are representable.
+    expectedSourceBehavior:
+    - The 23-hour interval returns getAmount() equal to 0.
+    - The 49-hour interval returns getAmount() equal to 2.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_TIME_NEGATIVE_PARTIAL_DAY
+    category: EDGE
+    description: LocalDateTime endpoints have negative elapsed intervals with truncation
+      toward zero at whole-day precision.
+    preconditions:
+    - Use one interval of -23 hours and one interval of -25 hours.
+    expectedSourceBehavior:
+    - The -23-hour interval returns getAmount() equal to 0.
+    - The -25-hour interval returns getAmount() equal to -1.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LOCAL_DATE_TIME_EXACT_WHOLE_DAYS
+    category: NORMAL
+    description: LocalDateTime endpoints share the same local time and differ by multiple
+      whole days.
+    preconditions:
+    - Use exact differences selected from 10 days and -10 days.
+    expectedSourceBehavior:
+    - The returned getAmount() equals 10 or -10 according to endpoint ordering.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: INSTANT_PARTIAL_24_HOUR_UNITS
+    category: EDGE
+    description: Instant endpoints differ by less than one complete ChronoUnit.DAYS
+      unit in each direction.
+    preconditions:
+    - Use elapsed durations of 23 hours and -23 hours between the Instant endpoints.
+    expectedSourceBehavior:
+    - Both source calls return getAmount() equal to 0 because no complete 24-hour
+      day is present.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: INSTANT_EXACT_MULTI_DAY_UNITS
+    category: NORMAL
+    description: Instant endpoints differ by exact positive and negative multiples
+      of 24 hours.
+    preconditions:
+    - Use elapsed durations of 72 hours and -72 hours.
+    expectedSourceBehavior:
+    - The returned getAmount() is 3 for 72 hours and -3 for -72 hours.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: OFFSET_DATE_TIME_SAME_OFFSET
+    category: NORMAL
+    description: OffsetDateTime endpoints retain the same ZoneOffset and differ by
+      whole days.
+    preconditions:
+    - Both endpoints have the same offset.
+    - Use day differences selected from 5 and -5 with matching local times.
+    expectedSourceBehavior:
+    - The returned getAmount() equals 5 or -5 according to endpoint ordering.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: OFFSET_DATE_TIME_DIFFERENT_OFFSETS
+    category: EDGE
+    description: OffsetDateTime endpoints use different offsets while remaining related
+      by an exact whole-day adjustment and offset-preserving instant conversion.
+    preconditions:
+    - Create the end from the start by adding d days and representing that resulting
+      instant at a different supported ZoneOffset.
+    - Select d from 2 and -2.
+    expectedSourceBehavior:
+    - ChronoUnit.DAYS.between completes for the differing-offset pair.
+    - The returned getAmount() equals the selected d.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ZONED_DATE_TIME_ORDINARY_DAYS
+    category: NORMAL
+    description: ZonedDateTime endpoints are in the same zone and the interval does
+      not cross an offset transition.
+    preconditions:
+    - Both endpoints use the same ZoneId.
+    - No zone-offset transition occurs between the endpoints.
+    - Use local-day differences selected from 4 and -4 with matching local times.
+    expectedSourceBehavior:
+    - The returned getAmount() equals 4 or -4 according to endpoint ordering.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ZONED_DATE_TIME_DAYLIGHT_SAVING_GAP
+    category: EDGE
+    description: A same-zone ZonedDateTime interval crosses a spring-forward gap where
+      elapsed hours need not equal 24 times the local-day count.
+    preconditions:
+    - The ZoneId has a daylight-saving gap between the endpoints.
+    - Endpoints use the same valid local time on opposite sides of the transition.
+    - Exercise a two-local-day forward interval and its reverse ordering.
+    expectedSourceBehavior:
+    - The returned getAmount() is 2 for forward ordering and -2 for reverse ordering.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ZONED_DATE_TIME_DAYLIGHT_SAVING_OVERLAP
+    category: EDGE
+    description: A same-zone ZonedDateTime interval crosses a fall-back overlap where
+      elapsed hours need not equal 24 times the local-day count.
+    preconditions:
+    - The ZoneId has a daylight-saving overlap between the endpoints.
+    - Endpoints use the same unambiguous local time on opposite sides of the transition.
+    - Exercise a two-local-day forward interval and its reverse ordering.
+    expectedSourceBehavior:
+    - The returned getAmount() is 2 for forward ordering and -2 for reverse ordering.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: JAPANESE_CHRONOLOGY_DATES
+    category: NORMAL
+    description: Both endpoints are day-capable dates in the Japanese chronology.
+    preconditions:
+    - The endpoints have the same Japanese chronology.
+    - endDateExclusive equals startDateInclusive.plus(d, ChronoUnit.DAYS), with d
+      selected from 8 and -8.
+    expectedSourceBehavior:
+    - The returned getAmount() equals 8 or -8 according to the selected difference.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: HIJRAH_CHRONOLOGY_DATES
+    category: NORMAL
+    description: Both endpoints are day-capable dates in the Hijrah chronology, exercising
+      a non-ISO calendar with different month structure.
+    preconditions:
+    - The endpoints have the same Hijrah chronology.
+    - endDateExclusive equals startDateInclusive.plus(d, ChronoUnit.DAYS), with d
+      selected from 9 and -9.
+    expectedSourceBehavior:
+    - The returned getAmount() equals 9 or -9 according to the selected difference.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: COMPATIBLE_MIXED_CHRONOLOGY_PAIR
+    category: EDGE
+    description: The two endpoints use different compatible ChronoLocalDate chronologies
+      while denoting epoch-day positions with a known separation.
+    preconditions:
+    - One endpoint is an ISO LocalDate and the other is a non-ISO ChronoLocalDate
+      accepted by ChronoUnit.DAYS.between.
+    - Their epoch-day values differ by 12.
+    expectedSourceBehavior:
+    - Days.between completes without a chronology compatibility exception.
+    - The returned getAmount() is 12 when the end epoch day is larger by 12.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: INTEGER_MAXIMUM_DAY_GAP
+    category: BOUNDARY
+    description: The source day difference is the largest value representable by Days.getAmount().
+    preconditions:
+    - Use LocalDate endpoints with endDateExclusive equal to startDateInclusive.plus(Integer.MAX_VALUE,
+      ChronoUnit.DAYS).
+    - Both endpoints remain representable after adding the MR shift of 37 days.
+    expectedSourceBehavior:
+    - Days.between returns normally.
+    - The returned getAmount() equals Integer.MAX_VALUE.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: INTEGER_MINIMUM_DAY_GAP
+    category: BOUNDARY
+    description: The source day difference is the smallest value representable by
+      Days.getAmount().
+    preconditions:
+    - Use LocalDate endpoints with endDateExclusive equal to startDateInclusive.plus(Integer.MIN_VALUE,
+      ChronoUnit.DAYS).
+    - Both endpoints remain representable after adding the MR shift of 37 days.
+    expectedSourceBehavior:
+    - Days.between returns normally.
+    - The returned getAmount() equals Integer.MIN_VALUE.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEAR_INTEGER_DAY_LIMITS
+    category: BOUNDARY
+    description: Large successful gaps immediately inside the positive and negative
+      int limits exercise Math.toIntExact without overflow.
+    preconditions:
+    - Use LocalDate endpoint differences selected from Integer.MAX_VALUE minus 1 and
+      Integer.MIN_VALUE plus 1.
+    - All source and 37-day-shifted endpoints are representable.
+    expectedSourceBehavior:
+    - The returned getAmount() exactly equals the selected near-limit difference.
+    - No ArithmeticException is thrown by Math.toIntExact.
+    targetCases: 2
+    emptyOutputAllowed: false

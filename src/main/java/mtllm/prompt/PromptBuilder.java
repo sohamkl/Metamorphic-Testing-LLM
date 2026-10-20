@@ -1,8 +1,12 @@
 package mtllm.prompt;
 
 import mtllm.config.PromptConfig;
+import mtllm.domain.SourceScenarioPlanner;
+import mtllm.sut.JavaSourceNames;
 import mtllm.runner.TestRunResult;
 import mtllm.sut.SutContext;
+
+import java.util.Map;
 
 /**
  * Builds the text prompts sent to the LLM.
@@ -57,8 +61,62 @@ public final class PromptBuilder {
         return prompt.toString();
     }
 
+    public static String buildMissingScenarioRepairPrompt(
+            PromptConfig config,
+            SutContext sutContext,
+            String existingCode,
+            Map<String, Integer> missingScenarios) {
+        return buildMissingScenarioRepairPrompt(
+                config, sutContext, existingCode, missingScenarios, "", null);
+    }
+
+    public static String buildMissingScenarioRepairPrompt(
+            PromptConfig config,
+            SutContext sutContext,
+            String existingCode,
+            Map<String, Integer> missingScenarios,
+            String previousAddition,
+            TestRunResult previousFailure) {
+        StringBuilder prompt = new StringBuilder();
+        appendSutSection(prompt, config, sutContext);
+        prompt.append("The following generated JUnit class already contains valid candidate tests.\n")
+                .append("Do not rewrite, remove, rename, or repeat any existing test or helper.\n")
+                .append("```java\n").append(existingCode).append("\n```\n\n");
+        appendMetamorphicRelation(prompt, config);
+        if (!config.inputDomain().isBlank()) {
+            prompt.append("Structured input domain and scenario requirements:\n")
+                    .append(config.inputDomain()).append("\n\n");
+        }
+        prompt.append("Add only these missing source scenarios:\n");
+        missingScenarios.forEach((id, needed) -> prompt.append("- ")
+                .append(id).append(": ").append(needed).append(" additional @Test method(s)\n"));
+        if (!previousAddition.isBlank()) {
+            prompt.append("\nPrevious additive class that must be replaced:\n")
+                    .append("```java\n").append(previousAddition).append("\n```\n");
+        }
+        if (previousFailure != null && !previousFailure.output().isBlank()) {
+            prompt.append("\nValidation, compilation, or execution failure to correct:\n")
+                    .append("```text\n").append(previousFailure.output()).append("\n```\n");
+        }
+        prompt.append("\nReturn a Java class named ").append(config.generatedClassName()).append(" containing only:\n")
+                .append("- the requested new @Test methods, with the exact scenario ID in each method name\n")
+                .append("- imports and genuinely new helper members required by those methods\n")
+                .append("The addition class may call helpers shown in the existing class without repeating them.\n")
+                .append("Every added test must construct a distinct valid source input and reach the same MR assertion path.\n")
+                .append("Do not include unrelated scenarios or copies of existing methods.\n")
+                .append("The backend will merge this addition into the existing class and revalidate the combined suite.\n")
+                .append("Output only Java code. No markdown fences and no explanation.\n");
+        return prompt.toString();
+    }
+
     private static void appendSutSection(StringBuilder prompt, PromptConfig config, SutContext sutContext) {
         prompt.append("You are generating developer-reviewable JUnit 5 metamorphic tests for a Java SUT.\n\n");
+
+        if (!config.sutDescription().isBlank()) {
+            prompt.append("System Under Test description:\n");
+            prompt.append(config.sutDescription()).append("\n\n");
+        }
+
         if (sutContext.classFile() != null) {
             prompt.append("System Under Test class file: ").append(sutContext.classFile()).append("\n");
             if (!config.targetFunction().isBlank()) {
@@ -66,6 +124,11 @@ public final class PromptBuilder {
             }
             prompt.append("SUT source:\n");
             prompt.append("```java\n").append(sutContext.classSource()).append("\n```\n\n");
+
+            if (!sutContext.apiDescription().isBlank()) {
+                prompt.append("Framework-discovered API and construction metadata:\n");
+                prompt.append("```text\n").append(sutContext.apiDescription()).append("\n```\n\n");
+            }
 
             for (SutContext.SourceFile supportFile : sutContext.supportFiles()) {
                 prompt.append("First-level dependency/support file: ").append(supportFile.path()).append("\n");
@@ -76,31 +139,67 @@ public final class PromptBuilder {
                 prompt.append("Developer-provided metamorphic helper file: ")
                         .append(config.developerMrFile() == null ? "not provided" : config.developerMrFile())
                         .append("\n");
-                prompt.append("Developer follow-up method to call: ")
-                        .append(config.developerFollowUpMethod())
-                        .append("\n");
-                prompt.append("Developer assertion method to call: ")
-                        .append(config.developerAssertMethod())
-                        .append("\n");
+                if (developerOwnsInput(config)) {
+                    prompt.append("Developer follow-up method to call: ")
+                            .append(config.developerFollowUpMethod())
+                            .append("\n");
+                }
+                if (developerOwnsOutput(config)) {
+                    prompt.append("Developer assertion method to call: ")
+                            .append(config.developerAssertMethod())
+                            .append("\n");
+                }
                 prompt.append("Developer MR helper source:\n");
                 prompt.append("```java\n").append(config.developerMrSource()).append("\n```\n\n");
             }
-        } else {
+        } else if (config.sutDescription().isBlank()) {
             prompt.append("System Under Test description:\n");
-            prompt.append(config.sutDescription().isBlank()
-                    ? "No SUT class file was provided."
-                    : config.sutDescription());
-            prompt.append("\n\n");
+            prompt.append("No SUT class file was provided.\n\n");
         }
     }
 
+    private static void appendMetamorphicRelation(StringBuilder prompt, PromptConfig config) {
+        // A developer-owned half is defined by its helper code, which appendSutSection already includes. Restating
+        // that half as prose too would give the model a second definition of it, so each half is stated in prose
+        // only when the LLM owns it: both halves for an LLM-owned MR, one half for i-AUTO/o-AUTO, neither for DEV.
+        if (!config.mode().usesDeveloperMrHelpers()) {
+            prompt.append("Metamorphic relation:\n");
+            prompt.append(config.metamorphicRelationStatement()).append("\n\n");
+            return;
+        }
+        if (!developerOwnsInput(config)) {
+            prompt.append("Metamorphic input transformation you must implement:\n");
+            prompt.append(config.mrInput()).append("\n\n");
+        }
+        if (!developerOwnsOutput(config)) {
+            prompt.append("Metamorphic output relation you must implement:\n");
+            prompt.append(config.mrOutput()).append("\n\n");
+        }
+    }
+
+    /** True when the prompt names a developer method for the input-transformation half. */
+    private static boolean developerOwnsInput(PromptConfig config) {
+        return !config.developerFollowUpMethod().isBlank();
+    }
+
+    /** True when the prompt names a developer method for the output-relation half. */
+    private static boolean developerOwnsOutput(PromptConfig config) {
+        return !config.developerAssertMethod().isBlank();
+    }
+
     private static void appendTaskSection(StringBuilder prompt, PromptConfig config) {
-        prompt.append("Metamorphic relation:\n");
-        prompt.append(config.metamorphicRelationStatement()).append("\n\n");
+        appendMetamorphicRelation(prompt, config);
 
         if (!config.inputDomain().isBlank()) {
-            prompt.append("Input domain and constraints:\n");
+            prompt.append(config.inputDomainRequirements().isStructured()
+                    ? "Structured input domain and scenario requirements:\n"
+                    : "Input domain and constraints:\n");
             prompt.append(config.inputDomain()).append("\n\n");
+            appendStructuredScenarioRules(prompt, config);
+        }
+
+        if (!config.randoopSeedExamples().isBlank() && config.inputGenerator().randoopSeedsLlm()) {
+            appendRandoopSeedExamples(prompt, config);
         }
 
         if (config.mode().usesDeveloperMrDataHelpers()) {
@@ -120,23 +219,80 @@ public final class PromptBuilder {
         }
     }
 
+    private static void appendStructuredScenarioRules(StringBuilder prompt, PromptConfig config) {
+        if (!config.inputDomainRequirements().isStructured()
+                || config.inputDomainRequirements().scenarios().isEmpty()) {
+            return;
+        }
+        prompt.append("Structured-scenario generation rules:\n");
+        prompt.append("- Treat every scenario ID as a source-input coverage requirement, not as optional prose.\n");
+        prompt.append("- Attempt the stated target case count for each scenario without exceeding Count overall.\n");
+        prompt.append("- Include the scenario ID in every generated test method name, followed by a concise variation name.\n");
+        prompt.append("- A scenario with 'Empty source output allowed: no' must be constructed to activate meaningful SUT output behavior.\n");
+        prompt.append("- Vary the listed diversity dimensions across cases instead of changing only test names.\n");
+        prompt.append("- Do not emit a detached inventory of scenario comments at class level.\n");
+        prompt.append("- Scenario descriptions guide source-input construction and expected source behavior.\n\n");
+        var sourcePlan = SourceScenarioPlanner.plan(config.inputDomainRequirements(), config.count());
+        if (!sourcePlan.isEmpty()) {
+            prompt.append("Backend-allocated source scenario plan:\n");
+            sourcePlan.forEach(slot -> prompt.append("- ").append(slot).append("\n"));
+            prompt.append("Generate one distinct source case for each listed slot. Treat dimension values as coverage goals, ")
+                    .append("while satisfying the scenario preconditions and discovered Java API.\n\n");
+        }
+    }
+
+    private static void appendRandoopSeedExamples(StringBuilder prompt, PromptConfig config) {
+        prompt.append("Randoop-generated source-input seed examples:\n");
+        if (config.randoopSeedExamples().isBlank() || config.randoopSeedExamples().equals("[]")) {
+            prompt.append("Randoop did not discover a usable source input in its bounded run.\n");
+        } else {
+            prompt.append("```json\n").append(config.randoopSeedExamples()).append("\n```\n");
+        }
+        prompt.append("These are API-grounding examples, not the complete final test set.\n");
+        prompt.append("Use their runtime values and Java construction snippets to learn how valid source objects are built.\n");
+        prompt.append("Generate additional diverse source inputs up to Count by varying values according to InputDomain.\n");
+        prompt.append("Do not blindly copy invalid, exceptional, duplicate, or overly long Randoop sequences.\n");
+        prompt.append("InputDomain remains authoritative when a seed conflicts with a stated constraint.\n\n");
+    }
+
     private static void appendDeveloperMrJUnitTask(StringBuilder prompt, PromptConfig config) {
         prompt.append("Generate a complete JUnit 5 test class with this exact public class name: ")
                 .append(config.generatedClassName()).append(".\n");
+        boolean devInput = developerOwnsInput(config);
+        boolean devOutput = developerOwnsOutput(config);
         prompt.append("Selected workflow: JUnit test-suite generation with developer-defined MR helpers.\n");
-        prompt.append("The developer has already written the follow-up transformation and assertion logic.\n");
+        if (devInput && devOutput) {
+            prompt.append("The developer has already written the follow-up transformation and assertion logic.\n");
+        } else if (devInput) {
+            prompt.append("The developer has written the follow-up transformation. You must write the output relation "
+                    + "assertion yourself, from the stated metamorphic output relation.\n");
+        } else {
+            prompt.append("The developer has written the output relation assertion. You must write the follow-up "
+                    + "transformation yourself, from the stated metamorphic input transformation.\n");
+        }
         prompt.append("You must call these exact methods:\n");
         prompt.append("- SUT method: ").append(targetMethodCallName(config)).append("\n");
-        prompt.append("- Follow-up transformation: ").append(config.developerFollowUpMethod()).append("\n");
-        prompt.append("- Output relation assertion: ").append(config.developerAssertMethod()).append("\n\n");
+        if (devInput) {
+            prompt.append("- Follow-up transformation: ").append(config.developerFollowUpMethod()).append("\n");
+        }
+        if (devOutput) {
+            prompt.append("- Output relation assertion: ").append(config.developerAssertMethod()).append("\n");
+        }
+        prompt.append("\n");
 
         prompt.append("The class must contain:\n");
         prompt.append("- Individual JUnit 5 @Test methods with diverse deterministic candidate source inputs.\n");
         prompt.append("- Each @Test method must construct one concrete source input directly inside the test body or through small source-construction helpers.\n");
         prompt.append("- Each test must run the target SUT method on the source input.\n");
-        prompt.append("- Each test must call the developer follow-up method to create the follow-up input.\n");
+        prompt.append(devInput
+                ? "- Each test must call the developer follow-up method to create the follow-up input.\n"
+                : "- Each test must create the follow-up input with one generateFollowUp helper that you write, "
+                        + "implementing exactly the stated input transformation.\n");
         prompt.append("- Each test must run the target SUT method on the follow-up input.\n");
-        prompt.append("- Each test must call the developer assertion method with the source output and follow-up output.\n");
+        prompt.append(devOutput
+                ? "- Each test must call the developer assertion method with the source output and follow-up output.\n"
+                : "- Each test must check the outputs with one assertMetamorphicRelation helper that you write, "
+                        + "implementing exactly the stated output relation.\n");
         prompt.append("- At most ").append(config.count()).append(" source-input test methods.\n");
         prompt.append("- JUnit 5 imports from org.junit.jupiter.api.Test only, unless another JUnit import is genuinely needed.\n");
         prompt.append("- No package declaration; import public SUT/helper classes by package name when needed.\n\n");
@@ -144,15 +300,34 @@ public final class PromptBuilder {
         prompt.append("Strict developer-MR JUnit rules:\n");
         prompt.append("- Always call the SUT method with its owning class name, for example ")
                 .append(targetMethodCallName(config)).append("(source), not a bare method call.\n");
-        prompt.append("- Always call the developer MR methods with their owning class names, for example ")
-                .append(config.developerFollowUpMethod()).append("(source) and ")
-                .append(config.developerAssertMethod()).append("(sourceOutput, followUpOutput).\n");
+        if (devInput) {
+            prompt.append("- Always call the developer follow-up method with its owning class name, for example ")
+                    .append(config.developerFollowUpMethod()).append("(source).\n");
+        }
+        if (devOutput) {
+            prompt.append("- Always call the developer assertion method with its owning class name, for example ")
+                    .append(config.developerAssertMethod()).append("(sourceOutput, followUpOutput).\n");
+        }
         prompt.append("- Do not use static imports for the SUT method or developer MR methods.\n");
-        prompt.append("- Do not generate a generateFollowUp method.\n");
-        prompt.append("- Do not generate an assertMetamorphicRelation or assertRelation method.\n");
-        prompt.append("- Do not rewrite, duplicate, reinterpret, or inline the developer-provided MR helper logic.\n");
-        prompt.append("- Do not use assertEquals, assertNotEquals, or other assertion calls directly unless they are inside the developer-provided assertion method already.\n");
-        prompt.append("- The generated JUnit class should be only candidate source-input construction plus calls to the SUT and developer helper methods.\n");
+        if (devInput) {
+            prompt.append("- Do not generate a generateFollowUp method.\n");
+        }
+        if (devOutput) {
+            prompt.append("- Do not generate an assertMetamorphicRelation or assertRelation method.\n");
+        }
+        prompt.append("- Do not rewrite, duplicate, reinterpret, or inline the logic of the developer MR methods named above.\n");
+        if (!devInput || !devOutput) {
+            prompt.append("- The developer MR helper file may contain methods for the half you must write; do not call "
+                    + "them, and do not copy their bodies. Write that half yourself from the stated relation.\n");
+        }
+        prompt.append(devOutput
+                ? "- Do not use assertEquals, assertNotEquals, or other assertion calls directly unless they are inside the developer-provided assertion method already.\n"
+                : "- Keep every assertion inside your single assertMetamorphicRelation helper. Assert only the stated "
+                        + "output relation between the source and follow-up outputs: no expected literal outputs, no "
+                        + "checks of what the SUT returns for one input on its own.\n");
+        prompt.append(devInput && devOutput
+                ? "- The generated JUnit class should be only candidate source-input construction plus calls to the SUT and developer helper methods.\n"
+                : "- The generated JUnit class should be only candidate source-input construction, the one MR helper you write, and calls to the SUT and developer helper methods.\n");
         prompt.append("- Do not try to decide which tests pass or fail. The backend will run the candidates and split actual passing/failing results into separate files.\n");
         prompt.append("- Do not add inline comments that state computed totals, expected outputs, or follow-up outputs; they can be misleading when the SUT is buggy.\n\n");
 
@@ -162,6 +337,7 @@ public final class PromptBuilder {
         prompt.append("- Do not generate invalid inputs unless the input domain explicitly asks for invalid cases.\n");
         prompt.append("- Make object inputs by using visible constructors, builders, factories, or simple helper methods.\n");
         prompt.append("- Prefer readable deterministic fixtures over unseeded randomness.\n");
+        prompt.append("- Never use Instant.now(), the current date/time, random values, or other runtime-dependent values in test fixtures; use fixed literals and derive related timestamps from the same fixed base value.\n");
         prompt.append("- Output only Java code. No markdown fences and no explanation.\n");
     }
 
@@ -188,6 +364,7 @@ public final class PromptBuilder {
         prompt.append("- Important: assertMetamorphicRelation must assert that the stated MR output relation holds, for example assertEquals(expected, actual). Do not use assertNotEquals to make violating cases pass.\n");
         prompt.append("- Each emitted @Test method must assert the original MR normally; do not invert assertions to make failures pass.\n");
         prompt.append("- Prefer readable deterministic fixtures over unseeded randomness.\n");
+        prompt.append("- Never use Instant.now(), the current date/time, random values, or other runtime-dependent values in test fixtures; use fixed literals and derive related timestamps from the same fixed base value.\n");
         prompt.append("- Include normal cases, boundary cases, and edge cases that make the MR meaningful.\n");
         prompt.append("- Do not add inline comments that state computed totals, expected outputs, or follow-up outputs; they can be misleading when the SUT is buggy.\n");
         prompt.append("- Do not generate invalid inputs unless the input domain explicitly asks for invalid cases.\n");
@@ -211,6 +388,7 @@ public final class PromptBuilder {
         prompt.append("- A public static method named generateSources() that returns a List of source inputs.\n");
         prompt.append("- generateSources() must generate at most ").append(config.count()).append(" diverse source inputs.\n");
         appendSourceCountRules(prompt, config);
+        appendDeterministicSourceRules(prompt);
         prompt.append("- A main(String[] args) method that prints valid JSON to stdout only.\n");
         prompt.append("- The main method must, for each source input:\n");
         prompt.append("  1. call the target SUT method on the source input to compute sourceOutput\n");
@@ -256,6 +434,7 @@ public final class PromptBuilder {
         prompt.append("- A public static method named generateSources() that returns a List of source inputs.\n");
         prompt.append("- generateSources() must generate at most ").append(config.count()).append(" diverse source inputs.\n");
         appendSourceCountRules(prompt, config);
+        appendDeterministicSourceRules(prompt);
         prompt.append("- A generateFollowUp(source) method that transforms each source input according to MRInput.\n");
         prompt.append("- An assertMetamorphicRelation(sourceOutput, followUpOutput) method that checks MROutput.\n");
         prompt.append("- A main(String[] args) method that prints valid JSON to stdout only.\n");
@@ -305,6 +484,12 @@ public final class PromptBuilder {
                 .append(" entries when the input domain is narrow, but never more.\n");
     }
 
+    private static void appendDeterministicSourceRules(StringBuilder prompt) {
+        prompt.append("- generateSources() must return equivalent values in the same order on every call and every JVM run.\n");
+        prompt.append("- Use explicit, readable fixtures or immutable value tables for source inputs.\n");
+        prompt.append("- Do not use Random, Math.random(), ThreadLocalRandom, SecureRandom, random UUIDs, current time, or other mutable/nondeterministic input generation.\n");
+    }
+
     private static String targetMethodCallName(PromptConfig config) {
         String targetFunction = config.targetFunction().trim();
         if (targetFunction.isBlank()) {
@@ -323,22 +508,11 @@ public final class PromptBuilder {
             return methodReference;
         }
 
-        String className = classNameFromPath(config.sutClassFile());
+        String className = JavaSourceNames.qualifiedName(config.sutClassFile());
         if (className.isBlank()) {
             return methodReference;
         }
         return className + "." + methodReference;
-    }
-
-    private static String classNameFromPath(java.nio.file.Path path) {
-        if (path == null) {
-            return "";
-        }
-        String fileName = path.getFileName().toString();
-        if (fileName.endsWith(".java")) {
-            return fileName.substring(0, fileName.length() - ".java".length());
-        }
-        return fileName;
     }
 
 }

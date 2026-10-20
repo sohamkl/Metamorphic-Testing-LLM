@@ -1,0 +1,349 @@
+InputDomain:
+  summary: Domain of non-null RectangleImpl and Point pairs for exercising latitude
+    rejection, ordinary containment, longitude boundaries, dateline unwrapping, normalized
+    follow-up rotations, planar versus geographic handling, degenerate rectangles,
+    and the explicit NaN sentinel paths of RectangleImpl.relate(Point).
+  globalConstraints:
+  - rectangle and point are non-null because generateFollowUp explicitly rejects null
+    arguments.
+  - both objects use the same non-null SpatialContext instance, as required by RectangleImpl
+    construction and by context.makePoint in the follow-up.
+  - ordinary scenarios use finite coordinates; geographic ordinary longitudes are
+    in [-180.0, 180.0] and latitudes are in [-90.0, 90.0].
+  - ordinary rectangles satisfy minY <= maxY, matching the assertion in RectangleImpl.reset.
+  - source and follow-up are compared only by the identity of their SpatialRelation
+    result, exactly as required by assertRelation.
+  - geographic rectangles with raw longitude width exactly 360 degrees are excluded
+    because relate(Point) treats them as an ordinary interval while the follow-up
+    normalizes both endpoints and can collapse them to the same longitude; this is
+    a representation class for which the supplied metamorphic relation is not valid.
+  - non-geographic scenarios keep the rectangle longitude endpoints and probe on the
+    same side of the DistanceUtils normalization cut, so the follow-up preserves endpoint
+    ordering instead of creating a minX > maxX rectangle that planar relate(Point)
+    does not interpret as a wrap.
+  - NaN is used only in scenarios that exercise the source's explicit Double.isNaN/isEmpty
+    sentinel behavior; infinities and other non-finite values are not included.
+  diversity:
+    contextMode:
+    - geographic context with ctx.isGeo() == true
+    - non-geographic context with ctx.isGeo() == false
+    latitudeRelationship:
+    - point latitude strictly below minY
+    - point latitude strictly above maxY
+    - point latitude equal to minY
+    - point latitude equal to maxY
+    - point latitude strictly inside [minY,maxY]
+    - rectangle minY is NaN sentinel
+    longitudeRelationship:
+    - point longitude strictly inside an ordinary interval
+    - point longitude equal to an ordinary interval endpoint
+    - point longitude outside an ordinary interval
+    - point longitude inside a dateline-wrapping interval
+    - point longitude below minX and shifted by +360 in geographic logic
+    - point longitude above maxX and shifted by -360 in geographic logic
+    - rectangle minX equals maxX
+    - rectangle minX is NaN sentinel
+    - point longitude is NaN
+    followUpShape:
+    - ordinary non-wrapping rectangle remains non-wrapping
+    - ordinary rectangle becomes dateline-wrapping after the 150 degree rotation
+    - dateline-wrapping rectangle becomes ordinary after the rotation
+    - degenerate longitude interval remains degenerate
+    - NaN sentinel coordinate remains NaN after normalization
+  scenarios:
+  - id: GEO_INTERIOR_CONTAINS
+    category: NORMAL
+    description: Geographic point is strictly inside both latitude and longitude ranges
+      of a finite, non-wrapping rectangle.
+    preconditions:
+    - ctx.isGeo() == true.
+    - rectangle is [-40.0, 40.0] in longitude and [-20.0, 20.0] in latitude.
+    - point is (0.0, 0.0).
+    expectedSourceBehavior:
+    - relate(Point) returns SpatialRelation.CONTAINS through the geographic pX-in-range
+      short circuit.
+    - the rotated rectangle and point must also return CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: GEO_LATITUDE_BELOW_DISJOINT
+    category: BOUNDARY
+    description: Geographic point is below the rectangle, so longitude logic is never
+      reached.
+    preconditions:
+    - ctx.isGeo() == true.
+    - rectangle is [-40.0, 40.0] by [-20.0, 20.0].
+    - point longitude is 0.0 and point latitude is -20.000001.
+    expectedSourceBehavior:
+    - relate(Point) returns DISJOINT at the point.getY() < getMinY() guard.
+    - the follow-up preserves the unchanged latitude and must also return DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: GEO_LATITUDE_ABOVE_DISJOINT
+    category: BOUNDARY
+    description: Geographic point is above the rectangle, exercising the other latitude
+      rejection comparison.
+    preconditions:
+    - ctx.isGeo() == true.
+    - rectangle is [-40.0, 40.0] by [-20.0, 20.0].
+    - point longitude is 0.0 and point latitude is 20.000001.
+    expectedSourceBehavior:
+    - relate(Point) returns DISJOINT at the point.getY() > getMaxY() guard.
+    - the follow-up must also return DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: GEO_LATITUDE_LOWER_EDGE_CONTAINS
+    category: BOUNDARY
+    description: Geographic point lies exactly on the lower latitude edge while longitude
+      is interior.
+    preconditions:
+    - ctx.isGeo() == true.
+    - rectangle is [-40.0, 40.0] by [-20.0, 20.0].
+    - point is (0.0, -20.0).
+    expectedSourceBehavior:
+    - strict latitude comparisons do not reject the point.
+    - relate(Point) returns CONTAINS.
+    - the follow-up must also return CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: GEO_LATITUDE_UPPER_EDGE_CONTAINS
+    category: BOUNDARY
+    description: Geographic point lies exactly on the upper latitude edge while longitude
+      is interior.
+    preconditions:
+    - ctx.isGeo() == true.
+    - rectangle is [-40.0, 40.0] by [-20.0, 20.0].
+    - point is (0.0, 20.0).
+    expectedSourceBehavior:
+    - strict latitude comparisons do not reject the point.
+    - relate(Point) returns CONTAINS and the follow-up must also return CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: GEO_LONGITUDE_ENDPOINTS_CONTAIN
+    category: BOUNDARY
+    description: Points on both ordinary longitude endpoints exercise the inclusive
+      geographic short circuit.
+    preconditions:
+    - ctx.isGeo() == true.
+    - rectangle is [-40.0, 40.0] by [-20.0, 20.0].
+    - use one case with point (-40.0, 0.0) and one with point (40.0, 0.0).
+    expectedSourceBehavior:
+    - both endpoint cases return CONTAINS because the geographic branch uses strict
+      less-than and greater-than tests.
+    - each rotated endpoint case must also return CONTAINS.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: GEO_DATELINE_INTERIOR_CONTAINS
+    category: EDGE
+    description: A wrapped rectangle contains a point on its western wrapped segment,
+      exercising rawWidth < 0 and the pX < minX shift.
+    preconditions:
+    - ctx.isGeo() == true.
+    - rectangle is [170.0, -170.0] by [-10.0, 10.0], so minX > maxX.
+    - point is (-175.0, 0.0), which is below minX but belongs to the unwrapped interval
+      [170.0, 190.0] after adding 360.
+    expectedSourceBehavior:
+    - relate(Point) unwraps maxX to 190.0, shifts pX to 185.0, and returns CONTAINS.
+    - the 150 degree follow-up is [-40.0, -20.0] with point longitude -25.0 and must
+      also return CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: GEO_DATELINE_OUTSIDE_DISJOINT
+    category: EDGE
+    description: A point in the longitude gap of a dateline-wrapping rectangle exercises
+      the shifted final-disjoint path.
+    preconditions:
+    - ctx.isGeo() == true.
+    - rectangle is [170.0, -170.0] by [-10.0, 10.0].
+    - point is (0.0, 0.0), which is outside the wrapped interval.
+    expectedSourceBehavior:
+    - relate(Point) unwraps the rectangle, shifts the point by -360, and returns DISJOINT.
+    - the follow-up rectangle is [-40.0, -20.0] and the follow-up point is (150.0,
+      0.0), which must also return DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: GEO_ROTATION_CREATES_DATELINE_WRAP
+    category: EDGE
+    description: A non-wrapping geographic rectangle crosses the dateline only after
+      the common 150 degree rotation.
+    preconditions:
+    - ctx.isGeo() == true.
+    - rectangle is [-20.0, 40.0] by [-10.0, 10.0].
+    - point is (0.0, 0.0).
+    - follow-up endpoints normalize to 130.0 and -170.0, making minX > maxX.
+    expectedSourceBehavior:
+    - source relate(Point) returns CONTAINS.
+    - follow-up relate(Point) must traverse the dateline-unwrapping path and return
+      CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: GEO_ROTATION_REMOVES_DATELINE_WRAP
+    category: EDGE
+    description: A wrapped geographic rectangle becomes ordinary after rotation, testing
+      the inverse representation transition.
+    preconditions:
+    - ctx.isGeo() == true.
+    - rectangle is [170.0, -170.0] by [-10.0, 10.0].
+    - point is (-175.0, 0.0).
+    - follow-up rectangle endpoints normalize to -40.0 and -20.0.
+    expectedSourceBehavior:
+    - source returns CONTAINS through unwrap-and-shift logic.
+    - follow-up returns CONTAINS through the ordinary in-range short circuit.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: GEO_DATELINE_SHIFTED_OUTSIDE
+    category: EDGE
+    description: A geographic point below minX is shifted by +360 but remains outside
+      the unwrapped dateline interval.
+    preconditions:
+    - ctx.isGeo() == true.
+    - rectangle is [170.0, -170.0] by [-10.0, 10.0].
+    - point is (160.0, 0.0), so pX + 360 is 520.0 only if the pX < minX branch is
+      used; the resulting value is outside [170.0,190.0].
+    expectedSourceBehavior:
+    - relate(Point) returns DISJOINT after the +360 shift and final range comparison.
+    - the rotated rectangle and point must also return DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: GEO_ZERO_WIDTH_LONGITUDE
+    category: BOUNDARY
+    description: A zero-width geographic rectangle tests equal minX and maxX without
+      triggering the excluded 360 degree case.
+    preconditions:
+    - ctx.isGeo() == true.
+    - rectangle is [30.0, 30.0] by [-10.0, 10.0].
+    - use point (30.0, 0.0) for one case and point (30.000001, 0.0) for one case.
+    expectedSourceBehavior:
+    - the endpoint case returns CONTAINS and the epsilon-outside case returns DISJOINT.
+    - normalization preserves the zero-width representation and the corresponding
+      follow-up relations.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: GEO_DATELINE_LONGITUDE_EDGES
+    category: BOUNDARY
+    description: Points exactly at both endpoints of a wrapped rectangle exercise
+      inclusive endpoint handling on opposite sides of the dateline.
+    preconditions:
+    - ctx.isGeo() == true.
+    - rectangle is [170.0, -170.0] by [-10.0, 10.0].
+    - use point (170.0, 0.0) and point (-170.0, 0.0).
+    expectedSourceBehavior:
+    - each endpoint returns CONTAINS.
+    - the follow-up endpoints are -40.0 and -20.0, and each corresponding follow-up
+      point remains contained.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: PLANAR_INTERIOR_CONTAINS
+    category: NORMAL
+    description: Non-geographic point is strictly inside a finite ordinary rectangle,
+      exercising the non-geo final range comparisons.
+    preconditions:
+    - ctx.isGeo() == false.
+    - rectangle is [-100.0, -50.0] by [-20.0, 20.0].
+    - point is (-75.0, 0.0); all longitudes plus 150 remain in normalized order.
+    expectedSourceBehavior:
+    - relate(Point) returns CONTAINS without entering geographic shifting logic.
+    - the follow-up point remains inside the translated ordinary rectangle and returns
+      CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PLANAR_LONGITUDE_OUTSIDE_DISJOINT
+    category: NORMAL
+    description: Non-geographic point is outside longitude but inside latitude, exercising
+      the final pX range rejection.
+    preconditions:
+    - ctx.isGeo() == false.
+    - rectangle is [-100.0, -50.0] by [-20.0, 20.0].
+    - point is (-40.0, 0.0), with all follow-up longitudes remaining ordered after
+      normalization.
+    expectedSourceBehavior:
+    - relate(Point) returns DISJOINT because pX > maxX after the non-geographic branch.
+    - the follow-up must also return DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PLANAR_LATITUDE_EDGE_AND_OUTSIDE
+    category: BOUNDARY
+    description: Non-geographic cases cover inclusive latitude edges and latitude
+      rejection without geographic longitude behavior.
+    preconditions:
+    - ctx.isGeo() == false.
+    - rectangle is [-100.0, -50.0] by [-20.0, 20.0].
+    - use points (-75.0, -20.0), (-75.0, 20.0), and (-75.0, 20.000001).
+    expectedSourceBehavior:
+    - the two latitude-edge cases return CONTAINS.
+    - the above-latitude case returns DISJOINT before longitude evaluation.
+    - each follow-up preserves the same relation because rotation leaves latitude
+      unchanged.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: PLANAR_ZERO_WIDTH_LONGITUDE
+    category: BOUNDARY
+    description: Non-geographic degenerate longitude interval distinguishes inclusive
+      equality from a nearby outside point.
+    preconditions:
+    - ctx.isGeo() == false.
+    - rectangle is [-75.0, -75.0] by [-20.0, 20.0].
+    - use point (-75.0, 0.0) and point (-74.999999, 0.0).
+    - all coordinates remain on the same normalization side after adding 150 degrees.
+    expectedSourceBehavior:
+    - the equal-longitude case returns CONTAINS and the nearby case returns DISJOINT.
+    - follow-up relations are identical to their source relations.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: NAN_MINX_SENTINEL
+    category: EDGE
+    description: Rectangle minX is NaN, which makes isEmpty true but is not checked
+      by the direct relate(Point) overload.
+    preconditions:
+    - ctx.isGeo() == true.
+    - rectangle is [NaN, 40.0] by [-10.0, 10.0].
+    - point is (0.0, 0.0).
+    expectedSourceBehavior:
+    - relate(Point) proceeds past the latitude guard; NaN comparisons in the longitude
+      logic do not reject the point, so the direct overload returns CONTAINS.
+    - the follow-up retains NaN for minX and must return the same CONTAINS relation.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NAN_MINY_SENTINEL
+    category: EDGE
+    description: Rectangle minY is NaN, exercising the reset assertion allowance and
+      the false latitude comparisons in relate(Point).
+    preconditions:
+    - ctx.isGeo() == true.
+    - rectangle is [-40.0, 40.0] by [NaN, 20.0].
+    - point is (0.0, 0.0).
+    expectedSourceBehavior:
+    - both latitude comparisons are false because minY is NaN.
+    - longitude is inside, so relate(Point) returns CONTAINS.
+    - the unchanged NaN latitude bounds make the follow-up also return CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NAN_POINT_LONGITUDE
+    category: EDGE
+    description: Point longitude is NaN while latitude is ordinary and inside the
+      rectangle.
+    preconditions:
+    - ctx.isGeo() == true.
+    - rectangle is [-40.0, 40.0] by [-10.0, 10.0].
+    - point is (NaN, 0.0).
+    expectedSourceBehavior:
+    - NaN makes pX < minX and pX > maxX false, so the geographic else path returns
+      CONTAINS.
+    - normalization leaves the NaN probe longitude on the follow-up and the relation
+      remains CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NAN_POINT_LATITUDE
+    category: EDGE
+    description: Point latitude is NaN, so the latitude rejection guard is bypassed
+      and longitude alone determines the result.
+    preconditions:
+    - ctx.isGeo() == true.
+    - rectangle is [-40.0, 40.0] by [-10.0, 10.0].
+    - point is (50.0, NaN), which is outside the longitude interval.
+    expectedSourceBehavior:
+    - latitude comparisons with NaN are false, then longitude is outside and relate(Point)
+      returns DISJOINT.
+    - follow-up leaves latitude NaN and must return DISJOINT for the correspondingly
+      rotated longitude.
+    targetCases: 1
+    emptyOutputAllowed: false

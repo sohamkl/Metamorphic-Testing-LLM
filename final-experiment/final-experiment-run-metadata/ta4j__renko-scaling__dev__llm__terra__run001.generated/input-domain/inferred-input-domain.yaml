@@ -1,0 +1,367 @@
+InputDomain:
+  summary: Valid Renko source sequences built from non-null BaseBar instances on a
+    contiguous, evenly spaced timeline, with finite numeric prices and positive finite
+    Renko box sizes. Cases vary initial direction, box and reversal thresholds, continuation,
+    multi-brick emission, metadata accumulation, nullable volume/amount, timestamps,
+    and numeric ranges.
+  globalConstraints:
+  - The receiver is a RenkoBarAggregator constructed with a finite positive Double
+    boxSize and reversalAmount >= 1; all listed configurations remain finite after
+    the MR doubles boxSize.
+  - bars is a non-null List containing only non-null Bar instances, because the follow-up
+    generator rejects null bars before invoking the SUT.
+  - Every source bar has a non-null close price, as aggregate throws IllegalArgumentException
+    for a missing close price.
+  - 'For each scenario, bars are chronological, contiguous, and evenly spaced: with
+    base instant T, bar i has beginTime T + i*60 seconds, endTime T + (i+1)*60 seconds,
+    and timePeriod PT60S.'
+  - Unless a scenario says otherwise, each source bar is a BaseBar whose open, high,
+    low, and close all equal the stated close-price vector entry; all price and amount
+    Num values use the same NumFactory.
+  - Unless overridden, source bar i has volume 10+i, amount 100+i, and trades i+1.
+    This makes pending metadata and its attachment to emitted bricks measurable.
+  - Invalid receiver configurations, null bar lists, null source bars, null close
+    prices, and uneven or non-contiguous intervals are excluded because the supplied
+    MR is a positive scaling relation for successful aggregation and does not request
+    exception relations.
+  diversity:
+    receiverConfiguration:
+    - '{default constructor=boxSize 2.0 and reversalAmount 2}'
+    - '{explicit two-box reversal=boxSize 2.0 and reversalAmount 2}'
+    - '{one-box reversal=boxSize 2.0 and reversalAmount 1}'
+    - '{three-box reversal=boxSize 2.0 and reversalAmount 3}'
+    - '{fractional box=boxSize 0.5 and reversalAmount 2}'
+    - '{larger box=boxSize 3.0 and reversalAmount 2}'
+    closeMovement:
+    - no movement
+    - movement strictly inside one box
+    - exact upward and downward box boundaries
+    - initial multi-box moves
+    - trend continuation
+    - reversal strictly below threshold
+    - reversal exactly at threshold
+    - reversal overshoot
+    - negative and zero price anchors
+    emissionAndMetadata:
+    - empty output
+    - one brick
+    - multiple bricks from separate source bars
+    - multiple bricks from one source bar
+    - pending metadata accumulated across non-emitting bars
+    - zero metadata on later bricks emitted by one source bar
+    - null volume
+    - null amount
+    - null volume and amount together
+  scenarios:
+  - id: EMPTY_SOURCE_LIST
+    category: EDGE
+    description: Empty valid source list.
+    preconditions:
+    - bars.size() = 0
+    - receiver uses boxSize 2.0 and reversalAmount 2
+    expectedSourceBehavior:
+    - aggregate returns an empty list without reading a source bar
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: SINGLE_ANCHOR_BAR
+    category: EDGE
+    description: One bar establishes lastBrickClose but cannot itself move from that
+      anchor.
+    preconditions:
+    - close-price vector is [100]
+    - receiver uses boxSize 2.0 and reversalAmount 2
+    expectedSourceBehavior:
+    - aggregate returns zero bricks
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: FLAT_MULTI_BAR_SEQUENCE
+    category: NORMAL
+    description: Several source bars close exactly at the initial anchor.
+    preconditions:
+    - close-price vector is [100, 100, 100, 100]
+    - receiver uses boxSize 2.0 and reversalAmount 2
+    expectedSourceBehavior:
+    - aggregate returns zero bricks
+    - pending volume, amount, and trades are accumulated internally without emission
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: UPWARD_MOVE_JUST_INSIDE_BOX
+    category: BOUNDARY
+    description: Positive movement is strictly less than one box.
+    preconditions:
+    - close-price vector is [100, 101.999]
+    - receiver uses boxSize 2.0 and reversalAmount 2
+    expectedSourceBehavior:
+    - aggregate returns zero bricks because close is below anchor plus boxSize
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: DOWNWARD_MOVE_JUST_INSIDE_BOX
+    category: BOUNDARY
+    description: Negative movement is strictly less than one box.
+    preconditions:
+    - close-price vector is [100, 98.001]
+    - receiver uses boxSize 2.0 and reversalAmount 2
+    expectedSourceBehavior:
+    - aggregate returns zero bricks because close is above anchor minus boxSize
+    targetCases: 1
+    emptyOutputAllowed: true
+  - id: INITIAL_EXACT_UPWARD_BOX
+    category: BOUNDARY
+    description: First qualifying movement equals exactly one upward box.
+    preconditions:
+    - close-price vector is [100, 102]
+    - receiver uses boxSize 2.0 and reversalAmount 2
+    expectedSourceBehavior:
+    - aggregate returns exactly one upward brick with open 100 and close 102
+    - emitted brick receives metadata accumulated from both source bars
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: INITIAL_EXACT_DOWNWARD_BOX
+    category: BOUNDARY
+    description: First qualifying movement equals exactly one downward box.
+    preconditions:
+    - close-price vector is [100, 98]
+    - receiver uses boxSize 2.0 and reversalAmount 2
+    expectedSourceBehavior:
+    - aggregate returns exactly one downward brick with open 100 and close 98
+    - emitted brick receives metadata accumulated from both source bars
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: INITIAL_UPWARD_MULTI_BOX_SINGLE_BAR
+    category: NORMAL
+    description: A single later source close crosses three upward box boundaries.
+    preconditions:
+    - close-price vector is [100, 106]
+    - receiver uses boxSize 2.0 and reversalAmount 2
+    expectedSourceBehavior:
+    - '{aggregate returns exactly three upward bricks=100-to-102, 102-to-104, and
+      104-to-106}'
+    - only the first emitted brick has accumulated source metadata
+    - second and third bricks have zero volume, zero amount, and zero trades
+    - later bricks emitted from the same source bar use successive source-period end
+      times
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: INITIAL_DOWNWARD_MULTI_BOX_SINGLE_BAR
+    category: NORMAL
+    description: A single later source close crosses three downward box boundaries.
+    preconditions:
+    - close-price vector is [100, 94]
+    - receiver uses boxSize 2.0 and reversalAmount 2
+    expectedSourceBehavior:
+    - aggregate returns exactly three downward bricks
+    - only the first emitted brick has accumulated source metadata
+    - additional bricks emitted by that source bar have zero metadata
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UPWARD_TREND_CONTINUATION
+    category: NORMAL
+    description: An established upward direction emits one brick on each subsequent
+      exact-box rise.
+    preconditions:
+    - close-price vector is [100, 102, 104]
+    - receiver uses boxSize 2.0 and reversalAmount 2
+    expectedSourceBehavior:
+    - aggregate returns exactly two upward bricks
+    - each brick receives metadata pending through its own emitting source bar
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DOWNWARD_TREND_CONTINUATION
+    category: NORMAL
+    description: An established downward direction emits one brick on each subsequent
+      exact-box fall.
+    preconditions:
+    - close-price vector is [100, 98, 96]
+    - receiver uses boxSize 2.0 and reversalAmount 2
+    expectedSourceBehavior:
+    - aggregate returns exactly two downward bricks
+    - each brick receives metadata pending through its own emitting source bar
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UP_DIRECTION_REVERSAL_INSIDE_THRESHOLD
+    category: BOUNDARY
+    description: An upward trend retraces but does not meet the default two-box reversal
+      distance.
+    preconditions:
+    - close-price vector is [100, 102, 99]
+    - receiver uses boxSize 2.0 and reversalAmount 2
+    expectedSourceBehavior:
+    - aggregate returns exactly the initial upward brick
+    - no downward brick is emitted because 99 is above 102 minus reversalDistance
+      4
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UP_DIRECTION_REVERSAL_AT_THRESHOLD
+    category: BOUNDARY
+    description: An upward trend retraces exactly the default two-box reversal distance.
+    preconditions:
+    - close-price vector is [100, 102, 98]
+    - receiver uses boxSize 2.0 and reversalAmount 2
+    expectedSourceBehavior:
+    - '{aggregate returns three bricks=one upward followed by two downward bricks}'
+    - the reversal source bar attaches its metadata to the first downward brick only
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DOWN_DIRECTION_REVERSAL_INSIDE_THRESHOLD
+    category: BOUNDARY
+    description: A downward trend rises but does not meet the default two-box reversal
+      distance.
+    preconditions:
+    - close-price vector is [100, 98, 101]
+    - receiver uses boxSize 2.0 and reversalAmount 2
+    expectedSourceBehavior:
+    - aggregate returns exactly the initial downward brick
+    - no upward brick is emitted because 101 is below 98 plus reversalDistance 4
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DOWN_DIRECTION_REVERSAL_AT_THRESHOLD
+    category: BOUNDARY
+    description: A downward trend rises exactly the default two-box reversal distance.
+    preconditions:
+    - close-price vector is [100, 98, 102]
+    - receiver uses boxSize 2.0 and reversalAmount 2
+    expectedSourceBehavior:
+    - '{aggregate returns three bricks=one downward followed by two upward bricks}'
+    - the reversal source bar attaches metadata only to the first upward brick
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ONE_BOX_REVERSAL_CONFIGURATION
+    category: BOUNDARY
+    description: A reversalAmount of one allows reversal after exactly one opposite
+      box.
+    preconditions:
+    - close-price vector is [100, 102, 100]
+    - receiver uses boxSize 2.0 and reversalAmount 1
+    expectedSourceBehavior:
+    - '{aggregate returns exactly two bricks=upward 100-to-102 then downward 102-to-100}'
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: THREE_BOX_REVERSAL_CONFIGURATION
+    category: BOUNDARY
+    description: A reversalAmount of three requires and accepts exactly three opposite
+      boxes.
+    preconditions:
+    - close-price vector is [100, 102, 96]
+    - receiver uses boxSize 2.0 and reversalAmount 3
+    expectedSourceBehavior:
+    - '{aggregate returns four bricks=one upward followed by three downward bricks}'
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: REVERSAL_OVERSHOOT_MULTI_BRICK
+    category: NORMAL
+    description: A downward overshoot after an upward brick emits more than the minimum
+      reversal bricks.
+    preconditions:
+    - close-price vector is [100, 102, 93]
+    - receiver uses boxSize 2.0 and reversalAmount 2
+    expectedSourceBehavior:
+    - aggregate returns one upward brick followed by four downward bricks ending at
+      94
+    - only the first downward brick emitted from the overshooting bar carries that
+      bar's pending metadata
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POST_REVERSAL_DOWNWARD_CONTINUATION
+    category: NORMAL
+    description: After a qualifying upward-to-downward reversal, a later exact downward
+      box continues the new trend.
+    preconditions:
+    - close-price vector is [100, 102, 98, 96]
+    - receiver uses boxSize 2.0 and reversalAmount 2
+    expectedSourceBehavior:
+    - '{aggregate returns four bricks=one upward and then three downward}'
+    - the final source bar emits one continuation brick in the DOWN direction
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PENDING_METADATA_ACROSS_NON_EMITTING_BARS
+    category: NORMAL
+    description: Metadata from multiple non-emitting bars is retained until a later
+      exact-box emission.
+    preconditions:
+    - close-price vector is [100, 101, 102]
+    - receiver uses boxSize 2.0 and reversalAmount 2
+    expectedSourceBehavior:
+    - aggregate returns exactly one upward brick
+    - its volume is 10+11+12, amount is 100+101+102, and trades are 1+2+3
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NULL_VOLUME_IGNORED_IN_PENDING_TOTAL
+    category: EDGE
+    description: A source bar with null volume still contributes its amount and trades,
+      but not volume.
+    preconditions:
+    - close-price vector is [100, 102]
+    - bar 1 volume is null
+    - all amounts are non-null
+    - receiver uses boxSize 2.0 and reversalAmount 2
+    expectedSourceBehavior:
+    - aggregate returns exactly one upward brick
+    - brick volume equals only bar 0 volume
+    - brick amount and trades include both source bars
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NULL_AMOUNT_IGNORED_IN_PENDING_TOTAL
+    category: EDGE
+    description: A source bar with null amount still contributes its volume and trades,
+      but not amount.
+    preconditions:
+    - close-price vector is [100, 102]
+    - bar 1 amount is null
+    - all volumes are non-null
+    - receiver uses boxSize 2.0 and reversalAmount 2
+    expectedSourceBehavior:
+    - aggregate returns exactly one upward brick
+    - brick amount equals only bar 0 amount
+    - brick volume and trades include both source bars
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NULL_VOLUME_AND_AMOUNT
+    category: EDGE
+    description: Null volume and amount on every source bar leave emitted metadata
+      numeric zero while trades remain accumulated.
+    preconditions:
+    - close-price vector is [100, 102]
+    - both bars have volume null and amount null
+    - receiver uses boxSize 2.0 and reversalAmount 2
+    expectedSourceBehavior:
+    - aggregate returns exactly one upward brick
+    - brick volume and amount are zero from the selected NumFactory
+    - brick trades equal 1+2
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FRACTIONAL_BOX_EXACT_BOUNDARIES
+    category: BOUNDARY
+    description: Binary-exact fractional box size exercises Num conversion and exact
+      repeated thresholds.
+    preconditions:
+    - close-price vector is [10.0, 10.5, 11.0]
+    - receiver uses boxSize 0.5 and reversalAmount 2
+    expectedSourceBehavior:
+    - aggregate returns exactly two upward bricks
+    - brick endpoints are 10.0-to-10.5 and 10.5-to-11.0
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LARGER_BOX_MULTI_BRICK_MOVE
+    category: NORMAL
+    description: A non-default larger box size emits two bricks from one source movement.
+    preconditions:
+    - close-price vector is [100, 106]
+    - receiver uses boxSize 3.0 and reversalAmount 2
+    expectedSourceBehavior:
+    - '{aggregate returns exactly two upward bricks=100-to-103 and 103-to-106}'
+    - only the first brick emitted from the second source bar carries pending metadata
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_AND_NEGATIVE_PRICE_DOWNWARD_MOVE
+    category: EDGE
+    description: A close movement crosses an exact downward box boundary from zero
+      into negative prices.
+    preconditions:
+    - close-price vector is [0, -2]
+    - receiver uses boxSize 2.0 and reversalAmount 2
+    expectedSourceBehavior:
+    - aggregate returns exactly one downward brick with open 0 and close -2
+    - follow-up scaling preserves brick count, direction, timestamps, volume, and
+      trades
+    targetCases: 1
+    emptyOutputAllowed: false

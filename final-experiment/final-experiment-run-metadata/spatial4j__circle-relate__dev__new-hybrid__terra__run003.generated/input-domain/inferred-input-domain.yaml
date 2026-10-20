@@ -1,0 +1,341 @@
+InputDomain:
+  summary: Valid inputs in a flat, non-geo SpatialContext consisting of circles and
+    axis-aligned rectangles whose source and jointly translated follow-up coordinates
+    remain valid. The domain exercises CircleImpl.relate(Rectangle)'s bounding-box
+    shortcuts, exact bounding-box equality exception, phase-2 nearest-corner disjoint
+    detection, axis-overlap intersections, rectangle containment tests, tangencies,
+    zero-area shapes, and empty-shape sentinels.
+  globalConstraints:
+  - Use a non-geo SpatialContext whose valid coordinate bounds contain every source
+    coordinate and that coordinate translated by (+17.5, -9.25).
+  - For every non-empty circle, construct a valid non-empty Point in the circle's
+    own context and use a finite radius greater than or equal to 0.
+  - For every non-empty rectangle, use finite bounds satisfying minX <= maxX and minY
+    <= maxY, valid in the circle's context before and after translation.
+  - Circle and rectangle must use the same SpatialContext instance because the follow-up
+    RectangleImpl is constructed with circle.getContext().
+  - Do not use geo/dateline-crossing rectangles; relateRectanglePhase2 explicitly
+    states that its logic does not support geo dateline or world-wrap cases.
+  - Empty-shape scenarios are included only when the context can supply its canonical
+    valid empty Point or Rectangle representation; they are not simulated with arbitrary
+    malformed coordinates.
+  - Coordinates in the concrete scenarios are dyadic or integral values, so the specified
+    shift values 17.5 and -9.25 are exactly representable and do not intentionally
+    introduce decimal-rounding-only cases.
+  diversity:
+    boundingBoxRelation:
+    - distinct
+    - source enclosing-box relation to rectangle
+    - DISJOINT, WITHIN, CONTAINS, INTERSECTS, exact-equals special case
+    phase2NearestPoint:
+    - distinct
+    - relative position of circle axes to rectangle intervals
+    - outside both axes, outside one axis, inside both axes, exactly on rectangle
+      boundary
+    geometricBoundary:
+    - distinct
+    - circle-to-rectangle distance condition
+    - strict gap, corner tangent, side tangent, contained interior, contained boundary
+      corner
+    shapeDimensionality:
+    - distinct
+    - circle and rectangle area
+    - positive-area circle/rectangle, zero-radius circle, line rectangle, point rectangle,
+      empty circle, empty rectangle
+  scenarios:
+  - id: BBOX_DISJOINT_HORIZONTAL_GAP
+    category: NORMAL
+    description: A positive-area rectangle lies strictly beyond the circle's right
+      bounding-box edge.
+    preconditions:
+    - Circle center is (0, 0) and radius is 5.
+    - Rectangle bounds are minX=6, maxX=7, minY=-1, maxY=1.
+    - Rectangle minX is greater than circle centerX plus radius.
+    expectedSourceBehavior:
+    - enclosingBox.relate(rectangle) is DISJOINT.
+    - relate(rectangle) returns DISJOINT through the bounding-box shortcut.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BBOX_DISJOINT_VERTICAL_GAP
+    category: NORMAL
+    description: A positive-area rectangle lies strictly above the circle's top bounding-box
+      edge.
+    preconditions:
+    - Circle center is (0, 0) and radius is 5.
+    - Rectangle bounds are minX=-1, maxX=1, minY=6, maxY=7.
+    - Rectangle minY is greater than circle centerY plus radius.
+    expectedSourceBehavior:
+    - enclosingBox.relate(rectangle) is DISJOINT.
+    - relate(rectangle) returns DISJOINT without phase-2 distance testing.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CIRCLE_BBOX_STRICTLY_WITHIN_RECTANGLE
+    category: NORMAL
+    description: The rectangle strictly contains the entire enclosing box of a positive-radius
+      circle.
+    preconditions:
+    - Circle center is (0, 0) and radius is 5.
+    - Rectangle bounds are minX=-6, maxX=6, minY=-6, maxY=6.
+    - Rectangle strictly contains enclosing-box bounds [-5, 5] by [-5, 5].
+    expectedSourceBehavior:
+    - enclosingBox.relate(rectangle) is WITHIN.
+    - relate(rectangle) returns WITHIN through the bounding-box shortcut.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EXACT_ENCLOSING_BOX_EQUALITY
+    category: EDGE
+    description: The rectangle has exactly the same bounds as the circle's enclosing
+      box.
+    preconditions:
+    - Circle center is (0, 0) and radius is 5.
+    - Rectangle bounds are minX=-5, maxX=5, minY=-5, maxY=5.
+    - Rectangle equals circle.getBoundingBox() by Rectangle.equals, not merely by
+      overlap.
+    expectedSourceBehavior:
+    - enclosingBox.relate(rectangle) is CONTAINS.
+    - The explicit enclosingBox.equals(rectangle) exception returns WITHIN rather
+      than entering phase 2.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PHASE2_DIAGONAL_NEAREST_CORNER_OUTSIDE
+    category: NORMAL
+    description: The rectangle overlaps the enclosing box only near a diagonal corner,
+      but its nearest corner is outside the circle.
+    preconditions:
+    - Circle center is (0, 0) and radius is 5.
+    - Rectangle bounds are minX=4, maxX=6, minY=4, maxY=6.
+    - The nearest rectangle point to the center is (4, 4), whose Euclidean distance
+      exceeds 5.
+    expectedSourceBehavior:
+    - enclosingBox.relate(rectangle) is INTERSECTS.
+    - Both circle axes are outside the rectangle intervals.
+    - relateRectanglePhase2 returns DISJOINT after contains(4, 4) is false.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PHASE2_DIAGONAL_NEAREST_CORNER_TANGENT
+    category: BOUNDARY
+    description: The rectangle's nearest diagonal corner lies exactly on the circle
+      boundary.
+    preconditions:
+    - Circle center is (0, 0) and radius is 5.
+    - Rectangle bounds are minX=3, maxX=4, minY=4, maxY=5.
+    - The nearest point is (3, 4), and 3 squared plus 4 squared equals radius squared.
+    expectedSourceBehavior:
+    - enclosingBox.relate(rectangle) is INTERSECTS.
+    - Both axes are outside the rectangle intervals, but contains(3, 4) is true at
+      the boundary.
+    - relate(rectangle) returns INTERSECTS rather than DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PHASE2_HORIZONTAL_AXIS_SPAN
+    category: NORMAL
+    description: The rectangle spans the circle's Y axis while lying partly beyond
+      the right side of the circle.
+    preconditions:
+    - Circle center is (0, 0) and radius is 5.
+    - Rectangle bounds are minX=4, maxX=6, minY=-1, maxY=1.
+    - Circle centerY lies within rectangle Y bounds.
+    - Circle centerX is less than rectangle minX.
+    expectedSourceBehavior:
+    - enclosingBox.relate(rectangle) is INTERSECTS.
+    - Phase 2 cannot classify the shapes as disjoint because the rectangle spans one
+      circle axis.
+    - relate(rectangle) returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PHASE2_VERTICAL_AXIS_SPAN
+    category: NORMAL
+    description: The rectangle spans the circle's X axis while lying partly beyond
+      the top of the circle.
+    preconditions:
+    - Circle center is (0, 0) and radius is 5.
+    - Rectangle bounds are minX=-1, maxX=1, minY=4, maxY=6.
+    - Circle centerX lies within rectangle X bounds.
+    - Circle centerY is less than rectangle minY.
+    expectedSourceBehavior:
+    - enclosingBox.relate(rectangle) is INTERSECTS.
+    - Phase 2 follows the Y-axis-outside path and cannot return DISJOINT.
+    - relate(rectangle) returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PHASE2_RECTANGLE_SPANS_BOTH_AXES
+    category: NORMAL
+    description: The rectangle contains the center but extends outside the circle's
+      bounding box.
+    preconditions:
+    - Circle center is (0, 0) and radius is 5.
+    - Rectangle bounds are minX=-1, maxX=6, minY=-1, maxY=1.
+    - Both circle axes lie within the rectangle bounds.
+    - Rectangle maxX exceeds the enclosing-box maxX.
+    expectedSourceBehavior:
+    - enclosingBox.relate(rectangle) is INTERSECTS rather than WITHIN.
+    - Phase 2 bypasses the diagonal-disjoint check because both axes are spanned.
+    - relate(rectangle) returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PHASE2_CENTER_ON_RECTANGLE_MIN_BOUNDARIES
+    category: BOUNDARY
+    description: The circle center coincides with the rectangle's minimum X and minimum
+      Y boundaries.
+    preconditions:
+    - Circle center is (0, 0) and radius is 5.
+    - Rectangle bounds are minX=0, maxX=6, minY=0, maxY=6.
+    - circle centerX equals rectangle minX and centerY equals rectangle minY.
+    expectedSourceBehavior:
+    - enclosingBox.relate(rectangle) is INTERSECTS.
+    - getXAxis and getYAxis take the inclusive interval branches rather than the less-than
+      branches.
+    - relate(rectangle) returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BBOX_CONTAINS_RECTANGLE_WITH_OUTSIDE_FARTHEST_CORNER
+    category: NORMAL
+    description: The rectangle is inside the enclosing box but has a corner outside
+      the circle.
+    preconditions:
+    - Circle center is (0, 0) and radius is 5.
+    - Rectangle bounds are minX=3, maxX=5, minY=3, maxY=5.
+    - Rectangle is contained by enclosing-box bounds [-5, 5] by [-5, 5].
+    - Rectangle corner (5, 5) is outside the circle.
+    expectedSourceBehavior:
+    - enclosingBox.relate(rectangle) is CONTAINS.
+    - The farthest-corner containment test fails.
+    - relate(rectangle) returns INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BBOX_CONTAINS_RECTANGLE_TOUCHING_BBOX_SIDE
+    category: BOUNDARY
+    description: The rectangle touches the enclosing-box right edge but extends vertically
+      far enough that a farthest corner is outside the circle.
+    preconditions:
+    - Circle center is (0, 0) and radius is 5.
+    - Rectangle bounds are minX=4, maxX=5, minY=-1, maxY=1.
+    - Rectangle maxX equals the enclosing-box maxX.
+    - At least one farthest candidate corner has distance greater than 5 from the
+      center.
+    expectedSourceBehavior:
+    - enclosingBox.relate(rectangle) is CONTAINS.
+    - Phase 2 returns INTERSECTS because the farthest rectangle point is not contained.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BBOX_CONTAINS_RECTANGLE_ALL_CORNERS_INTERIOR
+    category: NORMAL
+    description: A positive-area rectangle is wholly inside both the enclosing box
+      and the circle.
+    preconditions:
+    - Circle center is (0, 0) and radius is 5.
+    - Rectangle bounds are minX=-3, maxX=3, minY=-3, maxY=3.
+    - Every rectangle corner has distance less than 5 from the center.
+    expectedSourceBehavior:
+    - enclosingBox.relate(rectangle) is CONTAINS.
+    - Phase 2 finds its farthest selected corner contained.
+    - relate(rectangle) returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FARTHEST_X_TIE_AND_BOUNDARY_CONTAINMENT
+    category: BOUNDARY
+    description: Equal horizontal distances force the strict farthest-X comparison's
+      tie choice, and the selected farthest corner is on the circle boundary.
+    preconditions:
+    - Circle center is (0, 0) and radius is 5.
+    - Rectangle bounds are minX=-3, maxX=3, minY=-4, maxY=0.
+    - Rectangle is contained by enclosing-box bounds [-5, 5] by [-5, 5].
+    - Rectangle minX and maxX are equally distant from centerX.
+    - Corner (-3, -4) is on the circle boundary.
+    expectedSourceBehavior:
+    - enclosingBox.relate(rectangle) is CONTAINS.
+    - The farthest-X tie selects minX because maxX-centerX is not greater than centerX-minX.
+    - Boundary containment succeeds and relate(rectangle) returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CONTAINED_VERTICAL_LINE_RECTANGLE
+    category: EDGE
+    description: A zero-width, positive-height rectangle lies wholly inside the circle.
+    preconditions:
+    - Circle center is (0, 0) and radius is 5.
+    - Rectangle bounds are minX=1, maxX=1, minY=-1, maxY=1.
+    - Rectangle has zero width and all of its points are within the circle.
+    expectedSourceBehavior:
+    - enclosingBox.relate(rectangle) is CONTAINS.
+    - The farthest point used by phase 2 is contained.
+    - relate(rectangle) returns CONTAINS for the line rectangle.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: TANGENT_POINT_RECTANGLE_CONTAINED
+    category: BOUNDARY
+    description: A zero-area rectangle is exactly the point on the circle's right
+      boundary.
+    preconditions:
+    - Circle center is (0, 0) and radius is 5.
+    - Rectangle bounds are minX=5, maxX=5, minY=0, maxY=0.
+    - Rectangle is a point and its sole point has distance exactly 5 from the center.
+    expectedSourceBehavior:
+    - enclosingBox.relate(rectangle) is CONTAINS and the rectangle is not equal to
+      the full enclosing box.
+    - The farthest point is boundary-contained.
+    - relate(rectangle) returns CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_RADIUS_CIRCLE_WITHIN_AREA_RECTANGLE
+    category: EDGE
+    description: A zero-radius circle's point is strictly inside a positive-area rectangle.
+    preconditions:
+    - Circle center is (0, 0) and radius is 0.
+    - Rectangle bounds are minX=-1, maxX=1, minY=-1, maxY=1.
+    - Rectangle strictly contains point (0, 0).
+    expectedSourceBehavior:
+    - The zero-radius enclosing box is within the rectangle.
+    - relate(rectangle) returns WITHIN through the bounding-box shortcut.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_RADIUS_CIRCLE_DISJOINT_FROM_RECTANGLE
+    category: EDGE
+    description: A zero-radius circle's point is outside a positive-area rectangle.
+    preconditions:
+    - Circle center is (0, 0) and radius is 0.
+    - Rectangle bounds are minX=1, maxX=2, minY=1, maxY=2.
+    - Point (0, 0) is outside the rectangle.
+    expectedSourceBehavior:
+    - The zero-radius enclosing box is disjoint from the rectangle.
+    - relate(rectangle) returns DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_RADIUS_EXACT_POINT_RECTANGLE
+    category: EDGE
+    description: A zero-radius circle and a point rectangle have identical enclosing-box
+      bounds.
+    preconditions:
+    - Circle center is (0, 0) and radius is 0.
+    - Rectangle bounds are minX=0, maxX=0, minY=0, maxY=0.
+    - Rectangle equals the circle's zero-area enclosing box.
+    expectedSourceBehavior:
+    - enclosingBox.relate(rectangle) is CONTAINS.
+    - The exact enclosing-box equality exception returns WITHIN.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EMPTY_CIRCLE_WITH_NONEMPTY_RECTANGLE
+    category: EDGE
+    description: A valid empty circle is related to a valid non-empty rectangle.
+    preconditions:
+    - Circle center is a valid empty Point from the chosen context.
+    - Circle isEmpty() is true.
+    - Rectangle bounds are minX=-1, maxX=1, minY=-1, maxY=1 and rectangle is not empty.
+    expectedSourceBehavior:
+    - Circle construction creates an empty enclosing box because point.isEmpty() is
+      true.
+    - relate(rectangle) returns DISJOINT for the empty circle sentinel.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NONEMPTY_CIRCLE_WITH_EMPTY_RECTANGLE
+    category: EDGE
+    description: A valid positive-radius circle is related to the context's canonical
+      empty rectangle.
+    preconditions:
+    - Circle center is (0, 0) and radius is 5.
+    - Rectangle is the chosen context's valid canonical empty Rectangle and rectangle.isEmpty()
+      is true.
+    expectedSourceBehavior:
+    - The enclosing-box relation to the empty rectangle is DISJOINT.
+    - relate(rectangle) returns DISJOINT without requiring a phase-2 geometric overlap.
+    targetCases: 1
+    emptyOutputAllowed: false

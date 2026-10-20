@@ -1,0 +1,265 @@
+InputDomain:
+  summary: Finite IEEE-754 double longitudes, including in-range values, both sides
+    of the inclusive endpoints, multi-turn values, exact-turn sentinels, signed zero,
+    subnormal values, and large finite magnitudes; each follow-up is formed as source
+    + 360 degrees and is checked for the same globe position.
+  globalConstraints:
+  - The source input is a finite double; NaN and positive or negative infinity are
+    excluded because they do not identify a longitude on the globe and the source
+    arithmetic would produce non-geographic results.
+  - The follow-up input is exactly the Java double expression source + 360.0.
+  - The source and follow-up normalized results must be compared as the same longitude
+    modulo 360 degrees, treating -180 and +180 as the same antimeridian position because
+    the source explicitly permits both endpoints.
+  - Inputs are passed directly to the public static method DistanceUtils.normLonDEG(double);
+    no object construction or auxiliary API is required.
+  diversity:
+    inputRange:
+    - less_than_-180
+    - exactly_-180
+    - strictly_between_-180_and_180
+    - exactly_180
+    - greater_than_180
+    remainderAfterSourceOffset:
+    - negative
+    - zero
+    - positive
+    turnMagnitude:
+    - zero_turn
+    - one_turn
+    - multiple_turns
+    - very_large_finite_magnitude
+    boundaryDistance:
+    - exact_boundary
+    - one_ulp_or_small_delta_from_boundary
+    - ordinary_distance
+    floatingPointForm:
+    - ordinary_finite
+    - signed_zero
+    - subnormal
+    - large_finite_with_source_plus_360_unchanged
+    sourceBranchTarget:
+    - in_range_early_return
+    - negative_remainder
+    - positive_remainder
+    - positive_zero_remainder_sentinel
+  scenarios:
+  - id: INTERIOR_LONGITUDES_EARLY_RETURN
+    category: NORMAL
+    description: Source longitudes strictly inside the documented inclusive range,
+      with ordinary positive, negative, and zero values.
+    preconditions:
+    - -180.0 < source < 180.0
+    - source is finite
+    - source is not a boundary or subnormal case covered elsewhere
+    expectedSourceBehavior:
+    - normLonDEG(source) returns source unchanged through the first if branch.
+    - normLonDEG(source + 360.0) must denote the same longitude as source after the
+      follow-up wraps once.
+    targetCases: 5
+    emptyOutputAllowed: false
+  - id: INCLUSIVE_ENDPOINT_MINUS_180
+    category: BOUNDARY
+    description: Source is exactly the lower documented endpoint.
+    preconditions:
+    - source == -180.0
+    expectedSourceBehavior:
+    - The source call takes the in-range early return and returns -180.0 unchanged.
+    - The follow-up is 180.0 and takes the same early return, so the two results are
+      numerically different endpoint representations but the same antimeridian position.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: INCLUSIVE_ENDPOINT_PLUS_180
+    category: BOUNDARY
+    description: Source is exactly the upper documented endpoint.
+    preconditions:
+    - source == 180.0
+    expectedSourceBehavior:
+    - The source call returns 180.0 unchanged through the in-range early return.
+    - The follow-up is 540.0 and must normalize to 180.0.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: JUST_BELOW_LOWER_ENDPOINT
+    category: BOUNDARY
+    description: Source is just less than -180, exercising the negative remainder
+      branch immediately outside the range.
+    preconditions:
+    - source < -180.0
+    - source is the nearest representable value below -180.0 or differs from -180.0
+      by a small positive finite delta
+    expectedSourceBehavior:
+    - The early-return condition is false.
+    - (source + 180.0) % 360.0 is negative, so the method returns 180.0 + off.
+    - The follow-up must represent the same wrapped longitude.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: JUST_ABOVE_UPPER_ENDPOINT
+    category: BOUNDARY
+    description: Source is just greater than 180, exercising the positive remainder
+      branch immediately outside the range.
+    preconditions:
+    - source > 180.0
+    - source is the nearest representable value above 180.0 or differs from 180.0
+      by a small positive finite delta
+    expectedSourceBehavior:
+    - The early-return condition is false.
+    - The nonnegative, nonzero remainder path returns -180.0 + off, which is just
+      below -180.
+    - The follow-up must normalize to the same globe position.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ORDINARY_NEGATIVE_REMAINDER
+    category: NORMAL
+    description: Negative multi-turn values whose offset modulo 360 is strictly negative.
+    preconditions:
+    - source < -180.0
+    - (source + 180.0) % 360.0 < 0.0
+    - source is not in the just-below-boundary scenario and is not an exact-turn sentinel
+    expectedSourceBehavior:
+    - The method takes if (off < 0) and returns 180.0 + off.
+    - The result lies in [-180, 180) and the follow-up result denotes the same longitude.
+    targetCases: 4
+    emptyOutputAllowed: false
+  - id: ORDINARY_POSITIVE_REMAINDER
+    category: NORMAL
+    description: Positive multi-turn values with a strictly positive, nonzero remainder.
+    preconditions:
+    - source > 180.0
+    - (source + 180.0) % 360.0 > 0.0
+    - source is not in the just-above-boundary scenario and is not an exact positive-turn
+      sentinel
+    expectedSourceBehavior:
+    - The method skips both off < 0 and off == 0 checks and returns -180.0 + off.
+    - The result lies in (-180, 180] and the follow-up result denotes the same longitude.
+    targetCases: 4
+    emptyOutputAllowed: false
+  - id: POSITIVE_EXACT_TURN_SENTINEL
+    category: EDGE
+    description: Positive values at exact positive multiples of 360, including one,
+      two, and several full turns.
+    preconditions:
+    - source > 0.0
+    - source % 360.0 == 0.0
+    - source > 180.0
+    expectedSourceBehavior:
+    - The offset is exactly zero.
+    - The branch off == 0 && source > 0 returns 180.0.
+    - The follow-up remains a positive exact-turn value and must also return 180.0.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: NEGATIVE_EXACT_TURN_SENTINEL
+    category: EDGE
+    description: Negative values at exact negative multiples of 360, distinct from
+      the in-range -180 endpoint.
+    preconditions:
+    - source < -180.0
+    - source % 360.0 == 0.0
+    expectedSourceBehavior:
+    - (source + 180.0) % 360.0 is -180.0 rather than zero for these values.
+    - The negative-remainder branch returns 0.0.
+    - The follow-up must produce the same zero-longitude position.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: ZERO_AND_SIGNED_ZERO
+    category: EDGE
+    description: Positive zero and negative zero, both inside the early-return interval
+      but capable of exposing sign preservation.
+    preconditions:
+    - source is +0.0 or -0.0 as distinguished by Double.doubleToRawLongBits
+    expectedSourceBehavior:
+    - The source call returns the input value unchanged because both zeros satisfy
+      the in-range condition.
+    - The follow-up is 360.0 after Java addition and normalizes to zero; comparison
+      must use globe-position equivalence rather than requiring the zero sign to match.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: SUBNORMAL_LONGITUDES
+    category: EDGE
+    description: Smallest-magnitude nonzero finite values on both sides of zero.
+    preconditions:
+    - abs(source) is a positive subnormal double
+    - abs(source) < 180.0
+    expectedSourceBehavior:
+    - The source call takes the early return without modulo arithmetic, preserving
+      the tiny longitude.
+    - The follow-up is near 360.0 and must wrap to the same tiny signed-side longitude
+      to the precision permitted by the Java double operations.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: MULTIPLE_TURNS_WITH_FRACTION
+    category: NORMAL
+    description: Values several full turns from the origin with fractional offsets
+      on both positive and negative sides.
+    preconditions:
+    - abs(source) > 360.0
+    - source is not an exact multiple of 360.0
+    - source has a nonzero fractional longitude component after reduction modulo 360.0
+    expectedSourceBehavior:
+    - The modulo path is exercised rather than the common-case early return.
+    - The normalized result remains within the documented inclusive range.
+    - Adding 360 changes the turn count but not the normalized globe position.
+    targetCases: 4
+    emptyOutputAllowed: false
+  - id: LARGE_FINITE_REMAINDER_VALUES
+    category: EDGE
+    description: Large finite positive and negative values for which modulo reduction
+      remains defined, including magnitudes where adding 360 may be rounded by double
+      arithmetic.
+    preconditions:
+    - source is finite
+    - abs(source) >= 1.0e15
+    - source is not an exact-turn sentinel
+    expectedSourceBehavior:
+    - The method still follows its explicit range test and modulo-based normalization.
+    - If Java double addition makes source + 360.0 equal to source, the MR is still
+      exercised with that exact follow-up and the two normalized results must agree.
+    - The result must be checked for the documented range and for same-position equivalence,
+      not merely for a particular decimal remainder.
+    targetCases: 4
+    emptyOutputAllowed: false
+  - id: NEAR_LARGE_FINITE_LIMIT
+    category: EDGE
+    description: Finite values near the largest representable magnitudes, where source
+      + 360.0 is normally unchanged by floating-point rounding.
+    preconditions:
+    - source is finite
+    - abs(source) >= 1.0e300
+    - source + 360.0 is finite
+    expectedSourceBehavior:
+    - The follow-up construction must use Java double addition without decimal re-encoding.
+    - The method's range test and remainder computation remain the observable behavior
+      under test.
+    - The MR comparison must accept only the same normalized globe position, including
+      the source-plus-360 identity caused by rounding.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: FOLLOWUP_CROSSES_ZERO_REPRESENTATION
+    category: BOUNDARY
+    description: Values whose source normalization is zero or near zero while the
+      follow-up is around a positive full turn.
+    preconditions:
+    - source is a finite value outside the in-range interval
+    - source is an exact negative multiple of 360 or differs from one by a small finite
+      delta
+    expectedSourceBehavior:
+    - The source takes either the negative-remainder sentinel path or its adjacent
+      negative-remainder path.
+    - The follow-up must wrap to the same zero or near-zero longitude rather than
+      being treated as a distinct full-turn location.
+    targetCases: 3
+    emptyOutputAllowed: false
+  - id: FOLLOWUP_CROSSES_ANTIMERIDIAN_REPRESENTATION
+    category: BOUNDARY
+    description: Values at or near a positive or negative multiple of 180 where source
+      and follow-up may use opposite endpoint representations.
+    preconditions:
+    - source is finite
+    - source is within one representable or small finite delta of a value congruent
+      to 180.0 modulo 360.0
+    - source is not already covered by the exact -180 or exact +180 endpoint scenarios
+    expectedSourceBehavior:
+    - The source and follow-up may normalize to -180.0 and +180.0 in opposite orders.
+    - Those endpoint results must be treated as the same antimeridian position according
+      to the method's documented inclusive range and source description.
+    targetCases: 3
+    emptyOutputAllowed: false

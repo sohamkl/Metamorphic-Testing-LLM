@@ -1,0 +1,473 @@
+InputDomain:
+  summary: Finite, non-empty geographic rectangles and points in one non-null geo
+    SpatialContext, covering latitude rejection, inclusive boundaries, ordinary and
+    dateline-wrapping longitude paths, degenerate rectangles, longitude sentinels,
+    and rotations that change the rectangle's wrap representation.
+  globalConstraints:
+  - The RectangleImpl receiver and Point argument are non-null because generateFollowUp
+    explicitly requires both to be non-null.
+  - The rectangle context is non-null and satisfies context.isGeo() == true, matching
+    the geo-box SUT description and the longitude-normalizing follow-up transformation.
+  - Construct the point with the rectangle's SpatialContext, for example context.makePoint(pointX,
+    pointY), so the source and generated follow-up use the same geographic coordinate
+    system.
+  - All rectangle and point coordinates are finite doubles; exclude NaN and infinities
+    because they represent empty or non-geographic sentinel inputs rather than valid
+    map coordinates.
+  - Rectangle and point longitudes are within the inclusive geographic range [-180,
+    180], and latitudes are within the inclusive geographic range [-90, 90].
+  - Rectangle latitude bounds satisfy minY <= maxY; equality is allowed to cover horizontal
+    degenerate rectangles.
+  - Both minX <= maxX and minX > maxX are allowed; minX > maxX is the documented dateline-wrapping
+    representation.
+  - 'Exclude rectangles with minX == -180 and maxX == 180: this valid full-world longitude
+    interval has raw width 360, but the supplied follow-up normalizes both rotated
+    endpoints to -30 and collapses it to a zero-width rectangle, so the stated rotation
+    MR does not preserve that reachable class.'
+  - Do not otherwise exclude zero-width rectangles, zero-height rectangles, dateline-equivalent
+    endpoints, pole boundaries, or rectangles whose wrap status changes after the
+    150-degree rotation.
+  diversity:
+    longitudeRepresentation:
+    - non_wrapping
+    - dateline_wrapping
+    - zero_width
+    - dateline_equivalent_zero_width
+    - nearly_full_width
+    latitudePosition:
+    - strictly_below
+    - at_minY
+    - strictly_inside
+    - at_maxY
+    - strictly_above
+    - north_pole
+    - south_pole
+    longitudeDecisionPath:
+    - geo_short_circuit_contains
+    - shift_plus_360_contains
+    - shift_plus_360_disjoint
+    - shift_minus_360_contains
+    - shift_minus_360_disjoint
+    sourceRelation:
+    - CONTAINS
+    - DISJOINT
+    rotationEffect:
+    - remains_non_wrapping
+    - becomes_wrapping
+    - remains_wrapping
+    - becomes_non_wrapping
+    boundaryType:
+    - interior
+    - edge
+    - corner
+    - degenerate_axis
+    - plus_180_sentinel
+    - minus_180_sentinel
+  scenarios:
+  - id: ORDINARY_INTERIOR_CONTAINED
+    category: NORMAL
+    description: A point is strictly inside both axes of an ordinary non-wrapping
+      rectangle.
+    preconditions:
+    - minX < pointX < maxX and minY < pointY < maxY.
+    - minX < maxX and maxX - minX < 360.
+    expectedSourceBehavior:
+    - relate(point) returns SpatialRelation.CONTAINS through the geographic longitude
+      short-circuit.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: POINT_ON_MIN_X_EDGE
+    category: BOUNDARY
+    description: A point lies exactly on the west longitude edge and within the latitude
+      range.
+    preconditions:
+    - minX < maxX, pointX == minX, and minY < pointY < maxY.
+    expectedSourceBehavior:
+    - Longitude edges are inclusive, so relate(point) returns SpatialRelation.CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POINT_ON_MAX_X_EDGE
+    category: BOUNDARY
+    description: A point lies exactly on the east longitude edge and within the latitude
+      range.
+    preconditions:
+    - minX < maxX, pointX == maxX, and minY < pointY < maxY.
+    expectedSourceBehavior:
+    - Longitude edges are inclusive, so relate(point) returns SpatialRelation.CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POINT_ON_MIN_Y_EDGE
+    category: BOUNDARY
+    description: A point lies exactly on the rectangle's minimum latitude and strictly
+      inside its longitude interval.
+    preconditions:
+    - minX < pointX < maxX and pointY == minY < maxY.
+    expectedSourceBehavior:
+    - Latitude edges are inclusive, so relate(point) returns SpatialRelation.CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POINT_ON_MAX_Y_EDGE
+    category: BOUNDARY
+    description: A point lies exactly on the rectangle's maximum latitude and strictly
+      inside its longitude interval.
+    preconditions:
+    - minX < pointX < maxX and pointY == maxY > minY.
+    expectedSourceBehavior:
+    - Latitude edges are inclusive, so relate(point) returns SpatialRelation.CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POINT_ON_SOUTHWEST_CORNER
+    category: BOUNDARY
+    description: A point equals both minimum rectangle coordinates.
+    preconditions:
+    - pointX == minX and pointY == minY.
+    expectedSourceBehavior:
+    - Both comparisons are inclusive, so relate(point) returns SpatialRelation.CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POINT_ON_NORTHEAST_CORNER
+    category: BOUNDARY
+    description: A point equals both maximum rectangle coordinates.
+    preconditions:
+    - pointX == maxX and pointY == maxY.
+    expectedSourceBehavior:
+    - Both comparisons are inclusive, so relate(point) returns SpatialRelation.CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POINT_STRICTLY_ABOVE
+    category: NORMAL
+    description: Longitude would be contained, but the point is above the rectangle.
+    preconditions:
+    - pointY > maxY and pointX is in the rectangle's represented longitude interval.
+    expectedSourceBehavior:
+    - relate(point) returns SpatialRelation.DISJOINT at the first latitude check.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: POINT_STRICTLY_BELOW
+    category: NORMAL
+    description: Longitude would be contained, but the point is below the rectangle.
+    preconditions:
+    - pointY < minY and pointX is in the rectangle's represented longitude interval.
+    expectedSourceBehavior:
+    - relate(point) returns SpatialRelation.DISJOINT at the first latitude check.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ORDINARY_POINT_WEST_OF_RECTANGLE
+    category: NORMAL
+    description: A latitude-contained point is west of an ordinary rectangle and remains
+      outside after the method adds 360.
+    preconditions:
+    - minX < maxX, minY <= pointY <= maxY, and pointX < minX.
+    - pointX + 360 > maxX.
+    expectedSourceBehavior:
+    - The pX < minX branch adds 360, and the final longitude comparison returns SpatialRelation.DISJOINT.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ORDINARY_POINT_EAST_OF_RECTANGLE
+    category: NORMAL
+    description: A latitude-contained point is east of an ordinary rectangle and remains
+      outside after the method subtracts 360.
+    preconditions:
+    - minX < maxX, minY <= pointY <= maxY, and pointX > maxX.
+    - pointX - 360 < minX.
+    expectedSourceBehavior:
+    - The pX > maxX branch subtracts 360, and the final longitude comparison returns
+      SpatialRelation.DISJOINT.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ZERO_HEIGHT_EXACT_LATITUDE
+    category: EDGE
+    description: A horizontal degenerate rectangle is probed at its sole latitude.
+    preconditions:
+    - minY == maxY == pointY.
+    - pointX is in the rectangle's represented longitude interval.
+    expectedSourceBehavior:
+    - The equal latitude passes both strict rejection checks and relate(point) returns
+      SpatialRelation.CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_HEIGHT_DIFFERENT_LATITUDE
+    category: EDGE
+    description: A horizontal degenerate rectangle is probed at another valid latitude.
+    preconditions:
+    - minY == maxY and pointY != minY.
+    - pointX is in the rectangle's represented longitude interval.
+    expectedSourceBehavior:
+    - The point is either above or below the sole latitude, so relate(point) returns
+      SpatialRelation.DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_WIDTH_EXACT_LONGITUDE
+    category: EDGE
+    description: A non-dateline vertical degenerate rectangle is probed at its sole
+      longitude.
+    preconditions:
+    - minX == maxX == pointX and -180 < minX < 180.
+    - minY <= pointY <= maxY.
+    expectedSourceBehavior:
+    - The geographic longitude short-circuit returns SpatialRelation.CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_WIDTH_DIFFERENT_LONGITUDE
+    category: EDGE
+    description: A non-dateline vertical degenerate rectangle is probed at a non-equivalent
+      longitude.
+    preconditions:
+    - minX == maxX, -180 < minX < 180, and pointX != minX.
+    - pointX is not the same dateline longitude under a 360-degree shift.
+    - minY <= pointY <= maxY.
+    expectedSourceBehavior:
+    - After the applicable longitude shift, the final comparison returns SpatialRelation.DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MINUS_180_LINE_CONTAINS_PLUS_180_POINT
+    category: EDGE
+    description: A vertical line stored at -180 is probed using the equivalent +180
+      longitude.
+    preconditions:
+    - minX == maxX == -180, pointX == 180, and minY <= pointY <= maxY.
+    expectedSourceBehavior:
+    - The pX > maxX branch subtracts 360 to obtain -180, and relate(point) returns
+      SpatialRelation.CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PLUS_180_LINE_CONTAINS_MINUS_180_POINT
+    category: EDGE
+    description: A vertical line stored at +180 is probed using the equivalent -180
+      longitude.
+    preconditions:
+    - minX == maxX == 180, pointX == -180, and minY <= pointY <= maxY.
+    expectedSourceBehavior:
+    - The pX < minX branch adds 360 to obtain 180, and relate(point) returns SpatialRelation.CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WRAPPED_EAST_SEGMENT_INTERIOR
+    category: NORMAL
+    description: A point is strictly inside the east-side segment of a dateline-wrapping
+      rectangle.
+    preconditions:
+    - minX > maxX, minX < pointX <= 180, and minY < pointY < maxY.
+    expectedSourceBehavior:
+    - After maxX is unwrapped above 180, pointX lies directly between minX and maxX
+      and the short-circuit returns SpatialRelation.CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WRAPPED_EAST_EDGE
+    category: BOUNDARY
+    description: A point lies on the minX edge of a dateline-wrapping rectangle.
+    preconditions:
+    - minX > maxX, pointX == minX, and minY <= pointY <= maxY.
+    expectedSourceBehavior:
+    - The unwrapped interval includes minX, so relate(point) returns SpatialRelation.CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WRAPPED_WEST_SEGMENT_INTERIOR
+    category: NORMAL
+    description: A point is strictly inside the west-side segment of a dateline-wrapping
+      rectangle.
+    preconditions:
+    - minX > maxX, -180 <= pointX < maxX, and minY < pointY < maxY.
+    expectedSourceBehavior:
+    - The method adds 360 to pointX, placing it in the unwrapped interval, and returns
+      SpatialRelation.CONTAINS.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: WRAPPED_WEST_EDGE
+    category: BOUNDARY
+    description: A point lies on the maxX edge of a dateline-wrapping rectangle.
+    preconditions:
+    - minX > maxX, pointX == maxX, and minY <= pointY <= maxY.
+    expectedSourceBehavior:
+    - Adding 360 places pointX exactly on the adjusted maxX edge, so relate(point)
+      returns SpatialRelation.CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: WRAPPED_CENTRAL_GAP
+    category: NORMAL
+    description: A point lies in the excluded central longitude gap of a dateline-wrapping
+      rectangle.
+    preconditions:
+    - minX > maxX, maxX < pointX < minX, and minY <= pointY <= maxY.
+    expectedSourceBehavior:
+    - The applicable shift does not place pointX in the unwrapped interval, so relate(point)
+      returns SpatialRelation.DISJOINT.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: WRAPPED_GAP_JUST_BELOW_EAST_EDGE
+    category: BOUNDARY
+    description: A point is immediately on the gap side of the wrapped rectangle's
+      minX edge.
+    preconditions:
+    - minX > maxX and maxX < pointX < minX.
+    - The positive difference minX - pointX is finite and small, and minY <= pointY
+      <= maxY.
+    expectedSourceBehavior:
+    - Because the edge itself is inclusive but this point is below it in the central
+      gap, relate(point) returns SpatialRelation.DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ROTATION_CREATES_WRAP_CONTAINED
+    category: EDGE
+    description: The source rectangle is non-wrapping, but rotating both endpoints
+      by 150 degrees makes the follow-up rectangle wrap.
+    preconditions:
+    - Use minX == -20, maxX == 40, with minY < pointY < maxY and pointX == 0.
+    - The rotated endpoints are 130 and -170, respectively, so the follow-up has minX
+      > maxX.
+    expectedSourceBehavior:
+    - The source point is strictly inside the source rectangle and relate(point) returns
+      SpatialRelation.CONTAINS.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ROTATION_CREATES_WRAP_DISJOINT
+    category: EDGE
+    description: A source-disjoint point remains in the excluded gap when rotation
+      changes a non-wrapping rectangle into a wrapping one.
+    preconditions:
+    - Use minX == -20, maxX == 40, with minY <= pointY <= maxY and pointX == 100.
+    - The rotated rectangle endpoints are 130 and -170, and the rotated point longitude
+      is -110.
+    expectedSourceBehavior:
+    - The source point is east of maxX, so relate(point) returns SpatialRelation.DISJOINT.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ROTATION_REMOVES_WRAP_CONTAINED
+    category: EDGE
+    description: The source rectangle wraps across the dateline, but rotation turns
+      it into an ordinary non-wrapping rectangle.
+    preconditions:
+    - Use minX == 170, maxX == -170, with minY < pointY < maxY and pointX == 175.
+    - The rotated rectangle endpoints are -40 and -20, and the rotated point longitude
+      is -35.
+    expectedSourceBehavior:
+    - The source point is in the east segment and relate(point) returns SpatialRelation.CONTAINS.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ROTATION_REMOVES_WRAP_DISJOINT
+    category: EDGE
+    description: A point in a wrapped rectangle's source gap remains outside after
+      rotation removes the wrap representation.
+    preconditions:
+    - Use minX == 170, maxX == -170, with minY <= pointY <= maxY and pointX == 0.
+    - The rotated rectangle endpoints are -40 and -20, and the rotated point longitude
+      is 150.
+    expectedSourceBehavior:
+    - The source point lies in the central gap and relate(point) returns SpatialRelation.DISJOINT.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: NORTH_POLE_BOUNDARY
+    category: BOUNDARY
+    description: The rectangle reaches the north pole and the point lies exactly on
+      that latitude boundary.
+    preconditions:
+    - maxY == 90, pointY == 90, and pointX is in the represented longitude interval.
+    expectedSourceBehavior:
+    - The maximum latitude is inclusive, so relate(point) returns SpatialRelation.CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SOUTH_POLE_BOUNDARY
+    category: BOUNDARY
+    description: The rectangle reaches the south pole and the point lies exactly on
+      that latitude boundary.
+    preconditions:
+    - minY == -90, pointY == -90, and pointX is in the represented longitude interval.
+    expectedSourceBehavior:
+    - The minimum latitude is inclusive, so relate(point) returns SpatialRelation.CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: FULL_LATITUDE_RANGE_INTERIOR
+    category: EDGE
+    description: The rectangle spans every valid latitude while retaining a non-full-world
+      longitude interval.
+    preconditions:
+    - minY == -90 and maxY == 90.
+    - The rectangle does not have minX == -180 and maxX == 180.
+    - pointX is in the represented longitude interval and -90 < pointY < 90.
+    expectedSourceBehavior:
+    - Latitude cannot reject the valid point, and relate(point) returns SpatialRelation.CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: PLUS_180_ORDINARY_EDGE
+    category: BOUNDARY
+    description: An ordinary rectangle ends at +180 and is probed exactly at +180.
+    preconditions:
+    - minX < maxX == 180, pointX == 180, and minY <= pointY <= maxY.
+    expectedSourceBehavior:
+    - The source longitude is on the inclusive maxX edge, so relate(point) returns
+      SpatialRelation.CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: MINUS_180_ORDINARY_EDGE
+    category: BOUNDARY
+    description: An ordinary rectangle starts at -180 and is probed exactly at -180.
+    preconditions:
+    - minX == -180 < maxX, pointX == -180, and minY <= pointY <= maxY.
+    expectedSourceBehavior:
+    - The source longitude is on the inclusive minX edge, so relate(point) returns
+      SpatialRelation.CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEARLY_FULL_NON_WRAPPING_CONTAINS
+    category: EDGE
+    description: A 359-degree ordinary rectangle contains a point far from its narrow
+      excluded dateline gap.
+    preconditions:
+    - minX == -179.5, maxX == 179.5, minY <= pointY <= maxY, and pointX == 0.
+    expectedSourceBehavior:
+    - The point is directly within the interval and relate(point) returns SpatialRelation.CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEARLY_FULL_NON_WRAPPING_GAP
+    category: EDGE
+    description: A 359-degree ordinary rectangle excludes the +180/-180 dateline longitude.
+    preconditions:
+    - minX == -179.5, maxX == 179.5, minY <= pointY <= maxY, and pointX == 180.
+    expectedSourceBehavior:
+    - Subtracting 360 produces -180, which is below minX, so relate(point) returns
+      SpatialRelation.DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEARLY_FULL_WRAPPED_CONTAINS
+    category: EDGE
+    description: A 359-degree wrapped rectangle contains a point opposite its narrow
+      central gap.
+    preconditions:
+    - minX == 0.5, maxX == -0.5, minY <= pointY <= maxY, and pointX == 180.
+    expectedSourceBehavior:
+    - After unwrapping maxX to 359.5, pointX lies inside and relate(point) returns
+      SpatialRelation.CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NEARLY_FULL_WRAPPED_GAP
+    category: EDGE
+    description: A 359-degree wrapped rectangle excludes a point in its narrow central
+      gap.
+    preconditions:
+    - minX == 0.5, maxX == -0.5, minY <= pointY <= maxY, and pointX == 0.
+    expectedSourceBehavior:
+    - Adding 360 places the point above the adjusted maxX of 359.5, so relate(point)
+      returns SpatialRelation.DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DATELINE_EQUIVALENT_REVERSED_ENDPOINTS_CONTAIN
+    category: EDGE
+    description: The rectangle uses minX 180 and maxX -180, whose negative raw width
+      unwraps to a single dateline longitude.
+    preconditions:
+    - minX == 180, maxX == -180, minY <= pointY <= maxY, and pointX is either -180
+      or 180.
+    expectedSourceBehavior:
+    - The adjusted maxX equals 180 and the equivalent dateline point is included,
+      so relate(point) returns SpatialRelation.CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: DATELINE_EQUIVALENT_REVERSED_ENDPOINTS_DISJOINT
+    category: EDGE
+    description: The same reversed dateline endpoints are probed at a different longitude.
+    preconditions:
+    - minX == 180, maxX == -180, minY <= pointY <= maxY, and pointX == 0.
+    expectedSourceBehavior:
+    - After adding 360, pointX is outside the adjusted zero-width interval at 180,
+      so relate(point) returns SpatialRelation.DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false

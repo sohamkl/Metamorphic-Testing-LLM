@@ -1,0 +1,506 @@
+InputDomain:
+  summary: Non-null exact CircleImpl receivers and Rectangle arguments in one flat,
+    non-geo SpatialContext, covering empty sentinels, all bounding-box outcomes, phase-2
+    axis and corner branches, containment, tangency, degeneracy, and translation-safe
+    numeric ranges.
+  globalConstraints:
+  - The receiver is an exact CircleImpl constructed with a Point, a radius, and the
+    same flat SpatialContext used to construct the Rectangle; subclass overrides of
+    getXAxis(), getYAxis(), or contains() are outside this construction path.
+  - 'The SpatialContext is non-geo and flat: ctx.isGeo() is false, so the circle bounding
+    box is [cx-r,cx+r] by [cy-r,cy+r] for a non-empty center (cx,cy) and radius r.'
+  - The CircleImpl receiver and Rectangle argument are non-null, as required by generateFollowUp.
+  - For a non-empty circle, cx, cy, and r are finite, r >= 0, and the Point reports
+    isEmpty() == false.
+  - A non-empty rectangle has finite L=minX, R=maxX, B=minY, and T=maxY with L <=
+    R and B <= T; zero-width, zero-height, and point rectangles are included.
+  - An empty circle or rectangle is included only when its supplied Point or Rectangle
+    reports isEmpty() == true; no unsupported malformed representation is assumed.
+  - Except for coordinates belonging to a valid empty-shape sentinel, NaN and infinity
+    are excluded because the CircleImpl constructor explicitly assumes prior parameter
+    validation and the MR performs coordinate arithmetic.
+  - For every non-empty case, cx+17.5, cy-9.25, L+17.5, R+17.5, B-9.25, and T-9.25
+    are finite, accepted by the same context, and preserve L <= R and B <= T.
+  - Source and shifted coordinates remain inside any coordinate limits enforced by
+    the supplied SpatialContext.
+  - Strict inequalities have a margin greater than eight ulps of the involved coordinates
+    and distance calculations; exact tangency and equality scenarios use exactly representable
+    offsets or exact 3-4-5 distances. This excludes only inputs for which floating-point
+    addition by the MR shift changes an intended equality or ordering, since such
+    inputs do not represent an invariant common translation in double arithmetic.
+  - In scenario conditions, cx and cy denote the source center, r its radius, and
+    L, R, B, T the rectangle bounds.
+  diversity:
+    circleState:
+    - non-empty-positive-radius
+    - non-empty-zero-radius
+    - empty
+    rectangleState:
+    - area
+    - vertical-line
+    - horizontal-line
+    - point
+    - empty
+    boundingBoxRelation:
+    - DISJOINT
+    - WITHIN
+    - CONTAINS-equal
+    - CONTAINS-strict
+    - INTERSECTS
+    rectanglePosition:
+    - left
+    - right
+    - above
+    - below
+    - upper-right
+    - upper-left
+    - lower-right
+    - lower-left
+    - axis-spanning
+    - center-containing
+    phase2Outcome:
+    - closest-corner-disjoint
+    - bbox-intersection
+    - farthest-corner-outside
+    - farthest-corner-contained
+    sourceRelation:
+    - DISJOINT
+    - WITHIN
+    - INTERSECTS
+    - CONTAINS
+    numericClass:
+    - exact-integer
+    - exact-dyadic
+    - non-dyadic-with-margin
+    - large-magnitude-with-resolution
+  scenarios:
+  - id: EMPTY_CIRCLE_NONEMPTY_RECTANGLE
+    category: EDGE
+    description: An empty circle is related to an ordinary non-empty rectangle.
+    preconditions:
+    - circle.getCenter().isEmpty() == true and circle.isEmpty() == true.
+    - rectangle.isEmpty() == false.
+    expectedSourceBehavior:
+    - The empty enclosing-box sentinel leads to SpatialRelation.DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NONEMPTY_CIRCLE_EMPTY_RECTANGLE
+    category: EDGE
+    description: A non-empty circle is related to an empty rectangle sentinel.
+    preconditions:
+    - circle.isEmpty() == false.
+    - rectangle.isEmpty() == true.
+    expectedSourceBehavior:
+    - The enclosing-box relation with the empty rectangle yields SpatialRelation.DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BOTH_SHAPES_EMPTY
+    category: EDGE
+    description: Both source shapes are valid empty sentinels.
+    preconditions:
+    - circle.isEmpty() == true.
+    - rectangle.isEmpty() == true.
+    expectedSourceBehavior:
+    - The result is SpatialRelation.DISJOINT rather than null.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BBOX_DISJOINT_RECTANGLE_LEFT
+    category: NORMAL
+    description: The rectangle lies strictly left of the circle bounding box.
+    preconditions:
+    - r > 0 and R < cx-r.
+    expectedSourceBehavior:
+    - enclosingBox.relate(rectangle) is DISJOINT and relate returns SpatialRelation.DISJOINT
+      without phase 2.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BBOX_DISJOINT_RECTANGLE_RIGHT
+    category: NORMAL
+    description: The rectangle lies strictly right of the circle bounding box.
+    preconditions:
+    - r > 0 and L > cx+r.
+    expectedSourceBehavior:
+    - The bounding-box shortcut returns SpatialRelation.DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BBOX_DISJOINT_RECTANGLE_ABOVE
+    category: NORMAL
+    description: The rectangle lies strictly above the circle bounding box.
+    preconditions:
+    - r > 0 and B > cy+r.
+    expectedSourceBehavior:
+    - The bounding-box shortcut returns SpatialRelation.DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BBOX_DISJOINT_RECTANGLE_BELOW
+    category: NORMAL
+    description: The rectangle lies strictly below the circle bounding box.
+    preconditions:
+    - r > 0 and T < cy-r.
+    expectedSourceBehavior:
+    - The bounding-box shortcut returns SpatialRelation.DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CIRCLE_BBOX_STRICTLY_WITHIN_RECTANGLE
+    category: NORMAL
+    description: The rectangle strictly encloses the circle's complete bounding box.
+    preconditions:
+    - r > 0, L < cx-r, R > cx+r, B < cy-r, and T > cy+r.
+    expectedSourceBehavior:
+    - enclosingBox.relate(rectangle) is WITHIN and relate returns SpatialRelation.WITHIN.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CIRCLE_BBOX_WITHIN_WITH_SHARED_SIDE
+    category: BOUNDARY
+    description: The rectangle encloses the bounding box while sharing one bounding
+      side.
+    preconditions:
+    - r > 0, L == cx-r, R > cx+r, B < cy-r, and T > cy+r.
+    expectedSourceBehavior:
+    - The bounding-box shortcut returns SpatialRelation.WITHIN.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: RECTANGLE_EQUALS_CIRCLE_BBOX
+    category: EDGE
+    description: The rectangle is exactly equal to the circle's enclosing box.
+    preconditions:
+    - r > 0, L == cx-r, R == cx+r, B == cy-r, and T == cy+r.
+    expectedSourceBehavior:
+    - bboxSect is CONTAINS under the equality ordering, enclosingBox.equals(rectangle)
+      is true, and the identity edge case returns SpatialRelation.WITHIN.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EXTERNAL_RIGHT_SIDE_TANGENCY
+    category: BOUNDARY
+    description: An area rectangle touches the circle at its rightmost point and extends
+      outside the bounding box.
+    preconditions:
+    - r > 0, L == cx+r, R > L, B < cy, and T > cy.
+    expectedSourceBehavior:
+    - The rectangle spans the y-axis, so phase 2 cannot reject it as disjoint; the
+      result is SpatialRelation.INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EXTERNAL_LEFT_SIDE_TANGENCY
+    category: BOUNDARY
+    description: An area rectangle touches the circle at its leftmost point.
+    preconditions:
+    - r > 0, R == cx-r, L < R, B < cy, and T > cy.
+    expectedSourceBehavior:
+    - The xAxis > rectangle maximum branch is reached and the result is SpatialRelation.INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EXTERNAL_TOP_SIDE_TANGENCY
+    category: BOUNDARY
+    description: An area rectangle touches the circle at its topmost point.
+    preconditions:
+    - r > 0, B == cy+r, T > B, L < cx, and R > cx.
+    expectedSourceBehavior:
+    - The yAxis < rectangle minimum branch is reached and the result is SpatialRelation.INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EXTERNAL_BOTTOM_SIDE_TANGENCY
+    category: BOUNDARY
+    description: An area rectangle touches the circle at its bottommost point.
+    preconditions:
+    - r > 0, T == cy-r, B < T, L < cx, and R > cx.
+    expectedSourceBehavior:
+    - The yAxis > rectangle maximum branch is reached and the result is SpatialRelation.INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: EXTERNAL_CORNER_TANGENCY_3_4_5
+    category: BOUNDARY
+    description: The rectangle's nearest corner is exactly on the circular boundary.
+    preconditions:
+    - r == 5, L == cx+3, B == cy+4, R > cx+5, and T > cy+5.
+    expectedSourceBehavior:
+    - contains(L,B) is true at exact distance 5, so the corner-disjoint test does
+      not fire; the result is SpatialRelation.INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UPPER_RIGHT_CLOSEST_CORNER_DISJOINT
+    category: NORMAL
+    description: A rectangle inside the bounding-box corner is nevertheless outside
+      the circle.
+    preconditions:
+    - r == 5, L == cx+4, R == cx+5, B == cy+4, and T == cy+5.
+    expectedSourceBehavior:
+    - Both axes lie below the rectangle minima and contains(L,B) is false, producing
+      SpatialRelation.DISJOINT in phase 2.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UPPER_LEFT_CLOSEST_CORNER_DISJOINT
+    category: NORMAL
+    description: The upper-left phase-2 corner branch rejects the rectangle.
+    preconditions:
+    - r == 5, L == cx-5, R == cx-4, B == cy+4, and T == cy+5.
+    expectedSourceBehavior:
+    - xAxis > R, yAxis < B, and the closest corner is outside the circle; the result
+      is SpatialRelation.DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LOWER_RIGHT_CLOSEST_CORNER_DISJOINT
+    category: NORMAL
+    description: The lower-right phase-2 corner branch rejects the rectangle.
+    preconditions:
+    - r == 5, L == cx+4, R == cx+5, B == cy-5, and T == cy-4.
+    expectedSourceBehavior:
+    - xAxis < L, yAxis > T, and the closest corner is outside the circle; the result
+      is SpatialRelation.DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LOWER_LEFT_CLOSEST_CORNER_DISJOINT
+    category: NORMAL
+    description: The lower-left phase-2 corner branch rejects the rectangle.
+    preconditions:
+    - r == 5, L == cx-5, R == cx-4, B == cy-5, and T == cy-4.
+    expectedSourceBehavior:
+    - xAxis > R, yAxis > T, and the closest corner is outside the circle; the result
+      is SpatialRelation.DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UPPER_RIGHT_NEAR_IN_FAR_OUT
+    category: NORMAL
+    description: The upper-right rectangle has a nearest corner inside the circle
+      but a farthest corner outside.
+    preconditions:
+    - r == 5, L == cx+3, R == cx+4, B == cy+3, and T == cy+4.
+    expectedSourceBehavior:
+    - The closest-corner test passes, but contains(R,T) is false; the result is SpatialRelation.INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: UPPER_LEFT_NEAR_IN_FAR_OUT
+    category: NORMAL
+    description: The upper-left rectangle exercises xAxis > R and yAxis < B before
+      failing farthest-corner containment.
+    preconditions:
+    - r == 5, L == cx-4, R == cx-3, B == cy+3, and T == cy+4.
+    expectedSourceBehavior:
+    - The nearest corner is inside and the farthest corner is outside, producing SpatialRelation.INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LOWER_RIGHT_NEAR_IN_FAR_OUT
+    category: NORMAL
+    description: The lower-right rectangle exercises xAxis < L and yAxis > T.
+    preconditions:
+    - r == 5, L == cx+3, R == cx+4, B == cy-4, and T == cy-3.
+    expectedSourceBehavior:
+    - The nearest corner is inside and the farthest corner is outside, producing SpatialRelation.INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LOWER_LEFT_NEAR_IN_FAR_OUT
+    category: NORMAL
+    description: The lower-left rectangle exercises xAxis > R and yAxis > T.
+    preconditions:
+    - r == 5, L == cx-4, R == cx-3, B == cy-4, and T == cy-3.
+    expectedSourceBehavior:
+    - The nearest corner is inside and the farthest corner is outside, producing SpatialRelation.INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: RIGHT_RECTANGLE_SPANS_Y_AXIS
+    category: NORMAL
+    description: The rectangle is to the right of the center but crosses the horizontal
+      circle axis.
+    preconditions:
+    - r == 5, L == cx+4, R == cx+6, B < cy, and T > cy.
+    expectedSourceBehavior:
+    - xAxis < L while yAxis == closestY; phase 2 skips the diagonal disjoint test
+      and returns SpatialRelation.INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LEFT_RECTANGLE_SPANS_Y_AXIS
+    category: NORMAL
+    description: The rectangle is to the left of the center but crosses the horizontal
+      circle axis.
+    preconditions:
+    - r == 5, L == cx-6, R == cx-4, B < cy, and T > cy.
+    expectedSourceBehavior:
+    - xAxis > R while yAxis == closestY; the result is SpatialRelation.INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: TOP_RECTANGLE_SPANS_X_AXIS
+    category: NORMAL
+    description: The rectangle is above the center but crosses the vertical circle
+      axis.
+    preconditions:
+    - r == 5, B == cy+4, T == cy+6, L < cx, and R > cx.
+    expectedSourceBehavior:
+    - xAxis == closestX while yAxis < B; the result is SpatialRelation.INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: BOTTOM_RECTANGLE_SPANS_X_AXIS
+    category: NORMAL
+    description: The rectangle is below the center but crosses the vertical circle
+      axis.
+    preconditions:
+    - r == 5, B == cy-6, T == cy-4, L < cx, and R > cx.
+    expectedSourceBehavior:
+    - xAxis == closestX while yAxis > T; the result is SpatialRelation.INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SMALL_CENTERED_RECTANGLE_CONTAINED
+    category: NORMAL
+    description: A small area rectangle centered on the circle center is strictly
+      inside the circle.
+    preconditions:
+    - r == 5, L == cx-2, R == cx+2, B == cy-2, and T == cy+2.
+    expectedSourceBehavior:
+    - The bounding box contains the rectangle and its selected farthest corner is
+      inside, so the result is SpatialRelation.CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SMALL_OFFSET_RECTANGLE_CONTAINED
+    category: NORMAL
+    description: An area rectangle wholly in one quadrant is contained by the circle.
+    preconditions:
+    - r == 5, L == cx+1, R == cx+2, B == cy+1, and T == cy+2.
+    expectedSourceBehavior:
+    - The farthest corner is strictly within radius 5 and the result is SpatialRelation.CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: INTERNAL_3_4_5_CORNER_CONTAINMENT
+    category: BOUNDARY
+    description: A rectangle has its farthest corner exactly on the circle at a 3-4-5
+      boundary.
+    preconditions:
+    - r == 5, L == cx, R == cx+3, B == cy, and T == cy+4.
+    expectedSourceBehavior:
+    - contains(R,T) is true at distance 5, so the circle returns SpatialRelation.CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: SYMMETRIC_FARTHEST_TIE_ON_BOUNDARY
+    category: BOUNDARY
+    description: Both x and y farthest-side comparisons tie, selecting the minimum
+      sides.
+    preconditions:
+    - r == 5, L == cx-3, R == cx+3, B == cy-4, and T == cy+4.
+    expectedSourceBehavior:
+    - The strict greater-than expressions select L and B on ties; that corner is exactly
+      radius 5 and the result is SpatialRelation.CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: HORIZONTAL_DIAMETER_RECTANGLE
+    category: EDGE
+    description: A zero-height rectangle is the complete horizontal diameter of the
+      circle.
+    preconditions:
+    - r > 0, L == cx-r, R == cx+r, and B == T == cy.
+    expectedSourceBehavior:
+    - Both line endpoints are contained, including the boundary endpoints, and the
+      result is SpatialRelation.CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: VERTICAL_DIAMETER_RECTANGLE
+    category: EDGE
+    description: A zero-width rectangle is the complete vertical diameter of the circle.
+    preconditions:
+    - r > 0, L == R == cx, B == cy-r, and T == cy+r.
+    expectedSourceBehavior:
+    - The selected farthest endpoint is on the circle and the result is SpatialRelation.CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CENTER_POINT_RECTANGLE
+    category: EDGE
+    description: The Rectangle argument degenerates to the circle center.
+    preconditions:
+    - r > 0 and L == R == cx and B == T == cy.
+    expectedSourceBehavior:
+    - The point rectangle is contained and relate(Rectangle) returns SpatialRelation.CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: CIRCUMFERENCE_POINT_RECTANGLE
+    category: BOUNDARY
+    description: The Rectangle argument degenerates to a point on the circumference.
+    preconditions:
+    - r == 5, L == R == cx+3, and B == T == cy+4.
+    expectedSourceBehavior:
+    - The farthest point is exactly contained and relate(Rectangle) returns SpatialRelation.CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: POINT_INSIDE_BBOX_OUTSIDE_CIRCLE
+    category: EDGE
+    description: A point rectangle lies in a corner of the bounding box but outside
+      the circle.
+    preconditions:
+    - r == 5, L == R == cx+4, and B == T == cy+4.
+    expectedSourceBehavior:
+    - The closest point fails contains(), so phase 2 returns SpatialRelation.DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LARGE_INSCRIBING_SQUARE_CORNERS_OUTSIDE
+    category: NORMAL
+    description: The bounding box contains a centered square whose corners are outside
+      the circle.
+    preconditions:
+    - r == 5, L == cx-4, R == cx+4, B == cy-4, and T == cy+4.
+    expectedSourceBehavior:
+    - The rectangle overlaps both axes but the selected farthest corner is outside,
+      yielding SpatialRelation.INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: STRIP_EXTENDS_BEYOND_BBOX_BOTH_SIDES
+    category: NORMAL
+    description: A narrow horizontal strip crosses the circle and extends beyond both
+      horizontal bounding-box sides.
+    preconditions:
+    - r == 5, L < cx-5, R > cx+5, B == cy-1, and T == cy+1.
+    expectedSourceBehavior:
+    - bboxSect is INTERSECTS rather than CONTAINS, an axis is spanned, and phase 2
+      returns SpatialRelation.INTERSECTS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_RADIUS_STRICTLY_WITHIN_AREA_RECTANGLE
+    category: EDGE
+    description: A zero-radius non-empty circle is a point strictly inside an area
+      rectangle.
+    preconditions:
+    - r == 0, L < cx, R > cx, B < cy, and T > cy.
+    expectedSourceBehavior:
+    - The point bounding box is WITHIN the rectangle, so relate returns SpatialRelation.WITHIN.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_RADIUS_EQUALS_POINT_RECTANGLE
+    category: EDGE
+    description: A zero-radius circle and point rectangle have identical bounds.
+    preconditions:
+    - r == 0 and L == R == cx and B == T == cy.
+    expectedSourceBehavior:
+    - The exact bounding-box equality edge case returns SpatialRelation.WITHIN.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: ZERO_RADIUS_DISJOINT_POINT_RECTANGLE
+    category: EDGE
+    description: A zero-radius circle and a distinct point rectangle are separated.
+    preconditions:
+    - r == 0, L == R, B == T, and either L != cx or B != cy.
+    expectedSourceBehavior:
+    - The point bounding boxes are disjoint and the result is SpatialRelation.DISJOINT.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: NON_DYADIC_COORDINATES_WITH_STRICT_MARGIN
+    category: NORMAL
+    description: Ordinary non-dyadic coordinates exercise translation without relying
+      only on integer geometry.
+    preconditions:
+    - cx == 0.1, cy == 0.2, r == 5.1, L == cx-1.1, R == cx+1.2, B == cy-1.3, and T
+      == cy+1.4.
+    - All rectangle corners are strictly inside the circle by more than the global
+      ulp margin.
+    expectedSourceBehavior:
+    - The bounding box contains the rectangle and the farthest corner is contained,
+      yielding SpatialRelation.CONTAINS.
+    targetCases: 1
+    emptyOutputAllowed: false
+  - id: LARGE_MAGNITUDE_TRANSLATION_SAFE_WITHIN
+    category: NORMAL
+    description: Large finite coordinates retain enough resolution for the fixed common
+      shift.
+    preconditions:
+    - cx == 1000000000, cy == -1000000000, r == 100.
+    - L == cx-200, R == cx+200, B == cy-200, and T == cy+200.
+    - Adding 17.5 and -9.25 changes every applicable coordinate and preserves the
+      stated offsets.
+    expectedSourceBehavior:
+    - The circle bounding box is strictly within the rectangle and the result is SpatialRelation.WITHIN.
+    targetCases: 1
+    emptyOutputAllowed: false

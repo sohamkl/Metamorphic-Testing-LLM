@@ -26,8 +26,13 @@ public final class PromptConfigLoader {
 
         Map<String, Object> values = parseYaml(promptPath);
 
-        Path sutClassFile = resolveOptionalPath(stringValue(values, "SUTClassFile"), repoRoot);
+        Path projectRoot = resolveProjectRoot(stringValue(values, "ProjectRoot"), repoRoot);
+        boolean automaticDiscovery = parseBoolean(
+                stringValue(values, "AutomaticDiscovery"), true, "AutomaticDiscovery");
+        Path sutClassFile = resolveRequiredSutClassFile(
+                stringValue(values, "SUTClassFile"), stringValue(values, "SUTClass"), projectRoot, repoRoot);
         List<Path> supportFiles = parseSupportFiles(values.get("SUTSupportFiles"), repoRoot);
+        List<Path> sutClasspath = parseClasspath(values.get("SUTClasspath"), repoRoot);
         Path developerMrFile = resolveOptionalPath(stringValue(values, "DeveloperMrFile"), repoRoot);
         Path outputRoot = resolveOutputRoot(stringValue(values, "OutputRoot"), repoRoot, sutClassFile);
         String developerMrSource = readOptionalSource(developerMrFile);
@@ -38,18 +43,25 @@ public final class PromptConfigLoader {
         GenerationMode mode = deriveMode(jsonRequired, testSuiteRequired, mrProvider);
         String developerFollowUpMethod = stringValue(values, "DeveloperFollowUpMethod");
         String developerAssertMethod = stringValue(values, "DeveloperAssertMethod");
-        validateDeveloperMrConfig(mode, developerMrFile, developerFollowUpMethod, developerAssertMethod);
+        validateDeveloperMrConfig(mode, developerMrFile, developerFollowUpMethod, developerAssertMethod,
+                stringValue(values, "MRInput"), stringValue(values, "MROutput"));
+        int count = parsePositiveInt(stringValue(values, "Count"), 5, "Count");
+        InputDomainRequirements inputDomainRequirements = InputDomainRequirementsParser.parse(
+                values.get("InputDomain"), stringValue(values, "Constraints"), count);
 
         return new PromptConfig(
+                projectRoot,
+                automaticDiscovery,
                 sutClassFile,
                 stringValue(values, "TargetFunction"),
                 supportFiles,
+                sutClasspath,
                 firstNonBlank(stringValue(values, "SUTDescription"), stringValue(values, "SUT")),
                 stringValue(values, "MRInput"),
                 stringValue(values, "MROutput"),
                 stringValue(values, "MR"),
-                parsePositiveInt(stringValue(values, "Count"), 5, "Count"),
-                firstNonBlank(stringValue(values, "InputDomain"), stringValue(values, "Constraints")),
+                count,
+                inputDomainRequirements,
                 firstNonBlank(stringValue(values, "GeneratedClassName"), "GeneratedMetamorphicTest"),
                 mode,
                 jsonRequired,
@@ -61,7 +73,10 @@ public final class PromptConfigLoader {
                 developerAssertMethod,
                 outputRoot,
                 parseNonNegativeInt(stringValue(values, "MaxRepairAttempts"), 1, "MaxRepairAttempts"),
-                InputGenerator.fromConfig(stringValue(values, "InputGenerator")));
+                InputGenerator.fromConfig(stringValue(values, "InputGenerator")),
+                parseStringList(values.get("MavenProfiles")),
+                parseStringList(values.get("RandoopTargetClasses")),
+                "");
     }
 
     @SuppressWarnings("unchecked")
@@ -139,23 +154,42 @@ public final class PromptConfigLoader {
         return GenerationMode.FULL_JUNIT;
     }
 
+    /**
+     * The developer owns whichever half of the relation the prompt names a method for. Naming both is the
+     * fully developer-owned MR; naming one leaves the other half to the LLM, which then needs that half
+     * stated in prose (i-AUTO names the follow-up only, o-AUTO the assertion only).
+     */
     private static void validateDeveloperMrConfig(
             GenerationMode mode,
             Path developerMrFile,
             String developerFollowUpMethod,
-            String developerAssertMethod) {
+            String developerAssertMethod,
+            String mrInput,
+            String mrOutput) {
         if (!mode.usesDeveloperMrHelpers()) {
             return;
         }
         if (developerMrFile == null) {
             throw new IllegalArgumentException("MRProvider: DEV requires DeveloperMrFile.");
         }
-        if (developerFollowUpMethod == null || developerFollowUpMethod.trim().isEmpty()) {
-            throw new IllegalArgumentException("MRProvider: DEV requires DeveloperFollowUpMethod.");
+        boolean hasFollowUp = !isBlank(developerFollowUpMethod);
+        boolean hasAssert = !isBlank(developerAssertMethod);
+        if (!hasFollowUp && !hasAssert) {
+            throw new IllegalArgumentException(
+                    "MRProvider: DEV requires DeveloperFollowUpMethod, DeveloperAssertMethod, or both.");
         }
-        if (developerAssertMethod == null || developerAssertMethod.trim().isEmpty()) {
-            throw new IllegalArgumentException("MRProvider: DEV requires DeveloperAssertMethod.");
+        if (!hasFollowUp && isBlank(mrInput)) {
+            throw new IllegalArgumentException(
+                    "Omitting DeveloperFollowUpMethod leaves the input transformation to the LLM, so MRInput is required.");
         }
+        if (!hasAssert && isBlank(mrOutput)) {
+            throw new IllegalArgumentException(
+                    "Omitting DeveloperAssertMethod leaves the output relation to the LLM, so MROutput is required.");
+        }
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.trim().isEmpty();
     }
 
     private static List<Path> parseSupportFiles(Object raw, Path repoRoot) {
@@ -179,12 +213,129 @@ public final class PromptConfigLoader {
                 .toList();
     }
 
+    private static List<Path> parseClasspath(Object raw, Path repoRoot) {
+        List<Path> entries = parseSupportFiles(raw, repoRoot);
+        for (Path entry : entries) {
+            if (!Files.exists(entry)) {
+                throw new IllegalArgumentException("Missing SUTClasspath entry: " + entry);
+            }
+        }
+        return entries;
+    }
+
+    private static List<String> parseStringList(Object raw) {
+        if (raw == null) {
+            return List.of();
+        }
+        if (raw instanceof List<?> list) {
+            return list.stream()
+                    .map(String::valueOf)
+                    .map(String::trim)
+                    .filter(value -> !value.isEmpty())
+                    .toList();
+        }
+        String value = String.valueOf(raw).trim();
+        if (value.isEmpty()) {
+            return List.of();
+        }
+        return Arrays.stream(value.split(","))
+                .map(String::trim)
+                .filter(part -> !part.isEmpty())
+                .toList();
+    }
+
     private static Path resolveOptionalPath(String raw, Path repoRoot) {
         if (raw == null || raw.trim().isEmpty()) {
             return null;
         }
-        Path path = Path.of(raw.trim());
+        String value = raw.trim();
+        Path path;
+        if (value.equals("~")) {
+            path = Path.of(System.getProperty("user.home"));
+        } else if (value.startsWith("~/")) {
+            path = Path.of(System.getProperty("user.home")).resolve(value.substring(2));
+        } else {
+            path = Path.of(value);
+        }
         return path.isAbsolute() ? path.normalize() : repoRoot.resolve(path).normalize();
+    }
+
+    private static Path resolveRequiredSutClassFile(
+            String raw, String sutClass, Path projectRoot, Path repoRoot) throws IOException {
+        Path path = resolveOptionalPath(raw, repoRoot);
+        if (path == null && sutClass != null && !sutClass.isBlank()) {
+            path = findSutClassFile(projectRoot, sutClass.trim());
+        }
+        if (path == null) {
+            throw new IllegalArgumentException("Provide SUTClassFile or SUTClass with ProjectRoot.");
+        }
+        if (!Files.isRegularFile(path)) {
+            throw new IllegalArgumentException("Missing SUTClassFile: " + path);
+        }
+        return path;
+    }
+
+    private static Path resolveProjectRoot(String raw, Path repoRoot) {
+        Path configured = resolveOptionalPath(raw, repoRoot);
+        if (configured == null) {
+            return repoRoot;
+        }
+        if (!Files.isDirectory(configured)) {
+            throw new IllegalArgumentException("Missing ProjectRoot: " + configured);
+        }
+        return configured;
+    }
+
+    private static Path findSutClassFile(Path projectRoot, String className) throws IOException {
+        String relativeName = className.replace('.', '/') + ".java";
+        List<Path> conventionalRoots = List.of(
+                projectRoot.resolve("src/main/java"),
+                projectRoot.resolve("src/test/java"));
+        for (Path sourceRoot : conventionalRoots) {
+            Path candidate = sourceRoot.resolve(relativeName);
+            if (Files.isRegularFile(candidate)) {
+                return candidate.normalize();
+            }
+        }
+
+        String fileName = className.substring(className.lastIndexOf('.') + 1) + ".java";
+        try (var paths = Files.walk(projectRoot)) {
+            return paths.filter(Files::isRegularFile)
+                    .filter(path -> path.getFileName().toString().equals(fileName))
+                    .filter(path -> !hasDirectoryNamed(path, "target"))
+                    .filter(path -> !hasDirectoryNamed(path, "generated"))
+                    .filter(path -> className.equals(qualifiedNameOrEmpty(path)))
+                    .findFirst()
+                    .map(Path::normalize)
+                    .orElseThrow(() -> new IllegalArgumentException(
+                            "Could not find source for SUTClass " + className + " under " + projectRoot));
+        }
+    }
+
+    /**
+     * True when any directory along {@code path} carries {@code name}. Compares path elements rather
+     * than the rendered string so build output is skipped on Windows too, where the separator is '\'.
+     */
+    private static boolean hasDirectoryNamed(Path path, String name) {
+        for (Path element : path) {
+            if (element.toString().equals(name)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String qualifiedNameOrEmpty(Path path) {
+        try {
+            String source = Files.readString(path, StandardCharsets.UTF_8);
+            java.util.regex.Matcher matcher = java.util.regex.Pattern
+                    .compile("(?m)^\\s*package\\s+([\\w.]+)\\s*;")
+                    .matcher(source);
+            String simpleName = path.getFileName().toString().replaceFirst("\\.java$", "");
+            return matcher.find() ? matcher.group(1) + "." + simpleName : simpleName;
+        } catch (IOException ignored) {
+            return "";
+        }
     }
 
     private static String readOptionalSource(Path path) throws IOException {

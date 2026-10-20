@@ -34,7 +34,7 @@ public final class SutContextLoader {
         String classSource = readFileWithLimit(classFile, MAX_SOURCE_CHARS, "SUTClassFile");
 
         List<Path> supportPaths = new ArrayList<>(config.sutSupportFiles());
-        if (supportPaths.isEmpty()) {
+        if (supportPaths.isEmpty() && !CompiledClassPath.contains(config.sutClasspath(), classFile)) {
             supportPaths.addAll(detectFirstLevelDependencies(classFile, repoRoot));
         }
 
@@ -50,7 +50,24 @@ public final class SutContextLoader {
                     readFileWithLimit(normalized, MAX_SOURCE_CHARS / 2, "SUTSupportFiles")));
         }
 
-        return new SutContext(classFile, classSource, supportSources);
+        Path generatedSupportDir = config.outputRoot().resolve("generated-support");
+        if (Files.isDirectory(generatedSupportDir)) {
+            try (var generated = Files.list(generatedSupportDir)) {
+                for (Path path : generated.filter(file -> file.toString().endsWith(".java")).sorted().toList()) {
+                    Path normalized = path.normalize();
+                    if (seen.add(normalized)) {
+                        supportSources.add(new SutContext.SourceFile(
+                                normalized,
+                                readFileWithLimit(normalized, MAX_SOURCE_CHARS / 2, "generated support file")));
+                    }
+                }
+            } catch (IOException e) {
+                throw new IllegalArgumentException("Cannot read generated support files from "
+                        + generatedSupportDir, e);
+            }
+        }
+
+        return new SutContext(classFile, classSource, supportSources, SutApiInspector.inspect(config));
     }
 
     private static List<Path> detectFirstLevelDependencies(Path classFile, Path repoRoot) {

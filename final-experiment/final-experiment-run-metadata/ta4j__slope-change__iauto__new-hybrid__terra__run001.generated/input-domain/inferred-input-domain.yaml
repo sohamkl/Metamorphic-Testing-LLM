@@ -1,0 +1,418 @@
+InputDomain:
+  summary: Source inputs are successfully constructed SlopeChangeSwingDetector instances,
+    zero-based BarSeries instances, integer evaluation indices, and non-null ElliottDegree
+    values. Prices, volume, and amount are finite so that the supplied +100 translation
+    can construct a follow-up series and the relation's finite translated-price assertions
+    are applicable. Scenarios vary the detector's exposed configuration, index clamping,
+    candidate-range boundaries, regression slope signs and magnitudes, persistence,
+    extreme selection, ATR filtering, and pivot-list update behavior.
+  globalConstraints:
+  - The source series begin index is exactly 0, as required by SlopeChangeSwingDetectorMetamorphicSpec.generateFollowUp.
+  - The detector is successfully constructed through SlopeChangeSwingDetector(int)
+    or SlopeChangeSwingDetector(SlopeChangeConfig), and all scenario parameters named
+    window, confirmationBars, minSlopeChange, atrPeriod, and minAtrReversal refer
+    to detector.getConfig().
+  - The degree is a non-null valid ElliottDegree instance; no assumption is made about
+    specific ElliottDegree constant names.
+  - Every source bar used in a non-empty scenario has finite open, high, low, close,
+    volume, amount, and trades values accepted by the BarSeries implementation, and
+    each corresponding translated price and translated amount (amount + 100 * volume)
+    is finite.
+  - OHLC values and timestamps are constructed using supported BarSeries/BaseBar construction
+    paths; prices used for pivot scenarios make the stated high or low extrema observable
+    in the source series.
+  - Non-finite price, volume, or amount inputs are excluded from this MR domain because
+    the follow-up generator performs arithmetic on them and assertRelation explicitly
+    rejects non-finite expected or actual pivot and swing prices. This exclusion covers
+    the source detector's NaN-slope, null-extreme-pivot, and non-finite-ATR sentinel
+    paths only where they require non-finite bar-derived values.
+  - For references to slope S(a,b), S(a,b) is the least-squares slope computed by
+    the detector's slope method over close prices at inclusive indices a through b.
+    A candidate c has before slope S(c-window+1,c) and after slope S(c+1,c+window).
+  diversity:
+    evaluationIndex:
+    - distinct
+    - measurable
+    - below 0, 0, interior, exact end index, above end index
+    candidateRange:
+    - distinct
+    - measurable
+    - empty because clamped end is early, empty because series is short, exactly one
+      candidate, multiple candidates
+    slopeTransition:
+    - distinct
+    - measurable
+    - zero/flat, insufficient magnitude, same sign, positive-to-negative, negative-to-positive
+    persistence:
+    - distinct
+    - measurable
+    - all required post-window slopes have required sign, first persistence slope
+      fails, later persistence slope fails
+    pivotSelection:
+    - distinct
+    - measurable
+    - first pivot, alternating pivot, same-type stronger replacement, same-type non-replacement,
+      earliest tied high, earliest tied low
+    magnitudeFilter:
+    - distinct
+    - measurable
+    - first-pivot bypass, zero multiplier bypass, finite ATR rejection, finite ATR
+      acceptance
+    detectorWindow:
+    - distinct
+    - measurable
+    - window 1 when constructible, window 2 when constructible, window at least 3
+      when constructible
+  scenarios:
+  - id: EMPTY_ZERO_BASED_SERIES
+    category: EDGE
+    description: Empty series takes the early return before index clamping, indicators,
+      or candidate scanning.
+    preconditions:
+    - The series is empty and reports begin index 0.
+    - The supplied index is any integer, including an index below 0 and above the
+      empty-series end index.
+    expectedSourceBehavior:
+    - detect returns a SwingDetectorResult with zero pivots and zero swings.
+    targetCases: 2
+    emptyOutputAllowed: true
+  - id: INDEX_BELOW_BEGIN_CLAMPS_TO_ZERO
+    category: BOUNDARY
+    description: A non-empty series is evaluated with an index below the zero begin
+      index.
+    preconditions:
+    - The series has at least one finite bar and begin index 0.
+    - The supplied index is less than 0.
+    - The clamped end index 0 is earlier than firstCandidate plus the required future
+      window and confirmation bars.
+    expectedSourceBehavior:
+    - endIndex is 0 and the candidate loop executes zero iterations.
+    - The result has zero pivots and zero swings.
+    targetCases: 2
+    emptyOutputAllowed: true
+  - id: INDEX_AT_BEGIN_WITH_INSUFFICIENT_FUTURE
+    category: BOUNDARY
+    description: Evaluation exactly at the begin index has no future bars available
+      for a candidate's after window.
+    preconditions:
+    - The series is non-empty with begin index 0.
+    - The supplied index is 0.
+    - 0 - window - confirmationBars + 1 is less than window - 1.
+    expectedSourceBehavior:
+    - lastCandidate is less than firstCandidate.
+    - The result has zero pivots and zero swings.
+    targetCases: 2
+    emptyOutputAllowed: true
+  - id: SERIES_ONE_BAR_SHORT_OF_FIRST_CANDIDATE
+    category: BOUNDARY
+    description: The requested end index is exactly one bar short of allowing the
+      first candidate.
+    preconditions:
+    - The supplied index equals the series end index.
+    - The series end index is 2 * window + confirmationBars - 3.
+    - The series contains finite bars from index 0 through its end index.
+    expectedSourceBehavior:
+    - lastCandidate equals firstCandidate minus 1.
+    - The result has zero pivots and zero swings.
+    targetCases: 2
+    emptyOutputAllowed: true
+  - id: FIRST_CANDIDATE_EXACTLY_AVAILABLE_FLAT_CLOSES
+    category: BOUNDARY
+    description: The minimum-length series for one candidate has a flat close-price
+      sequence.
+    preconditions:
+    - The supplied index equals the series end index, which is 2 * window + confirmationBars
+      - 2.
+    - Every close price from index 0 through end index is the same finite value.
+    expectedSourceBehavior:
+    - Exactly one candidate is visited.
+    - Its before and after slopes are zero, so no HIGH or LOW pivot is added.
+    - The result has zero pivots and zero swings.
+    targetCases: 2
+    emptyOutputAllowed: true
+  - id: WINDOW_ONE_ZERO_DENOMINATOR
+    category: EDGE
+    description: A constructible configuration with a one-bar regression window exercises
+      slope's zero-denominator result.
+    preconditions:
+    - The detector was successfully constructed and detector.getConfig().window()
+      equals 1.
+    - The series is long enough that at least one candidate is scanned at the requested
+      index.
+    - All closes are finite.
+    expectedSourceBehavior:
+    - Every one-point regression slope returned by slope is zero because its denominator
+      is zero.
+    - No candidate has a positive-to-negative or negative-to-positive transition.
+    - The result has zero pivots and zero swings.
+    targetCases: 2
+    emptyOutputAllowed: true
+  - id: SLOPE_CHANGE_STRICTLY_BELOW_THRESHOLD
+    category: NORMAL
+    description: A candidate is rejected by the minimum slope-change comparison before
+      pivot type selection.
+    preconditions:
+    - detector.getConfig().minSlopeChange() is greater than zero.
+    - The series has exactly one scanned candidate c.
+    - Both S(c-window+1,c) and S(c+1,c+window) are finite.
+    - abs(S(c-window+1,c) - S(c+1,c+window)) is strictly less than minSlopeChange.
+    expectedSourceBehavior:
+    - The candidate takes the minSlopeChange continue path.
+    - The result has zero pivots and zero swings.
+    targetCases: 2
+    emptyOutputAllowed: true
+  - id: EQUAL_OR_SAME_DIRECTION_SLOPES
+    category: NORMAL
+    description: A candidate passes or reaches sign classification but has no opposite-sign
+      reversal.
+    preconditions:
+    - The series has exactly one scanned candidate c.
+    - The before and after slopes are finite and their absolute difference is at least
+      minSlopeChange.
+    - The slopes are both positive, both negative, or at least one is zero.
+    expectedSourceBehavior:
+    - The candidate is neither HIGH nor LOW and is skipped.
+    - The result has zero pivots and zero swings.
+    targetCases: 2
+    emptyOutputAllowed: true
+  - id: HIGH_CONFIRMATION_FIRST_POST_WINDOW_FAILURE
+    category: NORMAL
+    description: A positive-to-negative candidate is rejected because its first required
+      persistence slope is not negative.
+    preconditions:
+    - The series has exactly one scanned candidate c.
+    - S(c-window+1,c) is positive and S(c+1,c+window) is negative.
+    - The absolute difference of those slopes is at least minSlopeChange.
+    - S(c+1,c+window) or the first slope checked by persists at end c+window is non-negative.
+    expectedSourceBehavior:
+    - The candidate is classified HIGH.
+    - persists returns false at its first checked offset.
+    - The result has zero pivots and zero swings.
+    targetCases: 2
+    emptyOutputAllowed: true
+  - id: LOW_CONFIRMATION_LATER_POST_WINDOW_FAILURE
+    category: NORMAL
+    description: A negative-to-positive candidate passes an initial persistence check
+      but fails a later required check.
+    preconditions:
+    - confirmationBars is at least 2.
+    - The series has exactly one scanned candidate c.
+    - S(c-window+1,c) is negative and S(c+1,c+window) is positive.
+    - The slope difference magnitude is at least minSlopeChange.
+    - The first persistence slope is positive and at least one later persistence slope
+      is non-positive.
+    expectedSourceBehavior:
+    - The candidate is classified LOW.
+    - persists evaluates more than one offset and returns false.
+    - The result has zero pivots and zero swings.
+    targetCases: 2
+    emptyOutputAllowed: true
+  - id: CONFIRMED_INITIAL_HIGH
+    category: NORMAL
+    description: A single fully confirmed positive-to-negative reversal creates the
+      first HIGH pivot.
+    preconditions:
+    - The series has exactly one scanned candidate c.
+    - S(c-window+1,c) is positive, S(c+1,c+window) is negative, and their difference
+      magnitude is at least minSlopeChange.
+    - Every persistence slope checked from c+window through c+window+confirmationBars-1
+      is negative.
+    - High prices in inclusive interval c through c+window-1 are finite.
+    expectedSourceBehavior:
+    - The result contains exactly one HIGH pivot.
+    - The HIGH pivot index is an index of the greatest high in c through c+window-1.
+    - The result has zero swings because one pivot cannot form an ElliottSwing.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: CONFIRMED_INITIAL_LOW
+    category: NORMAL
+    description: A single fully confirmed negative-to-positive reversal creates the
+      first LOW pivot.
+    preconditions:
+    - The series has exactly one scanned candidate c.
+    - S(c-window+1,c) is negative, S(c+1,c+window) is positive, and their difference
+      magnitude is at least minSlopeChange.
+    - Every persistence slope checked from c+window through c+window+confirmationBars-1
+      is positive.
+    - Low prices in inclusive interval c through c+window-1 are finite.
+    expectedSourceBehavior:
+    - The result contains exactly one LOW pivot.
+    - The LOW pivot index is an index of the least low in c through c+window-1.
+    - The result has zero swings because one pivot cannot form an ElliottSwing.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: HIGH_EXTREME_TIE_SELECTS_EARLIEST_INDEX
+    category: EDGE
+    description: A confirmed HIGH transition has equal greatest highs at two or more
+      positions in its transition interval.
+    preconditions:
+    - A confirmed HIGH candidate c satisfies all conditions of CONFIRMED_INITIAL_HIGH.
+    - At least two indices in c through c+window-1 share the greatest high.
+    - No earlier index in that interval has a greater high.
+    expectedSourceBehavior:
+    - The selected HIGH pivot uses the earliest index having the greatest high, because
+      extremePivot updates only on strictly greater values.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: LOW_EXTREME_TIE_SELECTS_EARLIEST_INDEX
+    category: EDGE
+    description: A confirmed LOW transition has equal least lows at two or more positions
+      in its transition interval.
+    preconditions:
+    - A confirmed LOW candidate c satisfies all conditions of CONFIRMED_INITIAL_LOW.
+    - At least two indices in c through c+window-1 share the least low.
+    - No earlier index in that interval has a lower low.
+    expectedSourceBehavior:
+    - The selected LOW pivot uses the earliest index having the least low, because
+      extremePivot updates only on strictly lower values.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ALTERNATING_HIGH_TO_LOW_ADDS_SWING
+    category: NORMAL
+    description: Two accepted candidates of opposite types exercise pivot append and
+      SwingDetectorResult.fromPivots swing creation.
+    preconditions:
+    - At least two candidates are scanned in increasing order.
+    - The first accepted candidate produces a HIGH pivot H.
+    - A later accepted candidate produces a LOW pivot L.
+    - No accepted candidate between H and L replaces H, and L passes the magnitude
+      filter relative to H when the multiplier is non-zero.
+    expectedSourceBehavior:
+    - The pivot list contains H followed by L.
+    - The result contains an ElliottSwing from H.index to L.index with the supplied
+      degree.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ALTERNATING_LOW_TO_HIGH_ADDS_SWING
+    category: NORMAL
+    description: Two accepted candidates of opposite types exercise the inverse append
+      order.
+    preconditions:
+    - At least two candidates are scanned in increasing order.
+    - The first accepted candidate produces a LOW pivot L.
+    - A later accepted candidate produces a HIGH pivot H.
+    - No accepted candidate between L and H replaces L, and H passes the magnitude
+      filter relative to L when the multiplier is non-zero.
+    expectedSourceBehavior:
+    - The pivot list contains L followed by H.
+    - The result contains an ElliottSwing from L.index to H.index with the supplied
+      degree.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: SAME_TYPE_HIGH_STRONGER_REPLACES_PREVIOUS
+    category: NORMAL
+    description: A later accepted HIGH is higher than the previous HIGH and replaces
+      it instead of appending.
+    preconditions:
+    - Multiple candidates are scanned.
+    - An accepted HIGH pivot H1 is the current last pivot.
+    - A later accepted HIGH pivot H2 has H2.price strictly greater than H1.price.
+    - H2 passes the magnitude filter if a non-zero multiplier applies.
+    expectedSourceBehavior:
+    - H1 is replaced by H2 at the same pivot-list position.
+    - No adjacent duplicate HIGH pivot is appended for H2.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: SAME_TYPE_LOW_STRONGER_REPLACES_PREVIOUS
+    category: NORMAL
+    description: A later accepted LOW is lower than the previous LOW and replaces
+      it instead of appending.
+    preconditions:
+    - Multiple candidates are scanned.
+    - An accepted LOW pivot L1 is the current last pivot.
+    - A later accepted LOW pivot L2 has L2.price strictly less than L1.price.
+    - L2 passes the magnitude filter if a non-zero multiplier applies.
+    expectedSourceBehavior:
+    - L1 is replaced by L2 at the same pivot-list position.
+    - No adjacent duplicate LOW pivot is appended for L2.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: SAME_TYPE_HIGH_NOT_HIGHER_IS_IGNORED
+    category: NORMAL
+    description: A later accepted HIGH does not exceed the previous HIGH and therefore
+      changes no pivot-list entry.
+    preconditions:
+    - Multiple candidates are scanned.
+    - An accepted HIGH pivot H1 is the current last pivot.
+    - A later candidate yields a HIGH pivot H2 with H2.price less than or equal to
+      H1.price.
+    - H2 passes the magnitude filter if a non-zero multiplier applies.
+    expectedSourceBehavior:
+    - The previous HIGH remains in the result.
+    - H2 neither appends nor replaces a pivot.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: SAME_TYPE_LOW_NOT_LOWER_IS_IGNORED
+    category: NORMAL
+    description: A later accepted LOW does not fall below the previous LOW and therefore
+      changes no pivot-list entry.
+    preconditions:
+    - Multiple candidates are scanned.
+    - An accepted LOW pivot L1 is the current last pivot.
+    - A later candidate yields a LOW pivot L2 with L2.price greater than or equal
+      to L1.price.
+    - L2 passes the magnitude filter if a non-zero multiplier applies.
+    expectedSourceBehavior:
+    - The previous LOW remains in the result.
+    - L2 neither appends nor replaces a pivot.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ATR_FILTER_REJECTS_WEAK_SECOND_PIVOT
+    category: NORMAL
+    description: A non-first pivot reaches the ATR magnitude filter but is too close
+      to the preceding pivot.
+    preconditions:
+    - detector.getConfig().minAtrReversal() is greater than zero.
+    - A first pivot P is already accepted.
+    - A later opposite-type candidate Q has finite ATR at Q.index and otherwise passes
+      slope, persistence, and extreme selection.
+    - abs(Q.price - P.price) is strictly less than ATR(Q.index) * minAtrReversal.
+    expectedSourceBehavior:
+    - passesMagnitudeFilter returns false for Q.
+    - Q is absent from the pivot list and does not create a swing.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ATR_FILTER_ACCEPTS_SUFFICIENT_SECOND_PIVOT
+    category: NORMAL
+    description: A non-first pivot satisfies the configured ATR reversal distance.
+    preconditions:
+    - detector.getConfig().minAtrReversal() is greater than zero.
+    - A first pivot P is already accepted.
+    - A later opposite-type candidate Q has finite ATR at Q.index and otherwise passes
+      slope, persistence, and extreme selection.
+    - abs(Q.price - P.price) is greater than or equal to ATR(Q.index) * minAtrReversal.
+    expectedSourceBehavior:
+    - passesMagnitudeFilter returns true for Q.
+    - Q is added after P and the result includes the corresponding swing.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: ZERO_ATR_MULTIPLIER_BYPASSES_DISTANCE_CHECK
+    category: EDGE
+    description: A configuration with zero minimum ATR reversal accepts a later pivot
+      without requiring finite ATR distance comparison.
+    preconditions:
+    - The detector was successfully constructed and detector.getConfig().minAtrReversal()
+      equals zero.
+    - A first pivot P is already accepted.
+    - A later opposite-type candidate Q passes slope, persistence, and extreme selection.
+    expectedSourceBehavior:
+    - passesMagnitudeFilter returns true due to multiplier.isZero().
+    - Q is added after P regardless of the numerical ATR-distance comparison.
+    targetCases: 2
+    emptyOutputAllowed: false
+  - id: INDEX_ABOVE_END_CLAMPS_TO_END
+    category: BOUNDARY
+    description: An index greater than the series end index is clamped to the end
+      and scans all causally available candidates.
+    preconditions:
+    - The series is non-empty and has at least one candidate available at its end
+      index.
+    - The supplied index is strictly greater than series.getEndIndex().
+    - The same source series is also evaluated at exactly series.getEndIndex() for
+      observation.
+    expectedSourceBehavior:
+    - The above-end invocation uses endIndex equal to series.getEndIndex().
+    - Its pivots and swings are identical to those from evaluation at the exact end
+      index.
+    targetCases: 2
+    emptyOutputAllowed: false
